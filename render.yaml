@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: clan-renard-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: clan-renard-db
+          property: connectionString
+      - key: DEFAULT_TIMEZONE
+        value: Europe/Paris
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHON_VERSION
+        value: 3.12.7
+
+databases:
+  - name: clan-renard-db
+    plan: free
+    databaseName: clan_renard
+    user: clan_renard
