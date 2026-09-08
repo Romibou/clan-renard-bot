@@ -436,7 +436,7 @@ class AdventImageGenerator:
             AdventCalendarRenderer.render,
             username=username,
             year=state.campaign.year,
-            points=state.points,
+            points=state.total_points,
             day_states=day_states,
         )
 
