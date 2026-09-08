@@ -1,3 +1,4 @@
+import os
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -124,6 +125,11 @@ class AdventService:
         campaign: AdventCampaign,
         moment: datetime | None = None,
     ) -> date:
+        test_date = os.getenv("ADVENT_TEST_DATE", "").strip()
+
+        if test_date:
+            return date.fromisoformat(test_date)
+
         local_now = moment or now_in_timezone(campaign.timezone)
 
         # Si l'ouverture est configurée à 06:00, la période comprise
