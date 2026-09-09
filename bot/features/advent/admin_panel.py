@@ -730,7 +730,7 @@ class AdminRoleSelect(discord.ui.RoleSelect):
                 )
             )
 
-        elif self.action == "shop_configure":
+        elif self.action == "shop_role":
             await interaction.response.send_modal(
                 ShopConfigureModal(
                     role=role,
@@ -932,9 +932,16 @@ class AdminActionSelect(discord.ui.Select):
                 emoji="⚠️",
             ),
             discord.SelectOption(
-                label="Ajouter un article à la boutique",
-                value="shop_configure",
-                emoji="🛍️",
+                label="Ajouter un rôle à la boutique",
+                value="shop_role",
+                emoji="🎭",
+                description="Vend un rôle Discord contre des points.",
+            ),
+            discord.SelectOption(
+                label="Ajouter un cosmétique à la boutique",
+                value="shop_cosmetic",
+                emoji="✨",
+                description="Vend un cosmétique du profil contre des points.",
             ),
             discord.SelectOption(
                 label="Supprimer un article de la boutique",
@@ -1102,6 +1109,31 @@ class AdminActionSelect(discord.ui.Select):
             )
             return
 
+
+        if action == "shop_role":
+            await interaction.response.send_message(
+                embed=base_embed(
+                    "🎭 Choisir un rôle",
+                    (
+                        "Sélectionne le rôle Discord à ajouter "
+                        "à la boutique."
+                    ),
+                ),
+                view=AdminRoleSelectionView(
+                    owner_id=interaction.user.id,
+                    action="shop_role",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if action == "shop_cosmetic":
+            await interaction.response.send_modal(
+                ShopCosmeticModal()
+            )
+            return
+        
+
         if action == "channel":
             picker = AdminChannelSelect(
                 action="channel",
@@ -1120,11 +1152,6 @@ class AdminActionSelect(discord.ui.Select):
         elif action == "reward_role":
             picker = AdminRoleSelect(
                 action="reward_role",
-            )
-
-        elif action == "shop_configure":
-            picker = AdminRoleSelect(
-                action="shop_configure",
             )
 
         elif action == "inspect_user":
@@ -1273,4 +1300,144 @@ class AdventAdminPanel(commands.Cog):
                 owner_id=interaction.user.id,
             ),
             ephemeral=True,
+        )
+
+class ShopCosmeticModal(
+    discord.ui.Modal,
+    title="Ajouter un cosmétique à la boutique",
+):
+    cosmetic_identifier = discord.ui.TextInput(
+        label="Identifiant du cosmétique",
+        placeholder="Exemple : fond-hiver-2026",
+        min_length=1,
+        max_length=50,
+    )
+
+    price = discord.ui.TextInput(
+        label="Prix en points",
+        placeholder="Exemple : 500",
+        min_length=1,
+        max_length=10,
+    )
+
+    minimum = discord.ui.TextInput(
+        label="Cases minimum",
+        placeholder="Entre 0 et 24",
+        default="0",
+        min_length=1,
+        max_length=2,
+    )
+
+    emoji = discord.ui.TextInput(
+        label="Emoji",
+        placeholder="✨",
+        default="✨",
+        required=False,
+        max_length=100,
+    )
+
+    message = discord.ui.TextInput(
+        label="Message après l'achat",
+        placeholder="Félicitations !",
+        required=False,
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+    )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
+            price = int(str(self.price))
+            minimum = int(str(self.minimum))
+        except ValueError:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Valeur invalide",
+                    (
+                        "Le prix et le nombre de cases "
+                        "doivent être des nombres entiers."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if price < 0 or price > 1_000_000:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Prix invalide",
+                    (
+                        "Le prix doit être compris "
+                        "entre 0 et 1 000 000."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if minimum < 0 or minimum > 24:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Condition invalide",
+                    (
+                        "Le nombre de cases doit être "
+                        "compris entre 0 et 24."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        shop_cog = interaction.client.get_cog(
+            "AdventShop"
+        )
+
+        if shop_cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Boutique indisponible",
+                    (
+                        "Le module de la boutique "
+                        "n'est pas chargé."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        command = getattr(
+            shop_cog,
+            "configure_cosmetic_item",
+            None,
+        )
+        callback = getattr(
+            command,
+            "callback",
+            None,
+        )
+
+        if callback is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Commande introuvable",
+                    (
+                        "La commande de configuration "
+                        "des cosmétiques est introuvable."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await callback(
+            shop_cog,
+            interaction,
+            str(self.cosmetic_identifier).strip(),
+            price,
+            minimum,
+            str(self.message).strip(),
+            str(self.emoji).strip() or "✨",
+            None,
         )
