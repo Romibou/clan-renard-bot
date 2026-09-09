@@ -92,7 +92,7 @@ class AdventShop(commands.Cog):
 
         campaign = await pool.fetchrow(
             """
-            SELECT id, guild_id, year, name, enabled
+            SELECT id, guild_id, year, title, enabled
             FROM advent_campaigns
             WHERE guild_id = $1
               AND year = $2
@@ -108,7 +108,7 @@ class AdventShop(commands.Cog):
 
         return await pool.fetchrow(
             """
-            SELECT id, guild_id, year, name, enabled
+            SELECT id, guild_id, year, title, enabled
             FROM advent_campaigns
             WHERE guild_id = $1
             ORDER BY year DESC, id DESC
