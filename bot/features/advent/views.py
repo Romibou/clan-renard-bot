@@ -234,10 +234,13 @@ class AdventView(discord.ui.View):
         )
 
         if cog is None:
-            await unavailable(
-                interaction
-            )
+            await unavailable(interaction)
             return
+            
+        await cog.handle_help_button(interaction)
+
+
+
 class ConfirmResetView(discord.ui.View):
     """
     Confirmation non persistante pour une opération dangereuse.
