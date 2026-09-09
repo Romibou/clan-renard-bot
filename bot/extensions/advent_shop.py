@@ -2540,21 +2540,18 @@ class AdventShop(commands.Cog):
             )
 
 
-async def setup(
-    bot: commands.Bot,
-) -> None:
+async def setup(bot: commands.Bot) -> None:
     cog = AdventShop(bot)
 
     await cog.initialize_database()
     await bot.add_cog(cog)
 
-    # La boutique restera accessible depuis les boutons/panneaux,
-    # mais ces commandes ne seront plus visibles dans Discord.
+    # Ces commandes sont utilisées par /avent et /avent-admin,
+    # mais ne doivent pas apparaître séparément dans Discord.
     for command_name in (
         "avent-boutique",
-        "avent-boutique-configurer",
+        "avent-boutique-role",
+        "avent-boutique-cosmetique",
         "avent-boutique-supprimer",
     ):
-        bot.tree.remove_command(
-            command_name
-        )
+        bot.tree.remove_command(command_name)
