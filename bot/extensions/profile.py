@@ -938,6 +938,78 @@ class GrantCosmeticView(discord.ui.View):
             ephemeral=True,
         )
 
+class DeleteCosmeticModal(
+    discord.ui.Modal,
+    title="Supprimer un cosmétique",
+):
+    identifier = discord.ui.TextInput(
+        label="Identifiant du cosmétique",
+        placeholder="exemple : badge-noel",
+        min_length=1,
+        max_length=50,
+    )
+
+    def __init__(
+        self,
+        cog: ProfileCog,
+    ) -> None:
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "❌ Cette action doit être utilisée sur un serveur.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            display_name = await self.cog.delete_cosmetic(
+                guild_id=interaction.guild_id,
+                identifier=str(self.identifier),
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Cosmétique introuvable",
+                    str(error),
+                ),
+                ephemeral=True,
+            )
+            return
+        except Exception:
+            LOGGER.exception(
+                "Impossible de supprimer le cosmétique"
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Suppression impossible",
+                    "Une erreur inattendue s'est produite.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=success_embed(
+                "Cosmétique supprimé",
+                (
+                    f"Le cosmétique **{display_name}** a été "
+                    "désactivé et retiré des profils qui "
+                    "l'utilisaient."
+                ),
+            ),
+            ephemeral=True,
+        )
+
+
+
+
 
 class ProfileAdminView(discord.ui.View):
     def __init__(
@@ -1010,6 +1082,20 @@ class ProfileAdminView(discord.ui.View):
                 cosmetics=cosmetics,
             ),
             ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Supprimer un cosmétique",
+        emoji="🗑️",
+        style=discord.ButtonStyle.danger,
+    )
+    async def delete_cosmetic_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_modal(
+            DeleteCosmeticModal(self.cog)
         )
 
 
@@ -1355,6 +1441,168 @@ class ProfileCog(commands.Cog):
             value,
         )
 
+
+    async def delete_cosmetic(
+        self,
+        *,
+        guild_id: int,
+        identifier: str,
+    ) -> str:
+        """
+        Supprime définitivement un cosmétique.
+    
+        Cela supprime également :
+        - les équipements utilisant ce cosmétique ;
+        - les inventaires associés ;
+        - les articles correspondants dans la boutique de Noël ;
+        - les achats correspondants dans la boutique.
+        """
+        normalized_identifier = identifier.strip().lower()
+    
+        if not normalized_identifier:
+            raise ValueError(
+                "L'identifiant du cosmétique est obligatoire."
+            )
+    
+        pool = self.get_pool()
+    
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                cosmetic = await connection.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        identifier,
+                        display_name,
+                        cosmetic_type
+                    FROM profile_cosmetics
+                    WHERE guild_id = $1
+                      AND identifier = $2
+                    FOR UPDATE
+                    """,
+                    guild_id,
+                    normalized_identifier,
+                )
+    
+                if cosmetic is None:
+                    raise ValueError(
+                        "Aucun cosmétique ne possède cet identifiant."
+                    )
+    
+                cosmetic_id = int(cosmetic["id"])
+                display_name = str(cosmetic["display_name"])
+    
+                # Vérifie si la boutique possède bien la colonne
+                # cosmetic_id avant d'effectuer le nettoyage.
+                shop_cosmetics_enabled = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'advent_shop_items_v2'
+                          AND column_name = 'cosmetic_id'
+                    )
+                    """
+                )
+    
+                if shop_cosmetics_enabled:
+                    shop_item_records = await connection.fetch(
+                        """
+                        SELECT id
+                        FROM advent_shop_items_v2
+                        WHERE cosmetic_id = $1
+                        """,
+                        cosmetic_id,
+                    )
+    
+                    shop_item_ids = [
+                        int(record["id"])
+                        for record in shop_item_records
+                    ]
+    
+                    if shop_item_ids:
+                        # Les achats doivent être supprimés avant les
+                        # articles à cause de la clé étrangère item_id.
+                        await connection.execute(
+                            """
+                            DELETE FROM advent_shop_purchases_v2
+                            WHERE item_id = ANY($1::BIGINT[])
+                            """,
+                            shop_item_ids,
+                        )
+    
+                        await connection.execute(
+                            """
+                            DELETE FROM advent_shop_items_v2
+                            WHERE id = ANY($1::BIGINT[])
+                            """,
+                            shop_item_ids,
+                        )
+    
+                # Déséquipe le cosmétique de tous les profils.
+                await connection.execute(
+                    """
+                    UPDATE member_profiles
+                    SET
+                        equipped_title = CASE
+                            WHEN equipped_title = $2 THEN NULL
+                            ELSE equipped_title
+                        END,
+                        equipped_badge = CASE
+                            WHEN equipped_badge = $2 THEN NULL
+                            ELSE equipped_badge
+                        END,
+                        equipped_background = CASE
+                            WHEN equipped_background = $2 THEN NULL
+                            ELSE equipped_background
+                        END,
+                        equipped_frame = CASE
+                            WHEN equipped_frame = $2 THEN NULL
+                            ELSE equipped_frame
+                        END,
+                        equipped_effect = CASE
+                            WHEN equipped_effect = $2 THEN NULL
+                            ELSE equipped_effect
+                        END,
+                        updated_at = NOW()
+                    WHERE guild_id = $1
+                      AND (
+                          equipped_title = $2
+                          OR equipped_badge = $2
+                          OR equipped_background = $2
+                          OR equipped_frame = $2
+                          OR equipped_effect = $2
+                      )
+                    """,
+                    guild_id,
+                    normalized_identifier,
+                )
+    
+                # Supprime le cosmétique des inventaires.
+                await connection.execute(
+                    """
+                    DELETE FROM profile_inventory
+                    WHERE cosmetic_id = $1
+                    """,
+                    cosmetic_id,
+                )
+    
+                # Supprime finalement le cosmétique lui-même.
+                await connection.execute(
+                    """
+                    DELETE FROM profile_cosmetics
+                    WHERE id = $1
+                    """,
+                    cosmetic_id,
+                )
+    
+        return display_name
+
+
+
+
+    
     async def grant_cosmetic(
         self,
         *,
