@@ -240,6 +240,102 @@ class AdventView(discord.ui.View):
         await cog.handle_help_button(interaction)
 
 
+class CatchupDaySelect(discord.ui.Select):
+    """Menu permettant de choisir une case disponible."""
+
+    def __init__(
+        self,
+        *,
+        days: list[int],
+    ) -> None:
+        options = [
+            discord.SelectOption(
+                label=f"Case n°{day}",
+                value=str(day),
+                emoji="🎁",
+                description=f"Ouvrir la case du {day} décembre",
+            )
+            for day in sorted(days)
+        ]
+
+        super().__init__(
+            placeholder="Choisis la case à ouvrir…",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        cog = get_advent_cog(interaction)
+
+        if cog is None:
+            await unavailable(interaction)
+            return
+
+        try:
+            selected_day = int(self.values[0])
+        except (ValueError, IndexError):
+            await interaction.response.send_message(
+                "❌ La case sélectionnée est invalide.",
+                ephemeral=True,
+            )
+            return
+
+        # Empêche une seconde utilisation du même menu.
+        self.disabled = True
+
+        await interaction.response.edit_message(
+            view=self.view,
+        )
+
+        await cog._open_case(
+            interaction,
+            requested_day=selected_day,
+        )
+
+        if self.view is not None:
+            self.view.stop()
+
+
+class CatchupDayView(discord.ui.View):
+    """Vue personnelle pour sélectionner une ancienne case."""
+
+    def __init__(
+        self,
+        *,
+        owner_id: int,
+        days: list[int],
+    ) -> None:
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+
+        self.add_item(
+            CatchupDaySelect(days=days)
+        )
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            (
+                "❌ Ce menu appartient à un autre membre.\n"
+                "Utilise le bouton **Ouvrir la case** "
+                "pour ouvrir ton propre calendrier."
+            ),
+            ephemeral=True,
+        )
+        return False
+
+
+
+
 
 class ConfirmResetView(discord.ui.View):
     """
