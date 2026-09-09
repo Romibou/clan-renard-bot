@@ -24,6 +24,7 @@ from bot.features.advent.presentation import (
 )
 from bot.features.advent.service import AdventService
 from bot.shared.embeds import (
+    base_embed,
     error_embed,
     success_embed,
 )
@@ -568,75 +569,79 @@ class AdventCommands(commands.Cog):
     # MÉTHODES APPELÉES PAR LES BOUTONS
     # ----------------------------------------------------
 
-async def handle_open_button(
-    self,
-    interaction: discord.Interaction,
-) -> None:
-    guild = interaction.guild
+    async def handle_open_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        guild = interaction.guild
 
-    if guild is None:
-        await self._send_guild_required(interaction)
-        return
+        if guild is None:
+            await self._send_guild_required(interaction)
+            return
 
-    try:
-        campaign = (
-            await self.service.get_campaign_for_display(
+        try:
+            campaign = await self.service.get_campaign_for_display(
                 guild.id
             )
+
+            state = await self.service.get_calendar_state(
+                guild_id=guild.id,
+                user_id=interaction.user.id,
+                campaign=campaign,
+            )
+        except AdventError as error:
+            await self._send_advent_error(
+                interaction,
+                error,
+                title="Impossible d'ouvrir une case",
+            )
+            return
+
+        available_days = sorted(state.available_days)
+
+        if not available_days:
+            await interaction.response.defer(
+                ephemeral=True,
+                thinking=True,
+            )
+
+            await self._open_case(interaction)
+            return
+
+        # S'il n'y a que la case du jour, on l'ouvre directement.
+        if len(available_days) == 1:
+            await interaction.response.defer(
+                ephemeral=True,
+                thinking=True,
+            )
+
+            await self._open_case(
+                interaction,
+                requested_day=available_days[0],
+            )
+            return
+
+        # En mode rattrapage, plusieurs cases peuvent être ouvertes.
+        view = CatchupDayView(
+            owner_id=interaction.user.id,
+            available_days=available_days,
         )
 
-        state = await self.service.get_calendar_state(
-            guild_id=guild.id,
-            user_id=interaction.user.id,
-            campaign=campaign,
-        )
-    except AdventError as error:
-        await self._send_advent_error(
-            interaction,
-            error,
-        )
-        return
-
-    available_days = sorted(
-        state.available_days
-    )
-
-    # Une seule case est disponible : on l'ouvre directement.
-    if len(available_days) == 1:
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
-        await self._open_case(
-            interaction,
-            requested_day=available_days[0],
-        )
-        return
-
-    # Plusieurs cases sont disponibles grâce au rattrapage.
-    if len(available_days) > 1:
-        await interaction.response.send_message(
+        embed = base_embed(
+            "🎁 Choisis une case",
             (
-                "🎁 **Plusieurs cases sont disponibles.**\n"
-                "Choisis celle que tu souhaites ouvrir :"
+                "Plusieurs cases sont disponibles grâce au "
+                "rattrapage.\n\n"
+                "Choisis la case que tu souhaites ouvrir dans "
+                "le menu ci-dessous."
             ),
-            view=CatchupDayView(
-                owner_id=interaction.user.id,
-                days=available_days,
-            ),
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=view,
             ephemeral=True,
         )
-        return
-
-    # Aucune case disponible : le service donnera le message précis.
-    await interaction.response.defer(
-        ephemeral=True,
-        thinking=True,
-    )
-
-    await self._open_case(interaction)
-
 
     async def handle_refresh_button(
         self,
@@ -661,8 +666,134 @@ async def handle_open_button(
             thinking=True,
         )
 
-        await self._send_reward_history(
-            interaction
+        await self._send_reward_history(interaction)
+
+    async def handle_profile_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+
+        guild = interaction.guild
+
+        if guild is None:
+            await self._send_guild_required(interaction)
+            return
+
+        try:
+            campaign = await self.service.get_campaign_for_display(
+                guild.id
+            )
+
+            state = await self.service.get_calendar_state(
+                guild_id=guild.id,
+                user_id=interaction.user.id,
+                campaign=campaign,
+            )
+        except AdventError as error:
+            await self._send_advent_error(
+                interaction,
+                error,
+                title="Profil indisponible",
+            )
+            return
+
+        embed = profile_embed(
+            state,
+            interaction.user,
+        )
+
+        await interaction.followup.send(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    async def handle_leaderboard_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+
+        guild = interaction.guild
+
+        if guild is None:
+            await self._send_guild_required(interaction)
+            return
+
+        try:
+            campaign = await self.service.get_campaign_for_display(
+                guild.id
+            )
+
+            ranking = await self.service.get_leaderboard(
+                campaign.id,
+                limit=10,
+            )
+        except AdventError as error:
+            await self._send_advent_error(
+                interaction,
+                error,
+                title="Classement indisponible",
+            )
+            return
+
+        embed = leaderboard_embed(
+            campaign,
+            guild,
+            ranking,
+        )
+
+        await interaction.followup.send(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    async def handle_shop_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        shop_cog = self.bot.get_cog("AdventShop")
+
+        if shop_cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Boutique indisponible",
+                    (
+                        "Le module de la boutique de l'Avent "
+                        "n'est pas chargé."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        shop_command = getattr(shop_cog, "shop", None)
+        callback = getattr(shop_command, "callback", None)
+
+        if callback is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Boutique indisponible",
+                    (
+                        "La commande de la boutique est "
+                        "introuvable."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # Le callback de la commande /avent-boutique attend
+        # l'instance du Cog puis l'interaction.
+        await callback(
+            shop_cog,
+            interaction,
         )
 
     async def handle_help_button(
@@ -672,74 +803,6 @@ async def handle_open_button(
         await interaction.response.send_message(
             embed=help_embed(),
             ephemeral=True,
-        )
-
-
-    async def handle_profile_button(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        command = self.advent_profile
-
-        await command.callback(
-            self,
-            interaction,
-        )
-
-    async def handle_leaderboard_button(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        command = self.advent_leaderboard
-
-        await command.callback(
-            self,
-            interaction,
-        )
-
-    async def handle_shop_button(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        shop_cog = self.bot.get_cog(
-            "AdventShop"
-        )
-
-        if shop_cog is None:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Boutique indisponible",
-                    "Le module de la boutique n'est pas chargé.",
-                ),
-                ephemeral=True,
-            )
-            return
-
-        shop_command = getattr(
-            shop_cog,
-            "shop",
-            None,
-        )
-
-        callback = getattr(
-            shop_command,
-            "callback",
-            None,
-        )
-
-        if callback is None:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Boutique indisponible",
-                    "Impossible d'ouvrir la boutique.",
-                ),
-                ephemeral=True,
-            )
-            return
-
-        await callback(
-            shop_cog,
-            interaction,
         )
 
 
