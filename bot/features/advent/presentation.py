@@ -339,25 +339,37 @@ def help_embed() -> discord.Embed:
         (
             "Chaque membre possède son propre calendrier. "
             "Une nouvelle case devient disponible chaque jour "
-            "pendant la campagne."
+            "pendant la campagne.\n\n"
+            "Utilise `/avent` pour ouvrir ton espace personnel."
         ),
-        colour=CLAN_RENARD_PINK,
     )
 
     embed.add_field(
-        name="Commandes",
+        name="🎄 Commande principale",
         value=(
-            "`/avent` — affiche ton calendrier\n"
-            "`/avent-ouvrir` — ouvre la case du jour\n"
-            "`/avent-profil` — affiche ta progression\n"
-            "`/avent-recompenses` — affiche tes gains\n"
-            "`/avent-classement` — affiche le classement\n"
-            "`/avent-aide` — affiche cette aide"
+            "`/avent` — ouvre le panneau personnel du calendrier\n\n"
+            "Toutes les actions sont ensuite accessibles avec "
+            "les boutons du panneau."
         ),
         inline=False,
     )
+
     embed.add_field(
-        name="Cases",
+        name="🧭 Boutons disponibles",
+        value=(
+            "🎁 **Ouvrir la case** — ouvre la case disponible\n"
+            "🔄 **Actualiser** — actualise ton calendrier\n"
+            "👤 **Mon profil** — affiche ta progression et tes points\n"
+            "🏆 **Mes récompenses** — affiche les récompenses obtenues\n"
+            "📊 **Classement** — affiche les meilleurs participants\n"
+            "🛍️ **Boutique** — permet de dépenser tes points\n"
+            "❔ **Aide** — affiche ce message"
+        ),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="📅 État des cases",
         value=(
             "🎁 **Disponible** — peut être ouverte\n"
             "✅ **Ouverte** — récompense déjà obtenue\n"
@@ -366,12 +378,23 @@ def help_embed() -> discord.Embed:
         ),
         inline=False,
     )
+
     embed.add_field(
-        name="Rattrapage",
+        name="⏪ Rattrapage",
         value=(
             "Le serveur peut autoriser ou interdire l'ouverture "
-            "des anciennes cases. La configuration active est "
-            "appliquée automatiquement."
+            "des anciennes cases. Si le rattrapage est activé, "
+            "le bouton d'ouverture proposera les cases disponibles."
+        ),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="🛍️ Boutique",
+        value=(
+            "Les points obtenus en ouvrant les cases peuvent être "
+            "dépensés dans la boutique pour débloquer des rôles.\n"
+            "Les achats sont définitifs."
         ),
         inline=False,
     )
