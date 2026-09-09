@@ -442,8 +442,3 @@ class ConfirmResetView(discord.ui.View):
                     "modifiable.",
                     exc_info=True,
                 )
-
-        await cog.handle_help_button(
-            interaction
-        )
-
