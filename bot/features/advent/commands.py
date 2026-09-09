@@ -414,42 +414,6 @@ class AdventCommands(commands.Cog):
         )
 
     @app_commands.command(
-        name="avent-ouvrir",
-        description=(
-            "Ouvre la case disponible de ton calendrier."
-        ),
-    )
-    @app_commands.describe(
-        jour=(
-            "Ancienne case à ouvrir si le rattrapage "
-            "est autorisé."
-        )
-    )
-    @app_commands.guild_only()
-    @app_commands.checks.cooldown(
-        1,
-        3.0,
-        key=lambda interaction: (
-            interaction.guild_id,
-            interaction.user.id,
-        ),
-    )
-    async def advent_open(
-        self,
-        interaction: discord.Interaction,
-        jour: app_commands.Range[int, 1, 24] | None = None,
-    ) -> None:
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
-        await self._open_case(
-            interaction,
-            requested_day=jour,
-        )
-
-    @app_commands.command(
         name="avent-profil",
         description=(
             "Affiche ta progression dans le calendrier."
