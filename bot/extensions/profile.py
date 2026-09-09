@@ -1841,10 +1841,6 @@ class ProfileCog(commands.Cog):
             user_id=member.id,
         )
 
-        openings, points = await self.get_advent_stats(
-            guild_id=guild_id,
-            user_id=member.id,
-        )
 
         avatar_bytes = await member.display_avatar.replace(
             size=256,
@@ -1858,8 +1854,6 @@ class ProfileCog(commands.Cog):
             avatar_bytes,
             dict(profile),
             equipped,
-            openings,
-            points,
         )
 
         return discord.File(
@@ -1874,8 +1868,6 @@ class ProfileCog(commands.Cog):
         avatar_bytes: bytes,
         profile: dict[str, Any],
         equipped: dict[str, Any],
-        openings: int,
-        points: int,
     ) -> io.BytesIO:
         selected_color = color_tuple(
             str(profile["color_hex"])
