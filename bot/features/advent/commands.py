@@ -624,7 +624,7 @@ class AdventCommands(commands.Cog):
         # En mode rattrapage, plusieurs cases peuvent être ouvertes.
         view = CatchupDayView(
             owner_id=interaction.user.id,
-            available_days=available_days,
+            days=available_days,
         )
 
         embed = base_embed(
