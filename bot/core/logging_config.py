@@ -23,3 +23,4 @@ def configure_logging(level: str = "INFO") -> None:
     logging.getLogger("discord").setLevel(logging.INFO)
     logging.getLogger("discord.http").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
