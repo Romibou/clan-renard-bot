@@ -8,6 +8,9 @@ from bot.core.bot import ClanRenardBot
 from bot.features.advent.admin_commands import (
     AdventAdminCommands,
 )
+from bot.features.advent.admin_panel import (
+    AdventAdminPanel,
+)
 from bot.features.advent.admin_repository import (
     AdminAdventRepository,
 )
@@ -32,14 +35,39 @@ from bot.features.advent.views import AdventView
 logger = logging.getLogger(__name__)
 
 
-async def setup(bot: commands.Bot) -> None:
-    """
-    Point d'entrée unique de la fonctionnalité Avent.
+OLD_COMMANDS = (
+    # Anciennes commandes membres.
+    "avent-ouvrir",
+    "avent-profil",
+    "avent-recompenses",
+    "avent-classement",
+    "avent-aide",
 
-    Le chargeur automatique détecte ce fichier et appelle setup().
-    Tous les services sont instanciés une seule fois puis partagés
-    entre les commandes membres, l'administration et les tâches.
-    """
+    # Anciennes commandes administratives.
+    "avent-admin-initialiser",
+    "avent-admin-config",
+    "avent-admin-activer",
+    "avent-admin-canal",
+    "avent-admin-fuseau",
+    "avent-admin-heure",
+    "avent-admin-rattrapage",
+    "avent-admin-annonces",
+    "avent-admin-recompense-message",
+    "avent-admin-recompense-points",
+    "avent-admin-recompense-role",
+    "avent-admin-recompense-aleatoire",
+    "avent-admin-recompenses",
+    "avent-admin-recompense-supprimer",
+    "avent-admin-apercu",
+    "avent-admin-publier",
+    "avent-admin-utilisateur",
+    "avent-admin-reset-utilisateur",
+)
+
+
+async def setup(
+    bot: commands.Bot,
+) -> None:
     if not isinstance(bot, ClanRenardBot):
         raise TypeError(
             "L'extension Avent nécessite ClanRenardBot."
@@ -62,9 +90,9 @@ async def setup(bot: commands.Bot) -> None:
         default_timezone=bot.settings.default_timezone,
     )
 
-    # Enregistre les boutons persistants. Les messages contenant ces
-    # boutons restent utilisables après un redémarrage de Render.
-    bot.add_view(AdventView())
+    bot.add_view(
+        AdventView()
+    )
 
     await bot.add_cog(
         AdventCommands(
@@ -74,6 +102,9 @@ async def setup(bot: commands.Bot) -> None:
         )
     )
 
+    # On conserve ces deux Cogs pour que le panneau puisse appeler
+    # leurs fonctions. Leurs commandes seront ensuite retirées
+    # de l'arbre Discord.
     await bot.add_cog(
         AdventAdminCommands(
             bot,
@@ -97,6 +128,12 @@ async def setup(bot: commands.Bot) -> None:
     )
 
     await bot.add_cog(
+        AdventAdminPanel(
+            bot
+        )
+    )
+
+    await bot.add_cog(
         AdventAnnouncementTasks(
             bot,
             service=service,
@@ -104,22 +141,31 @@ async def setup(bot: commands.Bot) -> None:
         )
     )
 
+    # Les fonctions restent disponibles dans les Cogs,
+    # mais les anciennes commandes disparaissent de Discord.
+    for command_name in OLD_COMMANDS:
+        bot.tree.remove_command(
+            command_name
+        )
+
     logger.info(
         "Système du calendrier de l'Avent initialisé"
     )
 
 
-async def teardown(bot: commands.Bot) -> None:
-    """
-    Décharge proprement les Cogs lors d'un rechargement manuel.
-    """
+async def teardown(
+    bot: commands.Bot,
+) -> None:
     for cog_name in (
         "AdventAnnouncementTasks",
+        "AdventAdminPanel",
         "AdventAdminRewardsCommands",
         "AdventAdminCommands",
         "AdventCommands",
     ):
-        await bot.remove_cog(cog_name)
+        await bot.remove_cog(
+            cog_name
+        )
 
     logger.info(
         "Système du calendrier de l'Avent déchargé"
