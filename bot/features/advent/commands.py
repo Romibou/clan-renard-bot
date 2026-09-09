@@ -28,6 +28,7 @@ from bot.shared.embeds import (
     success_embed,
 )
 
+from bot.features.advent.views import CatchupDayView
 
 logger = logging.getLogger(__name__)
 
@@ -567,16 +568,75 @@ class AdventCommands(commands.Cog):
     # MÉTHODES APPELÉES PAR LES BOUTONS
     # ----------------------------------------------------
 
-    async def handle_open_button(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
+async def handle_open_button(
+    self,
+    interaction: discord.Interaction,
+) -> None:
+    guild = interaction.guild
+
+    if guild is None:
+        await self._send_guild_required(interaction)
+        return
+
+    try:
+        campaign = (
+            await self.service.get_campaign_for_display(
+                guild.id
+            )
+        )
+
+        state = await self.service.get_calendar_state(
+            guild_id=guild.id,
+            user_id=interaction.user.id,
+            campaign=campaign,
+        )
+    except AdventError as error:
+        await self._send_advent_error(
+            interaction,
+            error,
+        )
+        return
+
+    available_days = sorted(
+        state.available_days
+    )
+
+    # Une seule case est disponible : on l'ouvre directement.
+    if len(available_days) == 1:
         await interaction.response.defer(
             ephemeral=True,
             thinking=True,
         )
 
-        await self._open_case(interaction)
+        await self._open_case(
+            interaction,
+            requested_day=available_days[0],
+        )
+        return
+
+    # Plusieurs cases sont disponibles grâce au rattrapage.
+    if len(available_days) > 1:
+        await interaction.response.send_message(
+            (
+                "🎁 **Plusieurs cases sont disponibles.**\n"
+                "Choisis celle que tu souhaites ouvrir :"
+            ),
+            view=CatchupDayView(
+                owner_id=interaction.user.id,
+                days=available_days,
+            ),
+            ephemeral=True,
+        )
+        return
+
+    # Aucune case disponible : le service donnera le message précis.
+    await interaction.response.defer(
+        ephemeral=True,
+        thinking=True,
+    )
+
+    await self._open_case(interaction)
+
 
     async def handle_refresh_button(
         self,
