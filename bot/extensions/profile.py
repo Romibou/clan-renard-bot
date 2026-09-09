@@ -2082,32 +2082,6 @@ class ProfileCog(commands.Cog):
             spacing=10,
         )
 
-        draw.rounded_rectangle(
-            (410, 345, 680, 420),
-            radius=20,
-            fill=(255, 255, 255, 25),
-        )
-
-        draw.rounded_rectangle(
-            (705, 345, 975, 420),
-            radius=20,
-            fill=(255, 255, 255, 25),
-        )
-
-        draw.text(
-            (435, 360),
-            f"🎁 {openings} cases",
-            font=font(27, bold=True),
-            fill=(255, 255, 255, 255),
-        )
-
-        draw.text(
-            (730, 360),
-            f"⭐ {points} points",
-            font=font(27, bold=True),
-            fill=(255, 255, 255, 255),
-        )
-
         badge_cosmetic = equipped.get(
             "badge"
         )
