@@ -613,3 +613,73 @@ class AdventCommands(commands.Cog):
             embed=help_embed(),
             ephemeral=True,
         )
+
+
+    async def handle_profile_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        command = self.advent_profile
+
+        await command.callback(
+            self,
+            interaction,
+        )
+
+    async def handle_leaderboard_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        command = self.advent_leaderboard
+
+        await command.callback(
+            self,
+            interaction,
+        )
+
+    async def handle_shop_button(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        shop_cog = self.bot.get_cog(
+            "AdventShop"
+        )
+
+        if shop_cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Boutique indisponible",
+                    "Le module de la boutique n'est pas chargé.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        shop_command = getattr(
+            shop_cog,
+            "shop",
+            None,
+        )
+
+        callback = getattr(
+            shop_command,
+            "callback",
+            None,
+        )
+
+        if callback is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Boutique indisponible",
+                    "Impossible d'ouvrir la boutique.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await callback(
+            shop_cog,
+            interaction,
+        )
+
+
