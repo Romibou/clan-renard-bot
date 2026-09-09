@@ -84,7 +84,7 @@ class ClanRenardBot(commands.Bot):
             len(self.guilds),
         )
 
-        activity = discord.Game(name="/avent • Clan Renard")
+        activity = discord.Game(name="Bot du Clan Renard")
         await self.change_presence(
             status=discord.Status.online,
             activity=activity,
