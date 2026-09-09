@@ -497,6 +497,72 @@ class AdventShop(commands.Cog):
             """
         )
 
+        
+                # Migration : prise en charge des rôles et des cosmétiques.
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_items_v2
+            ADD COLUMN IF NOT EXISTS
+                item_type VARCHAR(30) NOT NULL DEFAULT 'role'
+            """
+        )
+    
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_items_v2
+            ADD COLUMN IF NOT EXISTS
+                cosmetic_id BIGINT
+            """
+        )
+    
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_items_v2
+            ALTER COLUMN role_id DROP NOT NULL
+            """
+        )
+    
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_purchases_v2
+            ADD COLUMN IF NOT EXISTS
+                item_type VARCHAR(30) NOT NULL DEFAULT 'role'
+            """
+        )
+    
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_purchases_v2
+            ADD COLUMN IF NOT EXISTS
+                cosmetic_id BIGINT
+            """
+        )
+    
+        await pool.execute(
+            """
+            ALTER TABLE advent_shop_purchases_v2
+            ALTER COLUMN role_id DROP NOT NULL
+            """
+        )
+    
+        await pool.execute(
+            """
+            UPDATE advent_shop_items_v2
+            SET item_type = 'role'
+            WHERE item_type IS NULL
+            """
+        )
+    
+        await pool.execute(
+            """
+            UPDATE advent_shop_purchases_v2
+            SET item_type = 'role'
+            WHERE item_type IS NULL
+            """
+        )
+
+        
+        
         await pool.execute(
             """
             CREATE INDEX IF NOT EXISTS
@@ -626,7 +692,7 @@ class AdventShop(commands.Cog):
         campaign_id: int,
     ) -> list[Any]:
         pool = self.get_pool()
-
+    
         records = await pool.fetch(
             """
             SELECT
@@ -637,7 +703,9 @@ class AdventShop(commands.Cog):
                 display_name,
                 description,
                 emoji,
+                item_type,
                 role_id,
+                cosmetic_id,
                 price,
                 min_openings,
                 success_message,
@@ -650,8 +718,9 @@ class AdventShop(commands.Cog):
             """,
             campaign_id,
         )
-
+    
         return list(records)
+
 
     async def get_purchased_item_ids(
         self,
@@ -787,7 +856,9 @@ class AdventShop(commands.Cog):
             item_id = int(selected_item["id"])
             price = int(selected_item["price"])
             minimum = int(selected_item["min_openings"])
-            role_id = int(selected_item["role_id"])
+            item_type = str(
+                selected_item["item_type"] or "role"
+            )
 
             description = (
                 str(selected_item["description"]).strip()
@@ -831,11 +902,59 @@ class AdventShop(commands.Cog):
                 inline=True,
             )
 
+            if item_type == "profile_cosmetic":
+                cosmetic_id = selected_item["cosmetic_id"]
+            
+                cosmetic = None
+            
+                if cosmetic_id is not None:
+                    cosmetic = await pool.fetchrow(
+                        """
+                        SELECT
+                            identifier,
+                            cosmetic_type,
+                            display_name
+                        FROM profile_cosmetics
+                        WHERE id = $1
+                          AND guild_id = $2
+                        """,
+                        int(cosmetic_id),
+                        guild.id,
+                    )
+            
+                if cosmetic is None:
+                    reward_value = "⚠️ Cosmétique introuvable"
+                else:
+                    cosmetic_labels = {
+                        "title": "Titre",
+                        "badge": "Badge",
+                        "background": "Fond",
+                        "frame": "Cadre",
+                        "effect": "Effet",
+                    }
+            
+                    cosmetic_type = str(
+                        cosmetic["cosmetic_type"]
+                    )
+            
+                    reward_value = (
+                        f"**{cosmetic_labels.get(cosmetic_type, cosmetic_type)}**\n"
+                        f"{cosmetic['display_name']}"
+                    )
+            else:
+                role_id = selected_item["role_id"]
+            
+                if role_id is None:
+                    reward_value = "⚠️ Rôle introuvable"
+                else:
+                    reward_value = f"<@&{int(role_id)}>"
+            
             embed.add_field(
-                name="Rôle obtenu",
-                value=f"<@&{role_id}>",
+                name="Récompense obtenue",
+                value=reward_value,
                 inline=True,
             )
+
 
             embed.add_field(
                 name="État",
@@ -858,6 +977,349 @@ class AdventShop(commands.Cog):
             openings,
         )
 
+    async def purchase_cosmetic_item(
+        self,
+        *,
+        interaction: discord.Interaction,
+        campaign_id: int,
+        identifier: str,
+    ) -> discord.Embed:
+        guild = interaction.guild
+    
+        if guild is None:
+            return error_embed(
+                "Achat impossible",
+                "Cette action doit être utilisée dans un serveur.",
+            )
+    
+        pool = self.get_pool()
+        user_id = interaction.user.id
+    
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                lock_key = (
+                    f"advent-shop:{campaign_id}:{user_id}"
+                )
+    
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended($1, 0)
+                    )
+                    """,
+                    lock_key,
+                )
+    
+                item = await connection.fetchrow(
+                    """
+                    SELECT
+                        item.id,
+                        item.identifier,
+                        item.display_name,
+                        item.description,
+                        item.emoji,
+                        item.cosmetic_id,
+                        item.price,
+                        item.min_openings,
+                        item.success_message,
+                        cosmetic.identifier AS cosmetic_identifier,
+                        cosmetic.display_name AS cosmetic_name,
+                        cosmetic.cosmetic_type,
+                        cosmetic.enabled AS cosmetic_enabled
+                    FROM advent_shop_items_v2 AS item
+                    LEFT JOIN profile_cosmetics AS cosmetic
+                        ON cosmetic.id = item.cosmetic_id
+                       AND cosmetic.guild_id = item.guild_id
+                    WHERE item.campaign_id = $1
+                      AND item.identifier = $2
+                      AND item.item_type = 'profile_cosmetic'
+                      AND item.enabled = TRUE
+                    """,
+                    campaign_id,
+                    identifier,
+                )
+    
+                if item is None:
+                    return error_embed(
+                        "Récompense introuvable",
+                        (
+                            "Ce cosmétique n'existe plus "
+                            "dans la boutique."
+                        ),
+                    )
+    
+                if (
+                    item["cosmetic_id"] is None
+                    or item["cosmetic_identifier"] is None
+                ):
+                    return error_embed(
+                        "Cosmétique introuvable",
+                        (
+                            "Le cosmétique associé à cet article "
+                            "n'existe plus."
+                        ),
+                    )
+    
+                if not bool(item["cosmetic_enabled"]):
+                    return error_embed(
+                        "Cosmétique indisponible",
+                        "Ce cosmétique est actuellement désactivé.",
+                    )
+    
+                cosmetic_id = int(item["cosmetic_id"])
+                item_id = int(item["id"])
+                price = int(item["price"])
+                minimum = int(item["min_openings"])
+    
+                already_owned = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM profile_inventory
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                          AND cosmetic_id = $3
+                    )
+                    """,
+                    guild.id,
+                    user_id,
+                    cosmetic_id,
+                )
+    
+                if already_owned:
+                    return warning_embed(
+                        "Déjà obtenu",
+                        (
+                            "Tu possèdes déjà le cosmétique "
+                            f"**{item['cosmetic_name']}**.\n"
+                                                   "Aucun point n'a été retiré."
+                        ),
+                    )
+    
+                existing_purchase = await connection.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        status
+                    FROM advent_shop_purchases_v2
+                    WHERE item_id = $1
+                      AND user_id = $2
+                    """,
+                    item_id,
+                    user_id,
+                )
+    
+                if (
+                    existing_purchase is not None
+                    and existing_purchase["status"] == "completed"
+                ):
+                    # Répare automatiquement un inventaire manquant.
+                    await connection.execute(
+                        """
+                        INSERT INTO profile_inventory (
+                            guild_id,
+                                                   user_id,
+                                                   cosmetic_id,
+                            source
+                        )
+                        VALUES ($1, $2, $3, 'advent_shop')
+                        ON CONFLICT (
+                            guild_id,
+                            user_id,
+                            cosmetic_id
+                        )
+                        DO NOTHING
+                        """,
+                        guild.id,
+                        user_id,
+                        cosmetic_id,
+                    )
+    
+                    return warning_embed(
+                        "Déjà acheté",
+                        (
+                            "Ce cosmétique avait déjà été acheté.\n"
+                            "Il a été restauré dans ton inventaire."
+                        ),
+                    )
+    
+                # Nettoie un ancien achat incomplet afin qu'il ne soit
+                # pas compté deux fois dans les dépenses.
+                if existing_purchase is not None:
+                    await connection.execute(
+                        """
+                        DELETE FROM advent_shop_purchases_v2
+                        WHERE id = $1
+                          AND status IN ('pending', 'failed')
+                        """,
+                        int(existing_purchase["id"]),
+                    )
+    
+                stats = await connection.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*)::INTEGER AS openings,
+                        COALESCE(
+                            SUM(points_awarded),
+                            0
+                        )::BIGINT AS total_points
+                    FROM advent_openings
+                    WHERE campaign_id = $1
+                      AND user_id = $2
+                    """,
+                    campaign_id,
+                    user_id,
+                )
+    
+                spent = await connection.fetchval(
+                    """
+                    SELECT COALESCE(
+                        SUM(points_spent),
+                        0
+                    )::BIGINT
+                    FROM advent_shop_purchases_v2
+                    WHERE campaign_id = $1
+                      AND user_id = $2
+                      AND status IN ('pending', 'completed')
+                    """,
+                    campaign_id,
+                    user_id,
+                )
+    
+                openings = int(stats["openings"] or 0)
+                total_points = int(
+                    stats["total_points"] or 0
+                )
+                spent_points = int(spent or 0)
+                balance = max(
+                    0,
+                    total_points - spent_points,
+                )
+    
+                if openings < minimum:
+                    return error_embed(
+                        "Cases insuffisantes",
+                        (
+                            f"Ce cosmétique demande "
+                            f"**{minimum} cases ouvertes**.\n"
+                            f"Tu en as actuellement **{openings}**."
+                        ),
+                    )
+    
+                if balance < price:
+                    return error_embed(
+                        "Solde insuffisant",
+                        (
+                            f"Ce cosmétique coûte "
+                            f"**{format_points(price)} points**.\n"
+                            f"Ton solde est de "
+                            f"**{format_points(balance)} points**."
+                        ),
+                    )
+    
+                purchase = await connection.fetchrow(
+                    """
+                    INSERT INTO advent_shop_purchases_v2 (
+                        campaign_id,
+                        item_id,
+                        guild_id,
+                        user_id,
+                        item_type,
+                        role_id,
+                        cosmetic_id,
+                        item_name,
+                        points_spent,
+                        status,
+                        completed_at
+                    )
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        'profile_cosmetic',
+                        NULL,
+                        $5,
+                        $6,
+                        $7,
+                        'completed',
+                        NOW()
+                    )
+                    ON CONFLICT (
+                        item_id,
+                        user_id
+                    )
+                    DO UPDATE SET
+                        campaign_id = EXCLUDED.campaign_id,
+                        guild_id = EXCLUDED.guild_id,
+                        item_type = EXCLUDED.item_type,
+                        role_id = NULL,
+                        cosmetic_id = EXCLUDED.cosmetic_id,
+                        item_name = EXCLUDED.item_name,
+                        points_spent = EXCLUDED.points_spent,
+                        status = 'completed',
+                        created_at = NOW(),
+                        completed_at = NOW()
+                    RETURNING id
+                    """,
+                    campaign_id,
+                    item_id,
+                    guild.id,
+                    user_id,
+                    cosmetic_id,
+                    str(item["display_name"]),
+                    price,
+                )
+    
+                if purchase is None:
+                    raise RuntimeError(
+                        "L'achat n'a pas été enregistré."
+                    )
+    
+                await connection.execute(
+                    """
+                    INSERT INTO profile_inventory (
+                        guild_id,
+                        user_id,
+                        cosmetic_id,
+                        source
+                    )
+                    VALUES ($1, $2, $3, 'advent_shop')
+                    ON CONFLICT (
+                        guild_id,
+                        user_id,
+                        cosmetic_id
+                    )
+                    DO NOTHING
+                    """,
+                    guild.id,
+                    user_id,
+                    cosmetic_id,
+                )
+    
+        message = str(
+            item["success_message"] or ""
+        ).strip()
+    
+        if not message:
+            message = (
+                f"Tu as obtenu le cosmétique "
+                f"**{item['cosmetic_name']}** !"
+            )
+    
+        return success_embed(
+            "Achat effectué",
+            (
+                f"{message}\n\n"
+                f"💸 Prix : **{format_points(price)} points**\n"
+                f"✨ Cosmétique : **{item['cosmetic_name']}**\n\n"
+                "Tu peux maintenant l'équiper avec `/profil`."
+            ),
+        )
+    
+        
+
+    
     async def purchase_item(
         self,
         *,
@@ -895,7 +1357,9 @@ class AdventShop(commands.Cog):
                 campaign_id,
                 identifier,
                 display_name,
+                item_type,
                 role_id,
+                cosmetic_id,
                 price,
                 min_openings,
                 success_message,
@@ -909,11 +1373,40 @@ class AdventShop(commands.Cog):
             identifier,
         )
 
+
         if item is None:
             return error_embed(
                 "Récompense introuvable",
                 "Cette récompense n'existe plus dans la boutique.",
             )
+
+
+        item_type = str(
+            item["item_type"] or "role"
+        )
+    
+        if item_type == "profile_cosmetic":
+            return await self.purchase_cosmetic_item(
+                interaction=interaction,
+                campaign_id=campaign_id,
+                identifier=identifier,
+            )
+    
+        if item_type != "role":
+            return error_embed(
+                "Type de récompense invalide",
+                (
+                    "Cet article possède un type de récompense "
+                    "inconnu."
+                ),
+            )
+    
+        if item["role_id"] is None:
+            return error_embed(
+                "Rôle introuvable",
+                "Aucun rôle n'est associé à cet article.",
+            )
+                
 
         role = guild.get_role(int(item["role_id"]))
 
@@ -1355,8 +1848,8 @@ class AdventShop(commands.Cog):
             )
 
     @app_commands.command(
-        name="avent-boutique-configurer",
-        description="Crée ou modifie une récompense de la boutique.",
+        name="avent-boutique-role",
+        description="Ajoute un rôle Discord à la boutique.",
     )
     @app_commands.describe(
         identifiant=(
@@ -1374,7 +1867,7 @@ class AdventShop(commands.Cog):
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.checks.has_permissions(manage_guild=True)
     @app_commands.guild_only()
-    async def configure_shop_item(
+    async def configure_role_item(
         self,
         interaction: discord.Interaction,
         identifiant: str,
@@ -1517,62 +2010,68 @@ class AdventShop(commands.Cog):
             pool = self.get_pool()
 
             item = await pool.fetchrow(
-                """
-                INSERT INTO advent_shop_items_v2 (
-                    campaign_id,
-                    guild_id,
-                    identifier,
-                    display_name,
-                    description,
-                    emoji,
-                    role_id,
-                    price,
-                    min_openings,
-                    success_message,
-                    enabled,
-                    updated_at
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    TRUE,
-                    NOW()
-                )
-                ON CONFLICT (
-                    campaign_id,
-                    identifier
-                )
-                DO UPDATE SET
-                    display_name = EXCLUDED.display_name,
-                    description = EXCLUDED.description,
-                    emoji = EXCLUDED.emoji,
-                    role_id = EXCLUDED.role_id,
-                    price = EXCLUDED.price,
-                    min_openings = EXCLUDED.min_openings,
-                    success_message = EXCLUDED.success_message,
-                    enabled = TRUE,
-                    updated_at = NOW()
-                RETURNING id
-                """,
-                int(campaign["id"]),
-                guild.id,
+            """
+            INSERT INTO advent_shop_items_v2 (
+                campaign_id,
+                guild_id,
                 identifier,
                 display_name,
-                product_description,
-                product_emoji,
-                role.id,
-                int(prix),
-                int(cases_minimum),
+                description,
+                emoji,
+                item_type,
+                role_id,
+                cosmetic_id,
+                price,
+                min_openings,
                 success_message,
+                enabled,
+                updated_at
             )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                'role',
+                $7,
+                NULL,
+                $8,
+                $9,
+                $10,
+                TRUE,
+                NOW()
+            )
+            ON CONFLICT (
+                campaign_id,
+                identifier
+            )
+            DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                emoji = EXCLUDED.emoji,
+                item_type = 'role',
+                role_id = EXCLUDED.role_id,
+                cosmetic_id = NULL,
+                price = EXCLUDED.price,
+                min_openings = EXCLUDED.min_openings,
+                success_message = EXCLUDED.success_message,
+                enabled = TRUE,
+                updated_at = NOW()
+            RETURNING id
+            """,
+            int(campaign["id"]),
+            guild.id,
+            identifier,
+            display_name,
+            product_description,
+            product_emoji,
+            role.id,
+            int(prix),
+            int(cases_minimum),
+            success_message,
+        )
 
             embed = success_embed(
                 "Récompense configurée",
@@ -1631,6 +2130,303 @@ class AdventShop(commands.Cog):
                 ephemeral=True,
             )
 
+
+    @app_commands.command(
+        name="avent-boutique-cosmetique",
+        description="Ajoute un cosmétique de profil à la boutique.",
+    )
+    @app_commands.describe(
+        cosmetique="Identifiant du cosmétique créé dans /profil-admin",
+        prix="Prix du cosmétique en points",
+        cases_minimum="Nombre minimum de cases ouvertes",
+        message="Message envoyé après l'achat",
+        emoji="Emoji affiché dans la boutique",
+        annee="Année de la campagne concernée",
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def configure_cosmetic_item(
+        self,
+        interaction: discord.Interaction,
+        cosmetique: str,
+        prix: app_commands.Range[int, 0, 1_000_000],
+        cases_minimum: app_commands.Range[int, 0, 24] = 0,
+        message: str = "",
+        emoji: str = "✨",
+        annee: app_commands.Range[int, 2024, 2100] | None = None,
+    ) -> None:
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+    
+        try:
+            guild = interaction.guild
+    
+            if guild is None:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Serveur introuvable",
+                        (
+                            "Cette commande doit être utilisée "
+                            "dans un serveur."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            cosmetic_identifier = (
+                cosmetique.strip().lower()
+            )
+    
+            if not IDENTIFIER_PATTERN.fullmatch(
+                cosmetic_identifier
+            ):
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Identifiant invalide",
+                        (
+                            "L'identifiant du cosmétique "
+                            "est invalide."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            campaign = await self.get_campaign(
+                guild_id=guild.id,
+                year=annee,
+            )
+    
+            if campaign is None:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Campagne introuvable",
+                        (
+                            "Crée d'abord une campagne "
+                            "du calendrier de l'Avent."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            pool = self.get_pool()
+    
+            cosmetic = await pool.fetchrow(
+                """
+                SELECT
+                    id,
+                    identifier,
+                    cosmetic_type,
+                    display_name,
+                    description,
+                    enabled
+                FROM profile_cosmetics
+                WHERE guild_id = $1
+                  AND identifier = $2
+                """,
+                guild.id,
+                cosmetic_identifier,
+            )
+    
+            if cosmetic is None:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Cosmétique introuvable",
+                        (
+                            f"Aucun cosmétique ne possède "
+                            f"l'identifiant "
+                            f"`{cosmetic_identifier}`.\n\n"
+                            "Crée-le d'abord avec `/profil-admin`."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            if not bool(cosmetic["enabled"]):
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Cosmétique désactivé",
+                        (
+                            "Ce cosmétique est désactivé dans "
+                            "le système de profil."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            product_emoji = emoji.strip() or "✨"
+            success_message = message.strip()
+    
+            if len(success_message) > 1000:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Message trop long",
+                        (
+                            "Le message doit faire au maximum "
+                            "1 000 caractères."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            if not success_message:
+                success_message = (
+                    f"Félicitations ! Tu as débloqué "
+                    f"**{cosmetic['display_name']}**."
+                )
+    
+            item = await pool.fetchrow(
+                """
+                INSERT INTO advent_shop_items_v2 (
+                    campaign_id,
+                    guild_id,
+                    identifier,
+                    display_name,
+                    description,
+                    emoji,
+                    item_type,
+                    role_id,
+                    cosmetic_id,
+                    price,
+                    min_openings,
+                    success_message,
+                    enabled,
+                    updated_at
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    'profile_cosmetic',
+                    NULL,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    TRUE,
+                    NOW()
+                )
+                ON CONFLICT (
+                    campaign_id,
+                    identifier
+                )
+                DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    description = EXCLUDED.description,
+                    emoji = EXCLUDED.emoji,
+                    item_type = 'profile_cosmetic',
+                    role_id = NULL,
+                    cosmetic_id = EXCLUDED.cosmetic_id,
+                    price = EXCLUDED.price,
+                    min_openings = EXCLUDED.min_openings,
+                    success_message = EXCLUDED.success_message,
+                    enabled = TRUE,
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                int(campaign["id"]),
+                guild.id,
+                cosmetic_identifier,
+                str(cosmetic["display_name"]),
+                str(cosmetic["description"] or ""),
+                product_emoji,
+                int(cosmetic["id"]),
+                int(prix),
+                int(cases_minimum),
+                success_message,
+            )
+    
+            cosmetic_labels = {
+                "title": "Titre",
+                "badge": "Badge",
+                "background": "Fond",
+                "frame": "Cadre",
+                "effect": "Effet",
+            }
+    
+            cosmetic_type = str(
+                cosmetic["cosmetic_type"]
+            )
+    
+            embed = success_embed(
+                "Cosmétique ajouté à la boutique",
+                (
+                    f"**{cosmetic['display_name']}** est maintenant "
+                    "disponible dans la boutique de l'Avent."
+                ),
+            )
+    
+            embed.add_field(
+                name="Identifiant",
+                value=f"`{cosmetic_identifier}`",
+                inline=True,
+            )
+            embed.add_field(
+                name="Type",
+                value=cosmetic_labels.get(
+                    cosmetic_type,
+                    cosmetic_type,
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="Prix",
+                value=(
+                    f"**{format_points(int(prix))} points**"
+                ),
+                inline=True,
+            )
+            embed.add_field(
+                name="Cases minimum",
+                value=f"**{int(cases_minimum)}/24**",
+                inline=True,
+            )
+            embed.add_field(
+                name="Campagne",
+                value=str(campaign["year"]),
+                inline=True,
+            )
+            embed.add_field(
+                name="Numéro interne",
+                value=str(item["id"]),
+                inline=True,
+            )
+    
+            await interaction.followup.send(
+                embed=embed,
+                ephemeral=True,
+            )
+    
+        except Exception:
+            LOGGER.exception(
+                "Impossible d'ajouter le cosmétique à la boutique"
+            )
+    
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Configuration impossible",
+                    (
+                        "Une erreur inattendue s'est produite "
+                        "pendant l'ajout du cosmétique."
+                    ),
+                ),
+                ephemeral=True,
+            )
+
+    
+
+    
     @app_commands.command(
         name="avent-boutique-supprimer",
         description="Retire une récompense de la boutique.",
