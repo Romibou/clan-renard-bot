@@ -2447,13 +2447,11 @@ class ProgressionCog(commands.Cog):
             next_level_xp - current_level_xp
         )
 
-        embed = base_embed(
-            f"🦊 Progression de {member.display_name}",
-            (
-                "Ta progression est permanente et indépendante "
-                "du calendrier de l'Avent."
-            ),
+        embed = discord.Embed(
+            title=f"🦊 Progression de {member.display_name}",
+            color=COLOR,
         )
+
 
         embed.set_thumbnail(
             url=member.display_avatar.url
