@@ -6,6 +6,9 @@ from typing import Any
 
 import asyncpg
 
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+
 
 logger = logging.getLogger(__name__)
 
