@@ -8,6 +8,7 @@ from typing import Any, Literal
 import discord
 from discord import app_commands
 from discord.ext import commands
+from bot.extensions.progression import level_from_xp
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,13 +62,6 @@ def warning_embed(
 
 def format_coins(value: int) -> str:
     return f"{value:,}".replace(",", " ")
-
-
-def level_from_xp(total_xp: int) -> int:
-    """
-    Doit correspondre à la formule utilisée par progression.py.
-    """
-    return math.isqrt(max(0, total_xp) // 100)
 
 
 async def send_ephemeral(
