@@ -247,65 +247,71 @@ class PermanentShopView(discord.ui.View):
         level: int,
     ) -> None:
         if not items:
-            self.item_select.options = [
+            self.product_select.options = [
                 discord.SelectOption(
-                    label="Boutique vide",
+                    label="Aucun article",
                     value="none",
-                    description="Aucun article disponible.",
+                    description="La boutique est vide.",
                 )
             ]
-            self.item_select.disabled = True
+            self.product_select.disabled = True
             self.buy_button.disabled = True
+            self.buy_button.label = "Indisponible"
+            self.buy_button.emoji = "❌"
             return
-
+    
         identifiers = {
             str(item["identifier"])
             for item in items
         }
-
+    
         if self.selected_identifier not in identifiers:
             self.selected_identifier = str(
                 items[0]["identifier"]
             )
-
+    
         options: list[discord.SelectOption] = []
-
+    
         for item in items[:25]:
             item_id = int(item["id"])
+            identifier = str(item["identifier"])
+            item_type = str(item["item_type"])
             price = int(item["price"])
             minimum_level = int(item["minimum_level"])
-            item_type = str(item["item_type"])
-
+    
             if item_id in purchased_item_ids:
-                status = "✅ Possédé"
+                if item_type == "role":
+                    status = "♻️ Acheté"
+                else:
+                    status = "✅ Possédé"
             elif level < minimum_level:
-                status = f"🔒 Niveau {minimum_level}"
+                status = f"🔒 Niveau {minimum_level} requis"
             elif wallet < price:
-                status = "❌ Pièces insuffisantes"
+                status = "❌ Solde insuffisant"
             else:
                 status = "✨ Disponible"
-
-            emoji = "🎭" if item_type == "role" else "🎨"
-
+    
+            description = (
+                f"{format_currency(price)} pièces • "
+                f"Niveau {minimum_level} • {status}"
+            )
+    
             options.append(
-                discord.SelectOption(
-                    label=str(item["display_name"])[:100],
-                    value=str(item["identifier"])[:100],
-                    description=(
-                        f"{format_coins(price)} pièces • "
-                        f"{status}"
-                    )[:100],
-                    emoji=emoji,
+                make_select_option(
+                    label=str(item["display_name"]),
+                    value=identifier,
+                    description=description,
+                    emoji=str(item["emoji"] or "🎁"),
                     default=(
-                        str(item["identifier"])
+                        identifier
                         == self.selected_identifier
                     ),
                 )
             )
-
-        self.item_select.options = options
-        self.item_select.disabled = False
-
+    
+        self.product_select.options = options
+        self.product_select.disabled = False
+    
         selected_item = next(
             (
                 item
@@ -315,55 +321,53 @@ class PermanentShopView(discord.ui.View):
             ),
             None,
         )
-
+    
         if selected_item is None:
             self.buy_button.disabled = True
+            self.buy_button.label = "Indisponible"
+            self.buy_button.emoji = "❌"
             return
-
+    
         item_id = int(selected_item["id"])
+        item_type = str(selected_item["item_type"])
         price = int(selected_item["price"])
         minimum_level = int(
             selected_item["minimum_level"]
         )
-
+    
         already_purchased = (
-            int(selected_item["id"]) in purchased_item_ids
+            item_id in purchased_item_ids
         )
-        
-        item_type = str(selected_item["item_type"])
-        
-        can_afford = balance >= int(selected_item["price"])
-        enough_openings = (
-            openings >= int(selected_item["min_openings"])
-        )
-        
+        can_afford = wallet >= price
+        has_required_level = level >= minimum_level
+    
         if already_purchased and item_type == "role":
-            # On laisse le bouton actif afin de pouvoir restaurer
-            # gratuitement un rôle acheté puis retiré.
+            # Permet de cliquer à nouveau pour restaurer le rôle
+            # sans retirer une seconde fois les pièces.
             self.buy_button.disabled = False
             self.buy_button.label = "Vérifier / restaurer"
             self.buy_button.emoji = "♻️"
-        
+    
         elif already_purchased:
-            # Une décoration reste un achat définitif.
             self.buy_button.disabled = True
-            self.buy_button.label = "Déjà acheté"
+            self.buy_button.label = "Déjà possédé"
             self.buy_button.emoji = "✅"
-        
-        elif not enough_openings:
+    
+        elif not has_required_level:
             self.buy_button.disabled = True
-            self.buy_button.label = "Cases insuffisantes"
+            self.buy_button.label = "Niveau insuffisant"
             self.buy_button.emoji = "🔒"
-        
+    
         elif not can_afford:
             self.buy_button.disabled = True
             self.buy_button.label = "Solde insuffisant"
             self.buy_button.emoji = "❌"
-        
+    
         else:
             self.buy_button.disabled = False
             self.buy_button.label = "Acheter"
             self.buy_button.emoji = "🛒"
+
 
 
     async def refresh(
