@@ -74,20 +74,50 @@ def format_number(value: int) -> str:
     return f"{value:,}".replace(",", " ")
 
 
+def xp_for_level(level: int) -> int:
+    """
+    Quantité totale d'XP nécessaire pour atteindre un niveau,
+    avec la même courbe que DraftBot.
+    """
+    level = max(0, int(level))
+
+    if level == 0:
+        return 0
+
+    return (
+        5 * (level - 1) * level * (2 * level - 1) // 6
+        + 25 * level * (level - 1)
+        + 100 * level
+    )
+
+
 def level_from_xp(total_xp: int) -> int:
     """
-    Niveau 0 : 0 XP
-    Niveau 1 : 100 XP
-    Niveau 2 : 400 XP
-    Niveau 3 : 900 XP
-    Niveau 10 : 10 000 XP
+    Retrouve le niveau correspondant à une quantité totale d'XP.
     """
-    normalized = max(0, total_xp)
-    return math.isqrt(normalized // XP_BASE)
+    total_xp = max(0, int(total_xp))
 
+    low = 0
+    high = 1
 
-def xp_for_level(level: int) -> int:
-    return XP_BASE * max(0, level) ** 2
+    # Trouve d'abord une borne supérieure
+    while xp_for_level(high) <= total_xp:
+        high *= 2
+
+    # Recherche binaire du niveau
+    while low + 1 < high:
+        middle = (low + high) // 2
+
+        if xp_for_level(middle) <= total_xp:
+            low = middle
+        else:
+            high = middle
+
+    return low
+
+def xp_needed_for_next_level(level: int) -> int:
+    return xp_for_level(level + 1) - xp_for_level(level)
+
 
 
 def progress_bar(
