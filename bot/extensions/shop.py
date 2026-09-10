@@ -326,26 +326,45 @@ class PermanentShopView(discord.ui.View):
             selected_item["minimum_level"]
         )
 
-        already_purchased = item_id in purchased_item_ids
-
-        self.buy_button.disabled = (
-            already_purchased
-            or wallet < price
-            or level < minimum_level
+        already_purchased = (
+            int(selected_item["id"]) in purchased_item_ids
         )
-
-        if already_purchased:
-            self.buy_button.label = "Déjà possédé"
+        
+        item_type = str(selected_item["item_type"])
+        
+        can_afford = balance >= int(selected_item["price"])
+        enough_openings = (
+            openings >= int(selected_item["min_openings"])
+        )
+        
+        if already_purchased and item_type == "role":
+            # On laisse le bouton actif afin de pouvoir restaurer
+            # gratuitement un rôle acheté puis retiré.
+            self.buy_button.disabled = False
+            self.buy_button.label = "Vérifier / restaurer"
+            self.buy_button.emoji = "♻️"
+        
+        elif already_purchased:
+            # Une décoration reste un achat définitif.
+            self.buy_button.disabled = True
+            self.buy_button.label = "Déjà acheté"
             self.buy_button.emoji = "✅"
-        elif level < minimum_level:
-            self.buy_button.label = "Niveau insuffisant"
+        
+        elif not enough_openings:
+            self.buy_button.disabled = True
+            self.buy_button.label = "Cases insuffisantes"
             self.buy_button.emoji = "🔒"
-        elif wallet < price:
+        
+        elif not can_afford:
+            self.buy_button.disabled = True
             self.buy_button.label = "Solde insuffisant"
             self.buy_button.emoji = "❌"
+        
         else:
+            self.buy_button.disabled = False
             self.buy_button.label = "Acheter"
             self.buy_button.emoji = "🛒"
+
 
     async def refresh(
         self,
@@ -390,72 +409,83 @@ class PermanentShopView(discord.ui.View):
                 ephemeral=True,
             )
 
-    async def buy(
+   async def buy(
         self,
         interaction: discord.Interaction,
     ) -> None:
         if not self.selected_identifier:
             await interaction.response.send_message(
                 embed=error_embed(
-                    "Aucun article",
-                    "Choisis d'abord un article.",
+                    "Aucune récompense",
+                    "Choisis d'abord une récompense.",
                 ),
                 ephemeral=True,
             )
             return
-
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
+    
+        # Pour un bouton, defer() sans thinking=True permet ensuite
+        # de modifier correctement le message contenant la boutique.
+        await interaction.response.defer()
+    
         try:
-            result = await self.cog.purchase_item(
+            result_embed = await self.cog.purchase_item(
                 interaction=interaction,
+                campaign_id=self.campaign_id,
                 identifier=self.selected_identifier,
             )
-
+        except Exception:
+            LOGGER.exception(
+                "Erreur pendant l'achat dans la boutique permanente"
+            )
+    
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Achat impossible",
+                    "Une erreur inattendue s'est produite pendant l'achat.",
+                ),
+                ephemeral=True,
+            )
+            return
+    
+        # L'achat ou la restauration est terminé. On actualise ensuite
+        # la boutique, sans transformer l'achat en erreur si le rendu échoue.
+        try:
             (
                 shop_embed,
                 items,
                 purchased_item_ids,
-                wallet,
-                level,
+                balance,
+                openings,
             ) = await self.cog.build_shop(
                 guild_id=self.guild_id,
                 user_id=self.owner_id,
                 selected_identifier=self.selected_identifier,
             )
-
+    
             self.update_components(
                 items=items,
                 purchased_item_ids=purchased_item_ids,
-                wallet=wallet,
-                level=level,
+                balance=balance,
+                openings=openings,
             )
-
-            if interaction.message is not None:
-                await interaction.message.edit(
-                    embed=shop_embed,
-                    view=self,
-                )
-
-            await interaction.followup.send(
-                embed=result,
-                ephemeral=True,
+    
+            await interaction.edit_original_response(
+                embed=shop_embed,
+                view=self,
             )
+    
         except Exception:
             LOGGER.exception(
-                "Erreur pendant un achat"
+                "L'achat a réussi, mais la boutique n'a pas pu "
+                "être actualisée"
             )
+    
+        # Le résultat réel de l'achat est toujours envoyé.
+        await interaction.followup.send(
+            embed=result_embed,
+            ephemeral=True,
+        )
 
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Achat impossible",
-                    "Une erreur inattendue s'est produite.",
-                ),
-                ephemeral=True,
-            )
 
 
 # ============================================================
