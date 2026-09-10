@@ -2658,7 +2658,7 @@ class ProgressionCog(commands.Cog):
                 message.author
             )
             
-            rresult = await self.award_message(
+            result = await self.award_message(
                 guild_id=message.guild.id,
                 user_id=message.author.id,
                 settings=settings,
