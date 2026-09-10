@@ -1,537 +1,578 @@
 from __future__ import annotations
 
+import html
 import logging
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.core.database import Database
+from bot.extensions.progression import level_from_xp
 
 
 logger = logging.getLogger(__name__)
 
+GUILD_ID = 733277977831407628
+MAX_FILE_SIZE = 8 * 1024 * 1024  # 8 Mo
 
-DRAFTBOT_GUILD_ID = 733277977831407628
+
+@dataclass(slots=True)
+class DraftBotUser:
+    user_id: int
+    username: str
+    level: int
+    total_xp: int
+    current_xp: int
+    next_xp: int
 
 
-# Format :
-# (
-#     user_id,
-#     niveau DraftBot,
-#     XP total affiché par DraftBot,
-# )
-DRAFTBOT_USERS: tuple[tuple[int, int, int], ...] = (
-    (733260131047047200, 43, 177_700),
-    (425582105125322763, 39, 140_300),
-    (1521621217079984311, 37, 125_900),
-    (760182467361243186, 36, 113_200),
-    (765578266295271445, 34, 100_000),
-    (594105847941169152, 32, 81_200),
-    (1430527773218181194, 24, 39_300),
-    (891260015489466388, 22, 31_700),
-    (347444894119493653, 19, 22_900),
-    (566294850786426901, 18, 19_900),
-    (1103728053923876895, 16, 15_200),
-    (778585584583180308, 16, 14_900),
-    (1235230812660699288, 11, 6_900),
-    (1369361071437254697, 11, 6_200),
-    (1215371540959330434, 11, 6_000),
-    (851182904792580146, 11, 5_800),
-    (1408904284489121902, 10, 5_600),
-    (694178411618238514, 9, 3_900),
-    (1018920833198075967, 9, 3_900),
-    (1403486118657396776, 6, 2_100),
-    (1147908324822622228, 6, 2_100),
-    (510505225971302410, 6, 2_000),
-    (1416692779446177903, 6, 1_800),
-    (1353122014008967328, 6, 1_700),
-    (684857177277857865, 6, 1_700),
-    (1295288602560827402, 5, 1_500),
-    (808341156751474698, 4, 1_000),
-    (1099003523984805898, 4, 943),
-    (1342493160785313862, 4, 902),
-    (689503785684435127, 4, 887),
-    (767074436557045811, 4, 846),
-    (975082117061046302, 4, 818),
-    (1392969249198444624, 3, 700),
-    (1217139224629874754, 3, 646),
-    (1258905263428210739, 3, 634),
-    (1495869256649277503, 3, 597),
-    (1154103857958367353, 3, 595),
-    (1298429647603892247, 3, 551),
-    (1096140548894634115, 3, 512),
-    (1350028860099661825, 3, 495),
-    (1278774786360741938, 3, 491),
-    (1014918277509685280, 2, 467),
-    (1265105058203439164, 2, 425),
-    (1373385422406811670, 2, 408),
-    (883435111947837523, 2, 390),
-    (1135229297611780166, 2, 382),
-    (1117112126499196980, 2, 366),
-    (1310295225477890190, 2, 351),
-    (1406688863799345153, 2, 350),
-    (1442847390339043380, 2, 345),
+USER_PATTERN = re.compile(
+    r"""
+    <li\b
+    (?=[^>]*\bid="(?P<user_id>\d+)")
+    (?=[^>]*\bclass="[^"]*\buser-element\b[^"]*")
+    [^>]*>
+    (?P<body>.*?)
+    </li>
+    """,
+    re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
 
+USERNAME_PATTERN = re.compile(
+    r'<span\s+class="username">(.*?)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
 
-def draftbot_xp_for_level(level: int) -> int:
+LEVEL_PATTERN = re.compile(
+    r'<div\s+class="[^"]*\blevel\b[^"]*">\s*<span>(\d+)</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+STAT_PATTERN = re.compile(
+    r"""
+    <div\s+class="element">\s*
+    <div\s+class="value">(.*?)</div>\s*
+    <div\s+class="title">(Total|Actuel|Prochain)</div>
+    """,
+    re.IGNORECASE | re.DOTALL | re.VERBOSE,
+)
+
+TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
+def clean_text(value: str) -> str:
+    value = TAG_PATTERN.sub("", value)
+    value = html.unescape(value)
+    return value.strip()
+
+
+def parse_number(value: str) -> int:
     """
-    XP total nécessaire pour atteindre un niveau sur DraftBot.
-
-    DraftBot utilise approximativement :
-        XP nécessaire pour passer le niveau L
-        = 5L² + 50L + 100
+    Convertit notamment :
+    177,7 k -> 177700
+    4,2 k   -> 4200
+    327     -> 327
     """
-    level = max(0, level)
+    normalized = clean_text(value).lower()
+    normalized = normalized.replace("\xa0", "")
+    normalized = normalized.replace(" ", "")
+    normalized = normalized.replace(",", ".")
 
-    if level == 0:
-        return 0
+    multiplier = 1
 
-    square_sum = (
-        (level - 1)
-        * level
-        * (2 * level - 1)
-        // 6
-    )
+    if normalized.endswith("k"):
+        multiplier = 1_000
+        normalized = normalized[:-1]
+    elif normalized.endswith("m"):
+        multiplier = 1_000_000
+        normalized = normalized[:-1]
 
-    linear_sum = level * (level - 1) // 2
-
-    return (
-        5 * square_sum
-        + 50 * linear_sum
-        + 100 * level
-    )
+    return round(float(normalized) * multiplier)
 
 
-def draftbot_xp_required_for_next_level(
-    level: int,
-) -> int:
-    level = max(0, level)
+def parse_draftbot_html(content: str) -> list[DraftBotUser]:
+    users: dict[int, DraftBotUser] = {}
 
-    return (
-        5 * level * level
-        + 50 * level
-        + 100
-    )
+    for match in USER_PATTERN.finditer(content):
+        user_id = int(match.group("user_id"))
+        body = match.group("body")
 
+        username_match = USERNAME_PATTERN.search(body)
+        level_match = LEVEL_PATTERN.search(body)
 
-def local_xp_for_level(level: int) -> int:
-    """
-    Formule actuellement utilisée par ton système :
+        if level_match is None:
+            logger.warning(
+                "Impossible de trouver le niveau DraftBot pour %s.",
+                user_id,
+            )
+            continue
 
-        niveau = sqrt(total_xp / 100)
-
-    Donc :
-        XP du niveau L = 100 × L²
-    """
-    level = max(0, level)
-    return 100 * level * level
-
-
-def convert_draftbot_xp(
-    *,
-    draftbot_level: int,
-    draftbot_total_xp: int,
-) -> int:
-    """
-    Convertit l'XP DraftBot vers ton système.
-
-    Le niveau et le pourcentage de progression sont conservés.
-    """
-    draftbot_level = max(0, draftbot_level)
-    draftbot_total_xp = max(0, draftbot_total_xp)
-
-    draftbot_level_start = draftbot_xp_for_level(
-        draftbot_level
-    )
-
-    draftbot_level_size = (
-        draftbot_xp_required_for_next_level(
-            draftbot_level
+        username = (
+            clean_text(username_match.group(1))
+            if username_match is not None
+            else str(user_id)
         )
-    )
 
-    draftbot_current_xp = max(
-        0,
-        draftbot_total_xp - draftbot_level_start,
-    )
+        stats: dict[str, int] = {}
 
-    # Les valeurs en "k" du site sont arrondies.
-    # On empêche donc la conversion de dépasser le niveau affiché.
-    draftbot_current_xp = min(
-        draftbot_current_xp,
-        max(0, draftbot_level_size - 1),
-    )
+        for stat_match in STAT_PATTERN.finditer(body):
+            value = parse_number(stat_match.group(1))
+            title = clean_text(stat_match.group(2)).lower()
+            stats[title] = value
 
-    if draftbot_level_size <= 0:
+        if not {"total", "actuel", "prochain"}.issubset(stats):
+            logger.warning(
+                "Statistiques DraftBot incomplètes pour %s (%s).",
+                username,
+                user_id,
+            )
+            continue
+
+        users[user_id] = DraftBotUser(
+            user_id=user_id,
+            username=username,
+            level=int(level_match.group(1)),
+            total_xp=stats["total"],
+            current_xp=stats["actuel"],
+            next_xp=stats["prochain"],
+        )
+
+    return list(users.values())
+
+
+def convert_draftbot_xp(user: DraftBotUser) -> int:
+    """
+    Convertit la progression DraftBot vers le système XP du bot.
+
+    Le système local utilise :
+        seuil du niveau L = 100 * L²
+
+    La proportion de progression dans le niveau DraftBot est conservée.
+    """
+    local_level_start = 100 * user.level * user.level
+    local_next_level = 100 * (user.level + 1) * (user.level + 1)
+    local_level_span = local_next_level - local_level_start
+
+    draftbot_level_span = user.current_xp + user.next_xp
+
+    if draftbot_level_span <= 0:
         progress = 0.0
     else:
-        progress = (
-            draftbot_current_xp
-            / draftbot_level_size
-        )
+        progress = user.current_xp / draftbot_level_span
 
-    local_level_start = local_xp_for_level(
-        draftbot_level
-    )
+    progress = max(0.0, min(progress, 0.999999))
 
-    local_next_level_start = local_xp_for_level(
-        draftbot_level + 1
-    )
+    converted_progress = round(progress * local_level_span)
+    converted_progress = min(converted_progress, local_level_span - 1)
 
-    local_level_size = (
-        local_next_level_start
-        - local_level_start
-    )
-
-    converted_progress = int(
-        progress * local_level_size
-    )
-
-    converted_progress = min(
-        converted_progress,
-        max(0, local_level_size - 1),
-    )
-
-    return (
-        local_level_start
-        + converted_progress
-    )
+    return local_level_start + converted_progress
 
 
-async def ensure_import_table(
-    database: Database,
-) -> None:
-    """
-    Cette table rend l'importation idempotente.
-
-    Si tu lances deux fois la commande, l'XP ne sera pas
-    ajoutée deux fois.
-    """
-    await database.execute(
-        """
-        CREATE TABLE IF NOT EXISTS draftbot_xp_imports (
-            guild_id BIGINT NOT NULL,
-            user_id BIGINT NOT NULL,
-            draftbot_level INTEGER NOT NULL,
-            draftbot_total_xp BIGINT NOT NULL,
-            converted_xp BIGINT NOT NULL,
-            imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-            PRIMARY KEY (guild_id, user_id)
-        )
-        """
-    )
-
-
-class DraftBotImport(commands.Cog):
-    def __init__(
-        self,
-        bot: commands.Bot,
-        database: Database,
-    ) -> None:
+class DraftBotImportCog(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.database = database
 
-    async def _update_level_roles(
-        self,
-        guild: discord.Guild,
-    ) -> tuple[int, int]:
-        """
-        Tente d'attribuer les rôles de niveau après l'import.
+    async def ensure_tables(self) -> None:
+        database = getattr(self.bot, "database", None)
 
-        L'échec d'un rôle n'annule pas l'importation de l'XP.
-        """
-        progression_cog = self.bot.get_cog(
-            "Progression"
+        if database is None:
+            raise RuntimeError("La base de données n'est pas disponible.")
+
+        await database.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draftbot_xp_imports (
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                draftbot_level INTEGER NOT NULL,
+                draftbot_total_xp BIGINT NOT NULL,
+                current_xp BIGINT,
+                next_xp BIGINT,
+                converted_xp BIGINT NOT NULL,
+                imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (guild_id, user_id)
+            )
+            """
         )
 
-        if progression_cog is None:
-            progression_cog = self.bot.get_cog(
-                "ProgressionCog"
-            )
-
-        if progression_cog is None:
-            logger.warning(
-                "Cog de progression introuvable : "
-                "les rôles seront vérifiés au prochain gain d'XP."
-            )
-            return 0, 0
-
-        role_handler = getattr(
-            progression_cog,
-            "grant_earned_level_roles",
-            None,
+        # Compatibilité si la table avait été créée avec l'ancienne version.
+        await database.execute(
+            """
+            ALTER TABLE draftbot_xp_imports
+            ADD COLUMN IF NOT EXISTS current_xp BIGINT
+            """
         )
 
-        if role_handler is None:
-            logger.warning(
-                "La méthode grant_earned_level_roles "
-                "est introuvable."
-            )
-            return 0, 0
+        await database.execute(
+            """
+            ALTER TABLE draftbot_xp_imports
+            ADD COLUMN IF NOT EXISTS next_xp BIGINT
+            """
+        )
 
-        success_count = 0
-        error_count = 0
-
-        for user_id, _, _ in DRAFTBOT_USERS:
-            member = guild.get_member(user_id)
-
-            if member is None:
-                continue
-
-            try:
-                await role_handler(member)
-                success_count += 1
-            except Exception:
-                error_count += 1
-
-                logger.exception(
-                    "Impossible de vérifier les rôles "
-                    "de niveau de %s",
-                    user_id,
-                )
-
-        return success_count, error_count
+        await database.execute(
+            """
+            ALTER TABLE draftbot_xp_imports
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+            NOT NULL DEFAULT NOW()
+            """
+        )
 
     @app_commands.command(
         name="import-draftbot-xp",
-        description=(
-            "Importe une seule fois l'XP de l'ancien classement."
+        description="Importe les niveaux DraftBot depuis un fichier HTML.",
+    )
+    @app_commands.describe(
+        fichier="Le fichier HTML contenant le classement DraftBot",
+        confirmer="Mettre sur Oui pour effectuer réellement l'import",
+        membres_presents_seulement=(
+            "Ignorer les utilisateurs qui ne sont plus sur le serveur"
         ),
+        attribuer_roles="Attribuer aussi les rôles correspondant aux niveaux",
     )
     @app_commands.guild_only()
-    @app_commands.default_permissions(
-        administrator=True
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
+    @app_commands.default_permissions(administrator=True)
     async def import_draftbot_xp(
         self,
         interaction: discord.Interaction,
+        fichier: discord.Attachment,
+        confirmer: bool = False,
+        membres_presents_seulement: bool = True,
+        attribuer_roles: bool = False,
     ) -> None:
         if interaction.guild is None:
             await interaction.response.send_message(
-                "❌ Cette commande doit être utilisée "
-                "dans un serveur.",
+                "Cette commande doit être utilisée dans un serveur.",
                 ephemeral=True,
             )
             return
 
-        if interaction.guild.id != DRAFTBOT_GUILD_ID:
+        if interaction.guild.id != GUILD_ID:
             await interaction.response.send_message(
-                "❌ Ces données DraftBot n'appartiennent "
-                "pas à ce serveur.",
+                "Cette commande n'est pas disponible sur ce serveur.",
                 ephemeral=True,
             )
             return
 
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
+        if fichier.size > MAX_FILE_SIZE:
+            await interaction.response.send_message(
+                "Le fichier dépasse la limite de 8 Mo.",
+                ephemeral=True,
+            )
+            return
 
-        pool = self.database.require_pool()
-
-        imported_count = 0
-        updated_count = 0
-        unchanged_count = 0
-        total_added = 0
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            async with pool.acquire() as connection:
-                async with connection.transaction():
-                    for (
-                        user_id,
-                        draftbot_level,
-                        draftbot_total_xp,
-                    ) in DRAFTBOT_USERS:
-                        converted_xp = convert_draftbot_xp(
-                            draftbot_level=draftbot_level,
-                            draftbot_total_xp=(
-                                draftbot_total_xp
-                            ),
+            raw_content = await fichier.read()
+            content = raw_content.decode("utf-8", errors="replace")
+            users = parse_draftbot_html(content)
+        except Exception:
+            logger.exception("Erreur pendant la lecture du fichier DraftBot.")
+            await interaction.followup.send(
+                "Impossible de lire le fichier HTML.",
+                ephemeral=True,
+            )
+            return
+
+        if not users:
+            await interaction.followup.send(
+                "Aucun membre DraftBot n'a été détecté dans ce fichier.",
+                ephemeral=True,
+            )
+            return
+
+        present_users: list[DraftBotUser] = []
+        absent_users: list[DraftBotUser] = []
+
+        for user in users:
+            member = interaction.guild.get_member(user.user_id)
+
+            if member is None:
+                absent_users.append(user)
+            else:
+                present_users.append(user)
+
+        users_to_import = (
+            present_users if membres_presents_seulement else users
+        )
+
+        total_converted_xp = sum(
+            convert_draftbot_xp(user)
+            for user in users_to_import
+        )
+
+        if not confirmer:
+            preview_lines = []
+
+            for user in users_to_import[:10]:
+                converted_xp = convert_draftbot_xp(user)
+                preview_lines.append(
+                    f"• {user.username} — niveau {user.level} "
+                    f"→ {converted_xp:,} XP"
+                )
+
+            preview = "\n".join(preview_lines)
+
+            await interaction.followup.send(
+                "## Prévisualisation de l'import DraftBot\n"
+                f"**Membres détectés :** {len(users)}\n"
+                f"**Présents sur le serveur :** {len(present_users)}\n"
+                f"**Absents du serveur :** {len(absent_users)}\n"
+                f"**Membres à importer :** {len(users_to_import)}\n"
+                f"**XP convertie totale :** {total_converted_xp:,}\n\n"
+                f"{preview}\n\n"
+                "Relance la commande avec `confirmer: Oui` pour effectuer "
+                "l'import.",
+                ephemeral=True,
+            )
+            return
+
+        database = getattr(self.bot, "database", None)
+
+        if database is None:
+            await interaction.followup.send(
+                "La base de données n'est pas disponible.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            await self.ensure_tables()
+        except Exception:
+            logger.exception(
+                "Impossible de préparer les tables d'import DraftBot."
+            )
+            await interaction.followup.send(
+                "Impossible de préparer la base de données.",
+                ephemeral=True,
+            )
+            return
+
+        newly_imported = 0
+        updated = 0
+        unchanged = 0
+        xp_added = 0
+
+        imported_members: list[tuple[int, int]] = []
+        now = datetime.now(timezone.utc)
+
+        try:
+            async with database.transaction() as connection:
+                for user in users_to_import:
+                    converted_xp = convert_draftbot_xp(user)
+
+                    previous = await connection.fetchrow(
+                        """
+                        SELECT converted_xp
+                        FROM draftbot_xp_imports
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        FOR UPDATE
+                        """,
+                        interaction.guild.id,
+                        user.user_id,
+                    )
+
+                    if previous is None:
+                        previous_converted_xp = 0
+                        newly_imported += 1
+                    else:
+                        previous_converted_xp = int(
+                            previous["converted_xp"]
                         )
 
-                        previous_import = (
-                            await connection.fetchrow(
-                                """
-                                SELECT converted_xp
-                                FROM draftbot_xp_imports
-                                WHERE guild_id = $1
-                                  AND user_id = $2
-                                """,
-                                interaction.guild.id,
-                                user_id,
-                            )
-                        )
+                    # Rend l'import idempotent :
+                    # relancer le même fichier n'ajoute pas deux fois l'XP.
+                    delta = max(
+                        0,
+                        converted_xp - previous_converted_xp,
+                    )
 
-                        if previous_import is None:
-                            previous_converted_xp = 0
-                            imported_count += 1
+                    stored_converted_xp = max(
+                        converted_xp,
+                        previous_converted_xp,
+                    )
+
+                    if previous is not None:
+                        if delta > 0:
+                            updated += 1
                         else:
-                            previous_converted_xp = int(
-                                previous_import[
-                                    "converted_xp"
-                                ]
-                            )
+                            unchanged += 1
 
-                        difference = (
-                            converted_xp
-                            - previous_converted_xp
-                        )
-
-                        if difference == 0:
-                            unchanged_count += 1
-                        else:
-                            updated_count += 1
-                            total_added += difference
-
-                        # Adapte uniquement le nom de cette table
-                        # si ta table de progression porte un autre nom.
-                        await connection.execute(
-                            """
-                            INSERT INTO progression_members (
-                                guild_id,
-                                user_id,
-                                total_xp,
-                                coins
-                            )
-                            VALUES ($1, $2, 0, 0)
-                            ON CONFLICT (guild_id, user_id)
-                            DO NOTHING
-                            """,
-                            interaction.guild.id,
+                    await connection.execute(
+                        """
+                        INSERT INTO progression_members (
+                            guild_id,
                             user_id,
+                            total_xp,
+                            wallet,
+                            lifetime_coins,
+                            rewarded_messages,
+                            created_at,
+                            updated_at
                         )
+                        VALUES ($1, $2, 0, 0, 0, 0, $3, $3)
+                        ON CONFLICT (guild_id, user_id)
+                        DO NOTHING
+                        """,
+                        interaction.guild.id,
+                        user.user_id,
+                        now,
+                    )
 
-                        if difference != 0:
-                            await connection.execute(
-                                """
-                                UPDATE progression_members
-                                SET total_xp = GREATEST(
-                                        0,
-                                        total_xp + $3
-                                    ),
-                                    updated_at = NOW()
-                                WHERE guild_id = $1
-                                  AND user_id = $2
-                                """,
-                                interaction.guild.id,
-                                user_id,
-                                difference,
-                            )
+                    resulting_xp = await connection.fetchval(
+                        """
+                        UPDATE progression_members
+                        SET total_xp = total_xp + $3,
+                            updated_at = $4
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        RETURNING total_xp
+                        """,
+                        interaction.guild.id,
+                        user.user_id,
+                        delta,
+                        now,
+                    )
 
-                        await connection.execute(
-                            """
-                            INSERT INTO draftbot_xp_imports (
-                                guild_id,
-                                user_id,
-                                draftbot_level,
-                                draftbot_total_xp,
-                                converted_xp,
-                                imported_at,
-                                updated_at
-                            )
-                            VALUES (
-                                $1,
-                                $2,
-                                $3,
-                                $4,
-                                $5,
-                                NOW(),
-                                NOW()
-                            )
-                            ON CONFLICT (guild_id, user_id)
-                            DO UPDATE SET
-                                draftbot_level =
-                                    EXCLUDED.draftbot_level,
-                                draftbot_total_xp =
-                                    EXCLUDED.draftbot_total_xp,
-                                converted_xp =
-                                    EXCLUDED.converted_xp,
-                                updated_at = NOW()
-                            """,
-                            interaction.guild.id,
+                    await connection.execute(
+                        """
+                        INSERT INTO draftbot_xp_imports (
+                            guild_id,
                             user_id,
                             draftbot_level,
                             draftbot_total_xp,
+                            current_xp,
+                            next_xp,
                             converted_xp,
+                            imported_at,
+                            updated_at
+                        )
+                        VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8, $8
+                        )
+                        ON CONFLICT (guild_id, user_id)
+                        DO UPDATE SET
+                            draftbot_level = EXCLUDED.draftbot_level,
+                            draftbot_total_xp =
+                                EXCLUDED.draftbot_total_xp,
+                            current_xp = EXCLUDED.current_xp,
+                            next_xp = EXCLUDED.next_xp,
+                            converted_xp = EXCLUDED.converted_xp,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        interaction.guild.id,
+                        user.user_id,
+                        user.level,
+                        user.total_xp,
+                        user.current_xp,
+                        user.next_xp,
+                        stored_converted_xp,
+                        now,
+                    )
+
+                    if delta > 0:
+                        await connection.execute(
+                            """
+                            INSERT INTO progression_transactions (
+                                guild_id,
+                                user_id,
+                                actor_id,
+                                transaction_type,
+                                amount,
+                                reason,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            """,
+                            interaction.guild.id,
+                            user.user_id,
+                            interaction.user.id,
+                            "draftbot_import",
+                            delta,
+                            (
+                                "Import de la progression DraftBot "
+                                f"(niveau {user.level})"
+                            ),
+                            now,
                         )
 
-            role_success, role_errors = (
-                await self._update_level_roles(
-                    interaction.guild
-                )
-            )
+                    xp_added += delta
+
+                    if resulting_xp is not None:
+                        imported_members.append(
+                            (user.user_id, int(resulting_xp))
+                        )
 
         except Exception:
-            logger.exception(
-                "Impossible d'importer les données DraftBot"
-            )
-
+            logger.exception("Échec de l'import DraftBot.")
             await interaction.followup.send(
-                (
-                    "❌ L'importation DraftBot a échoué.\n"
-                    "Regarde les logs Render pour obtenir "
-                    "l'erreur complète."
-                ),
+                "Une erreur est survenue pendant l'import. "
+                "Aucune modification partielle n'a été conservée.",
                 ephemeral=True,
             )
             return
 
+        roles_added = 0
+        role_errors = 0
+
+        if attribuer_roles:
+            progression_cog = self.bot.get_cog("ProgressionCog")
+
+            if progression_cog is None:
+                role_errors = len(imported_members)
+            else:
+                for user_id, total_xp in imported_members:
+                    member = interaction.guild.get_member(user_id)
+
+                    if member is None:
+                        continue
+
+                    try:
+                        level = level_from_xp(total_xp)
+
+                        await progression_cog.grant_earned_level_roles(
+                            member,
+                            level,
+                        )
+
+                        roles_added += 1
+                    except Exception:
+                        role_errors += 1
+                        logger.exception(
+                            "Impossible de synchroniser les rôles de %s.",
+                            user_id,
+                        )
+
+        result = (
+            "## Import DraftBot terminé\n"
+            f"**Membres lus :** {len(users)}\n"
+            f"**Membres traités :** {len(users_to_import)}\n"
+            f"**Nouveaux imports :** {newly_imported}\n"
+            f"**Imports mis à jour :** {updated}\n"
+            f"**Déjà à jour :** {unchanged}\n"
+            f"**XP ajoutée :** {xp_added:,}\n"
+            f"**Membres absents ignorés :** "
+            f"{len(absent_users) if membres_presents_seulement else 0}"
+        )
+
+        if attribuer_roles:
+            result += (
+                f"\n**Rôles synchronisés :** {roles_added}"
+                f"\n**Erreurs de rôles :** {role_errors}"
+            )
+
         await interaction.followup.send(
-            (
-                "✅ **Importation DraftBot terminée**\n\n"
-                f"• Nouveaux membres importés : "
-                f"**{imported_count}**\n"
-                f"• Entrées mises à jour : "
-                f"**{updated_count}**\n"
-                f"• Entrées déjà à jour : "
-                f"**{unchanged_count}**\n"
-                f"• Différence totale ajoutée : "
-                f"**{total_added:,} XP**\n"
-                f"• Membres vérifiés pour les rôles : "
-                f"**{role_success}**\n"
-                f"• Erreurs de rôles : "
-                f"**{role_errors}**\n\n"
-                "La commande peut être relancée sans "
-                "dupliquer l'XP."
-            ).replace(",", " "),
+            result,
             ephemeral=True,
         )
 
 
-async def setup(
-    bot: commands.Bot,
-) -> None:
-    database = getattr(bot, "database", None)
-
-    if not isinstance(database, Database):
-        raise RuntimeError(
-            "La base de données du bot est introuvable."
-        )
-
-    await ensure_import_table(database)
-
-    await bot.add_cog(
-        DraftBotImport(
-            bot,
-            database,
-        )
-    )
-
-    logger.info(
-        "Outil d'importation DraftBot chargé"
-    )
-
-
-async def teardown(
-    bot: commands.Bot,
-) -> None:
-    logger.info(
-        "Outil d'importation DraftBot déchargé"
-    )
+async def setup(bot: commands.Bot) -> None:
+    cog = DraftBotImportCog(bot)
+    await cog.ensure_tables()
+    await bot.add_cog(cog)
