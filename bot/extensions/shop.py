@@ -420,23 +420,50 @@ class PermanentShopView(discord.ui.View):
         if not self.selected_identifier:
             await interaction.response.send_message(
                 embed=error_embed(
-                    "Aucune récompense",
-                    "Choisis d'abord une récompense.",
+                    "Aucun article",
+                    "Choisis d'abord un article.",
                 ),
                 ephemeral=True,
             )
             return
     
-        # Pour un bouton, defer() sans thinking=True permet ensuite
-        # de modifier correctement le message contenant la boutique.
         await interaction.response.defer()
     
         try:
             result_embed = await self.cog.purchase_item(
                 interaction=interaction,
-                campaign_id=self.campaign_id,
                 identifier=self.selected_identifier,
             )
+    
+            (
+                shop_embed,
+                items,
+                purchased_item_ids,
+                wallet,
+                level,
+            ) = await self.cog.build_shop(
+                guild_id=self.guild_id,
+                user_id=self.owner_id,
+                selected_identifier=self.selected_identifier,
+            )
+    
+            self.update_components(
+                items=items,
+                purchased_item_ids=purchased_item_ids,
+                wallet=wallet,
+                level=level,
+            )
+    
+            await interaction.edit_original_response(
+                embed=shop_embed,
+                view=self,
+            )
+    
+            await interaction.followup.send(
+                embed=result_embed,
+                ephemeral=True,
+            )
+    
         except Exception:
             LOGGER.exception(
                 "Erreur pendant l'achat dans la boutique permanente"
@@ -449,46 +476,7 @@ class PermanentShopView(discord.ui.View):
                 ),
                 ephemeral=True,
             )
-            return
-    
-        # L'achat ou la restauration est terminé. On actualise ensuite
-        # la boutique, sans transformer l'achat en erreur si le rendu échoue.
-        try:
-            (
-                shop_embed,
-                items,
-                purchased_item_ids,
-                balance,
-                openings,
-            ) = await self.cog.build_shop(
-                guild_id=self.guild_id,
-                user_id=self.owner_id,
-                selected_identifier=self.selected_identifier,
-            )
-    
-            self.update_components(
-                items=items,
-                purchased_item_ids=purchased_item_ids,
-                balance=balance,
-                openings=openings,
-            )
-    
-            await interaction.edit_original_response(
-                embed=shop_embed,
-                view=self,
-            )
-    
-        except Exception:
-            LOGGER.exception(
-                "L'achat a réussi, mais la boutique n'a pas pu "
-                "être actualisée"
-            )
-    
-        # Le résultat réel de l'achat est toujours envoyé.
-        await interaction.followup.send(
-            embed=result_embed,
-            ephemeral=True,
-        )
+
 
 
 
