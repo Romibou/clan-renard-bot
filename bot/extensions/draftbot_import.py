@@ -9,7 +9,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.core.database import database
 from bot.extensions.progression import level_from_xp, xp_for_level
 
 
@@ -206,7 +205,7 @@ class DraftBotImportCog(commands.Cog):
         self.bot = bot
 
     async def ensure_tables(self) -> None:
-        pool = database.require_pool()
+        pool = self.bot.database.require_pool()
 
         async with pool.acquire() as connection:
             await connection.execute(
@@ -406,7 +405,7 @@ class DraftBotImportCog(commands.Cog):
         # Import
         # -------------------------------------------------------------------
 
-        pool = database.require_pool()
+        pool = self.bot.database.require_pool()
         now = datetime.now(timezone.utc)
 
         newly_imported = 0
