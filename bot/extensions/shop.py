@@ -409,7 +409,7 @@ class PermanentShopView(discord.ui.View):
                 ephemeral=True,
             )
 
-   async def buy(
+    async def buy(
         self,
         interaction: discord.Interaction,
     ) -> None:
