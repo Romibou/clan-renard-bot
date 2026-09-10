@@ -403,52 +403,21 @@ class PermanentShopView(discord.ui.View):
                 ephemeral=True,
             )
             return
-
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
+    
+        # Pour un bouton, on diffère la mise à jour du message existant.
+        await interaction.response.defer()
+    
         try:
-            result = await self.cog.purchase_item(
+            result_embed = await self.cog.purchase_item(
                 interaction=interaction,
                 identifier=self.selected_identifier,
             )
-
-            (
-                shop_embed,
-                items,
-                purchased_item_ids,
-                wallet,
-                level,
-            ) = await self.cog.build_shop(
-                guild_id=self.guild_id,
-                user_id=self.owner_id,
-                selected_identifier=self.selected_identifier,
-            )
-
-            self.update_components(
-                items=items,
-                purchased_item_ids=purchased_item_ids,
-                wallet=wallet,
-                level=level,
-            )
-
-            if interaction.message is not None:
-                await interaction.message.edit(
-                    embed=shop_embed,
-                    view=self,
-                )
-
-            await interaction.followup.send(
-                embed=result,
-                ephemeral=True,
-            )
         except Exception:
             LOGGER.exception(
-                "Erreur pendant un achat"
+                "Erreur réelle pendant l'achat de l'article %s",
+                self.selected_identifier,
             )
-
+    
             await interaction.followup.send(
                 embed=error_embed(
                     "Achat impossible",
@@ -456,168 +425,218 @@ class PermanentShopView(discord.ui.View):
                 ),
                 ephemeral=True,
             )
-
-
-# ============================================================
-# MODAL DE CONFIGURATION
-# ============================================================
-
-
-class ShopItemModal(discord.ui.Modal):
-    def __init__(
-        self,
-        *,
-        cog: PermanentShop,
-        item_type: ShopItemType,
-        role_id: int | None = None,
-        cosmetic_id: int | None = None,
-        default_identifier: str = "",
-        default_name: str = "",
-        default_description: str = "",
-    ) -> None:
-        title = (
-            "Ajouter un rôle"
-            if item_type == "role"
-            else "Ajouter un cosmétique"
+            return
+    
+        # L'achat est terminé à partir d'ici.
+        # Une erreur d'affichage ne doit donc pas être présentée
+        # comme une erreur d'achat.
+        try:
+            guild = interaction.guild
+    
+            if guild is not None:
+                (
+                    shop_embed,
+                    items,
+                    purchased_item_ids,
+                    wallet,
+                    level,
+                ) = await self.cog.build_shop(
+                    guild=guild,
+                    user_id=self.owner_id,
+                    selected_identifier=self.selected_identifier,
+                )
+    
+                self.update_components(
+                    items=items,
+                    purchased_item_ids=purchased_item_ids,
+                    wallet=wallet,
+                    level=level,
+                )
+    
+                # Méthode correcte pour modifier le message éphémère
+                # qui contient les boutons.
+                await interaction.edit_original_response(
+                    embed=shop_embed,
+                    view=self,
+                )
+    
+        except Exception:
+            # L'achat peut avoir réussi même si Discord refuse
+            # d'actualiser le message.
+            LOGGER.exception(
+                "Achat traité, mais impossible d'actualiser "
+                "l'affichage de la boutique"
+            )
+    
+        # Le résultat est toujours envoyé, même si l'actualisation
+        # de la boutique a échoué.
+        await interaction.followup.send(
+            embed=result_embed,
+            ephemeral=True,
         )
-
-        super().__init__(
-            title=title,
-            timeout=300,
-        )
-
-        self.cog = cog
-        self.item_type = item_type
-        self.role_id = role_id
-        self.cosmetic_id = cosmetic_id
-
-        self.identifier_input = discord.ui.TextInput(
-            label="Identifiant",
-            placeholder="exemple: role-vip",
-            default=default_identifier[:50] or None,
+    
+    
+    
+    # ============================================================
+    # MODAL DE CONFIGURATION
+    # ============================================================
+    
+    
+    class ShopItemModal(discord.ui.Modal):
+        def __init__(
+            self,
+            *,
+            cog: PermanentShop,
+            item_type: ShopItemType,
+            role_id: int | None = None,
+            cosmetic_id: int | None = None,
+            default_identifier: str = "",
+            default_name: str = "",
+            default_description: str = "",
+        ) -> None:
+            title = (
+                "Ajouter un rôle"
+                if item_type == "role"
+                else "Ajouter un cosmétique"
+            )
+    
+            super().__init__(
+                title=title,
+                timeout=300,
+            )
+    
+            self.cog = cog
+            self.item_type = item_type
+            self.role_id = role_id
+            self.cosmetic_id = cosmetic_id
+    
+            self.identifier_input = discord.ui.TextInput(
+                label="Identifiant",
+                placeholder="exemple: role-vip",
+                default=default_identifier[:50] or None,
+                min_length=1,
+                max_length=50,
+            )
+    
+            self.name_input = discord.ui.TextInput(
+                label="Nom affiché",
+                placeholder="Exemple : Rôle VIP",
+                default=default_name[:100] or None,
+                min_length=1,
+                max_length=100,
+            )
+    
+            self.price_input = discord.ui.TextInput(
+                label="Prix en pièces",
+                placeholder="Exemple : 500",
+                default="500",
+                min_length=1,
+                max_length=10,
+            )
+    
+            self.level_input = discord.ui.TextInput(
+                label="Niveau minimum",
+                placeholder="Exemple : 5",
+                default="0",
+                min_length=1,
+                max_length=5,
+            )
+    
+            self.description_input = discord.ui.TextInput(
+                label="Description",
+                placeholder="Description affichée dans la boutique",
+                default=default_description[:1000] or None,
+                required=False,
+                max_length=1000,
+                style=discord.TextStyle.paragraph,
+            )
+    
+            self.add_item(self.identifier_input)
+            self.add_item(self.name_input)
+            self.add_item(self.price_input)
+            self.add_item(self.level_input)
+            self.add_item(self.description_input)
+    
+        async def on_submit(
+            self,
+            interaction: discord.Interaction,
+        ) -> None:
+            try:
+                price = int(self.price_input.value)
+                minimum_level = int(self.level_input.value)
+            except ValueError:
+                await interaction.response.send_message(
+                    embed=error_embed(
+                        "Valeur invalide",
+                        (
+                            "Le prix et le niveau minimum doivent "
+                            "être des nombres entiers."
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+    
+            await interaction.response.defer(
+                ephemeral=True,
+                thinking=True,
+            )
+    
+            result = await self.cog.configure_item(
+                interaction=interaction,
+                identifier=self.identifier_input.value,
+                display_name=self.name_input.value,
+                description=self.description_input.value,
+                price=price,
+                minimum_level=minimum_level,
+                item_type=self.item_type,
+                role_id=self.role_id,
+                cosmetic_id=self.cosmetic_id,
+            )
+    
+            await interaction.followup.send(
+                embed=result,
+                ephemeral=True,
+            )
+    
+    
+    class DeleteShopItemModal(discord.ui.Modal):
+        identifier_input = discord.ui.TextInput(
+            label="Identifiant de l'article",
+            placeholder="Exemple : role-vip",
             min_length=1,
             max_length=50,
         )
-
-        self.name_input = discord.ui.TextInput(
-            label="Nom affiché",
-            placeholder="Exemple : Rôle VIP",
-            default=default_name[:100] or None,
-            min_length=1,
-            max_length=100,
-        )
-
-        self.price_input = discord.ui.TextInput(
-            label="Prix en pièces",
-            placeholder="Exemple : 500",
-            default="500",
-            min_length=1,
-            max_length=10,
-        )
-
-        self.level_input = discord.ui.TextInput(
-            label="Niveau minimum",
-            placeholder="Exemple : 5",
-            default="0",
-            min_length=1,
-            max_length=5,
-        )
-
-        self.description_input = discord.ui.TextInput(
-            label="Description",
-            placeholder="Description affichée dans la boutique",
-            default=default_description[:1000] or None,
-            required=False,
-            max_length=1000,
-            style=discord.TextStyle.paragraph,
-        )
-
-        self.add_item(self.identifier_input)
-        self.add_item(self.name_input)
-        self.add_item(self.price_input)
-        self.add_item(self.level_input)
-        self.add_item(self.description_input)
-
-    async def on_submit(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        try:
-            price = int(self.price_input.value)
-            minimum_level = int(self.level_input.value)
-        except ValueError:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Valeur invalide",
-                    (
-                        "Le prix et le niveau minimum doivent "
-                        "être des nombres entiers."
-                    ),
-                ),
+    
+        def __init__(
+            self,
+            *,
+            cog: PermanentShop,
+        ) -> None:
+            super().__init__(
+                title="Supprimer un article",
+                timeout=300,
+            )
+            self.cog = cog
+    
+        async def on_submit(
+            self,
+            interaction: discord.Interaction,
+        ) -> None:
+            await interaction.response.defer(
+                ephemeral=True,
+                thinking=True,
+            )
+    
+            result = await self.cog.delete_item(
+                guild_id=interaction.guild_id,
+                identifier=self.identifier_input.value,
+            )
+    
+            await interaction.followup.send(
+                embed=result,
                 ephemeral=True,
             )
-            return
-
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
-        result = await self.cog.configure_item(
-            interaction=interaction,
-            identifier=self.identifier_input.value,
-            display_name=self.name_input.value,
-            description=self.description_input.value,
-            price=price,
-            minimum_level=minimum_level,
-            item_type=self.item_type,
-            role_id=self.role_id,
-            cosmetic_id=self.cosmetic_id,
-        )
-
-        await interaction.followup.send(
-            embed=result,
-            ephemeral=True,
-        )
-
-
-class DeleteShopItemModal(discord.ui.Modal):
-    identifier_input = discord.ui.TextInput(
-        label="Identifiant de l'article",
-        placeholder="Exemple : role-vip",
-        min_length=1,
-        max_length=50,
-    )
-
-    def __init__(
-        self,
-        *,
-        cog: PermanentShop,
-    ) -> None:
-        super().__init__(
-            title="Supprimer un article",
-            timeout=300,
-        )
-        self.cog = cog
-
-    async def on_submit(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
-        )
-
-        result = await self.cog.delete_item(
-            guild_id=interaction.guild_id,
-            identifier=self.identifier_input.value,
-        )
-
-        await interaction.followup.send(
-            embed=result,
-            ephemeral=True,
-        )
 
 
 # ============================================================
