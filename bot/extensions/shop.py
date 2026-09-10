@@ -292,7 +292,7 @@ class PermanentShopView(discord.ui.View):
                 status = "✨ Disponible"
     
             description = (
-                f"{format_currency(price)} pièces • "
+                f"{format_coins(price)} pièces • "
                 f"Niveau {minimum_level} • {status}"
             )
     
