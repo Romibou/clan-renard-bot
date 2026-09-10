@@ -7,6 +7,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Any
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -480,6 +483,28 @@ class AdjustMemberModal(
             ),
         )
 
+        guild = interaction.guild
+
+        if guild is not None:
+            member = guild.get_member(self.user_id)
+
+            if member is None:
+                try:
+                    member = await guild.fetch_member(self.user_id)
+                except (
+                    discord.NotFound,
+                    discord.Forbidden,
+                    discord.HTTPException,
+                ):
+                    member = None
+
+            if member is not None:
+                await self.cog.grant_earned_level_roles(
+                    member,
+                    int(stats["level"]),
+                )
+
+
         member_text = f"<@{self.user_id}>"
 
         await interaction.response.send_message(
@@ -582,6 +607,391 @@ class ConfirmProgressionResetView(discord.ui.View):
     ) -> None:
         await self.disable_buttons(interaction)
         self.stop()
+
+
+
+class XPMultiplierModal(discord.ui.Modal):
+    def __init__(
+        self,
+        *,
+        cog: ProgressionCog,
+        role: discord.Role,
+    ) -> None:
+        super().__init__(
+            title="Multiplicateur d'XP",
+            timeout=300,
+        )
+
+        self.cog = cog
+        self.role = role
+
+        self.multiplier_input = discord.ui.TextInput(
+            label="Multiplicateur",
+            placeholder=(
+                "Exemple : 1.5, 2 ou 0 pour supprimer"
+            ),
+            required=True,
+            min_length=1,
+            max_length=5,
+        )
+
+        self.add_item(
+            self.multiplier_input
+        )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        guild = interaction.guild
+
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Cette action doit être utilisée "
+                "dans un serveur.",
+                ephemeral=True,
+            )
+            return
+
+        raw_value = (
+            str(self.multiplier_input.value)
+            .strip()
+            .replace(",", ".")
+        )
+
+        try:
+            multiplier = Decimal(raw_value)
+        except InvalidOperation:
+            await interaction.response.send_message(
+                "❌ Entre un nombre valide, par exemple "
+                "`1.5`, `2` ou `0`.",
+                ephemeral=True,
+            )
+            return
+
+        if multiplier != Decimal("0") and not (
+            Decimal("1.00")
+            <= multiplier
+            <= Decimal("10.00")
+        ):
+            await interaction.response.send_message(
+                "❌ Le multiplicateur doit être compris "
+                "entre **1 et 10**.\n"
+                "Entre `0` pour supprimer la règle.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            saved = await self.cog.set_role_xp_multiplier(
+                guild_id=guild.id,
+                role_id=self.role.id,
+                multiplier=multiplier,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                f"❌ {error}",
+                ephemeral=True,
+            )
+            return
+
+        if saved:
+            normalized = multiplier.quantize(
+                Decimal("0.01")
+            )
+
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Multiplicateur enregistré",
+                    description=(
+                        f"Les membres possédant "
+                        f"{self.role.mention} gagneront maintenant "
+                        f"**x{normalized.normalize()} XP**.\n\n"
+                        "Si un membre possède plusieurs rôles, "
+                        "seul le multiplicateur le plus élevé "
+                        "sera utilisé."
+                    ),
+                    color=discord.Color.green(),
+                ),
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Multiplicateur supprimé",
+                    description=(
+                        f"{self.role.mention} ne possède plus "
+                        "de multiplicateur d'XP."
+                    ),
+                    color=discord.Color.green(),
+                ),
+                ephemeral=True,
+            )
+
+
+class LevelRewardRoleModal(discord.ui.Modal):
+    def __init__(
+        self,
+        *,
+        cog: ProgressionCog,
+        role: discord.Role,
+    ) -> None:
+        super().__init__(
+            title="Rôle de niveau",
+            timeout=300,
+        )
+
+        self.cog = cog
+        self.role = role
+
+        self.level_input = discord.ui.TextInput(
+            label="Niveau demandé",
+            placeholder=(
+                "Exemple : 10 ou 0 pour supprimer"
+            ),
+            required=True,
+            min_length=1,
+            max_length=5,
+        )
+
+        self.add_item(
+            self.level_input
+        )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        guild = interaction.guild
+
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Cette action doit être utilisée "
+                "dans un serveur.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            required_level = int(
+                str(self.level_input.value).strip()
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ Entre un niveau entier valide.",
+                ephemeral=True,
+            )
+            return
+
+        if not 0 <= required_level <= 10000:
+            await interaction.response.send_message(
+                "❌ Le niveau doit être compris entre "
+                "**1 et 10 000**.\n"
+                "Entre `0` pour supprimer la règle.",
+                ephemeral=True,
+            )
+            return
+
+        if required_level != 0:
+            bot_member = guild.me
+
+            if self.role.is_default():
+                await interaction.response.send_message(
+                    "❌ Le rôle `@everyone` ne peut pas être "
+                    "utilisé comme récompense.",
+                    ephemeral=True,
+                )
+                return
+
+            if self.role.managed:
+                await interaction.response.send_message(
+                    "❌ Ce rôle est géré par Discord ou une "
+                    "intégration.",
+                    ephemeral=True,
+                )
+                return
+
+            if bot_member is None:
+                await interaction.response.send_message(
+                    "❌ Impossible de retrouver le rôle du bot.",
+                    ephemeral=True,
+                )
+                return
+
+            if not bot_member.guild_permissions.manage_roles:
+                await interaction.response.send_message(
+                    "❌ Le bot n'a pas la permission "
+                    "**Gérer les rôles**.",
+                    ephemeral=True,
+                )
+                return
+
+            if self.role >= bot_member.top_role:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="❌ Hiérarchie incorrecte",
+                        description=(
+                            f"Le rôle {self.role.mention} est "
+                            "au-dessus du rôle principal du bot.\n\n"
+                            "Déplace le rôle du bot plus haut "
+                            "dans les paramètres du serveur."
+                        ),
+                        color=discord.Color.red(),
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+        try:
+            saved = await self.cog.set_level_reward_role(
+                guild_id=guild.id,
+                role_id=self.role.id,
+                required_level=required_level,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                f"❌ {error}",
+                ephemeral=True,
+            )
+            return
+
+        if saved:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Rôle de niveau enregistré",
+                    description=(
+                        f"Le rôle {self.role.mention} sera donné "
+                        f"aux membres ayant atteint le niveau "
+                        f"**{required_level}**."
+                    ),
+                    color=discord.Color.green(),
+                ),
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="✅ Rôle de niveau supprimé",
+                    description=(
+                        f"{self.role.mention} n'est plus une "
+                        "récompense de niveau."
+                    ),
+                    color=discord.Color.green(),
+                ),
+                ephemeral=True,
+            )
+
+
+class ProgressionRuleRoleSelect(discord.ui.RoleSelect):
+    def __init__(
+        self,
+        *,
+        cog: ProgressionCog,
+        action: str,
+    ) -> None:
+        self.cog = cog
+        self.action = action
+
+        super().__init__(
+            placeholder="Choisis un rôle…",
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        if not self.values:
+            await interaction.response.send_message(
+                "❌ Aucun rôle sélectionné.",
+                ephemeral=True,
+            )
+            return
+
+        selected = self.values[0]
+
+        if isinstance(selected, discord.Role):
+            role = selected
+        else:
+            guild = interaction.guild
+
+            if guild is None:
+                await interaction.response.send_message(
+                    "❌ Serveur introuvable.",
+                    ephemeral=True,
+                )
+                return
+
+            role = guild.get_role(selected.id)
+
+            if role is None:
+                await interaction.response.send_message(
+                    "❌ Rôle introuvable.",
+                    ephemeral=True,
+                )
+                return
+
+        if self.action == "multiplier":
+            await interaction.response.send_modal(
+                XPMultiplierModal(
+                    cog=self.cog,
+                    role=role,
+                )
+            )
+            return
+
+        if self.action == "level-role":
+            await interaction.response.send_modal(
+                LevelRewardRoleModal(
+                    cog=self.cog,
+                    role=role,
+                )
+            )
+            return
+
+        await interaction.response.send_message(
+            "❌ Action administrative inconnue.",
+            ephemeral=True,
+        )
+
+
+class ProgressionRuleRoleView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        cog: ProgressionCog,
+        owner_id: int,
+        action: str,
+    ) -> None:
+        super().__init__(timeout=180)
+
+        self.owner_id = owner_id
+
+        self.add_item(
+            ProgressionRuleRoleSelect(
+                cog=cog,
+                action=action,
+            )
+        )
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            "❌ Seul l'administrateur ayant ouvert ce menu "
+            "peut l'utiliser.",
+            ephemeral=True,
+        )
+        return False
+
+
+
 
 
 class ProgressionAdminView(discord.ui.View):
@@ -783,6 +1193,100 @@ class ProgressionAdminView(discord.ui.View):
             ephemeral=True,
         )
 
+    @discord.ui.button(
+        label="Multiplicateur XP",
+        emoji="✨",
+        style=discord.ButtonStyle.primary,
+        row=3,
+    )
+    async def configure_xp_multiplier(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="✨ Multiplicateur d'XP",
+                description=(
+                    "Choisis le rôle auquel appliquer un "
+                    "multiplicateur d'XP.\n\n"
+                    "Ensuite, entre une valeur entre **1 et 10**.\n"
+                    "Entre `0` pour supprimer son multiplicateur."
+                ),
+                color=discord.Color.blurple(),
+            ),
+            view=ProgressionRuleRoleView(
+                cog=self.cog,
+                owner_id=interaction.user.id,
+                action="multiplier",
+            ),
+            ephemeral=True,
+        )
+    
+    
+    @discord.ui.button(
+        label="Rôle de niveau",
+        emoji="🎭",
+        style=discord.ButtonStyle.primary,
+        row=3,
+    )
+    async def configure_level_role(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="🎭 Rôle de niveau",
+                description=(
+                    "Choisis le rôle qui devra être donné "
+                    "automatiquement.\n\n"
+                    "Ensuite, indique le niveau nécessaire.\n"
+                    "Entre `0` pour supprimer cette récompense."
+                ),
+                color=discord.Color.blurple(),
+            ),
+            view=ProgressionRuleRoleView(
+                cog=self.cog,
+                owner_id=interaction.user.id,
+                action="level-role",
+            ),
+            ephemeral=True,
+        )
+    
+    
+    @discord.ui.button(
+        label="Voir les règles",
+        emoji="📋",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def show_progression_rules(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        guild = interaction.guild
+    
+        if guild is None:
+            await interaction.response.send_message(
+                "❌ Cette action doit être utilisée dans un serveur.",
+                ephemeral=True,
+            )
+            return
+    
+        embed = await self.cog.build_progression_rules_embed(
+            guild
+        )
+    
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+    
+
+    
+
 
 class ProgressionCog(commands.Cog):
     def __init__(
@@ -809,6 +1313,366 @@ class ProgressionCog(commands.Cog):
             )
 
         return database.require_pool()
+
+
+    async def get_member_xp_multiplier(
+        self,
+        member: discord.Member,
+    ) -> Decimal:
+        """
+        Retourne le plus grand multiplicateur d'XP parmi les rôles
+        du membre.
+    
+        Les multiplicateurs ne se cumulent pas :
+        x2 + x3 donnera x3, et non x6.
+        """
+        role_ids = [
+            role.id
+            for role in member.roles
+        ]
+    
+        if not role_ids:
+            return Decimal("1.00")
+    
+        pool = self.get_pool()
+    
+        value = await pool.fetchval(
+            """
+            SELECT MAX(multiplier)
+            FROM progression_role_multipliers
+            WHERE guild_id = $1
+              AND role_id = ANY($2::BIGINT[])
+            """,
+            member.guild.id,
+            role_ids,
+        )
+    
+        if value is None:
+            return Decimal("1.00")
+    
+        multiplier = Decimal(str(value))
+    
+        if multiplier < Decimal("1.00"):
+            return Decimal("1.00")
+    
+        return multiplier
+    
+    
+    async def set_role_xp_multiplier(
+        self,
+        *,
+        guild_id: int,
+        role_id: int,
+        multiplier: Decimal,
+    ) -> bool:
+        """
+        Enregistre un multiplicateur.
+    
+        Retourne True s'il a été enregistré.
+        Retourne False s'il a été supprimé avec la valeur 0.
+        """
+        pool = self.get_pool()
+    
+        if multiplier == Decimal("0"):
+            await pool.execute(
+                """
+                DELETE FROM progression_role_multipliers
+                WHERE guild_id = $1
+                  AND role_id = $2
+                """,
+                guild_id,
+                role_id,
+            )
+            return False
+    
+        normalized = multiplier.quantize(
+            Decimal("0.01")
+        )
+    
+        if not Decimal("1.00") <= normalized <= Decimal("10.00"):
+            raise ValueError(
+                "Le multiplicateur doit être compris entre 1 et 10."
+            )
+    
+        await pool.execute(
+            """
+            INSERT INTO progression_role_multipliers (
+                guild_id,
+                role_id,
+                multiplier,
+                updated_at
+            )
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (guild_id, role_id)
+            DO UPDATE SET
+                multiplier = EXCLUDED.multiplier,
+                updated_at = NOW()
+            """,
+            guild_id,
+            role_id,
+            normalized,
+        )
+    
+        return True
+    
+    
+    async def set_level_reward_role(
+        self,
+        *,
+        guild_id: int,
+        role_id: int,
+        required_level: int,
+    ) -> bool:
+        """
+        Configure un rôle débloqué à partir d'un niveau.
+    
+        Un niveau égal à 0 supprime la règle.
+        """
+        pool = self.get_pool()
+    
+        if required_level == 0:
+            await pool.execute(
+                """
+                DELETE FROM progression_level_roles
+                WHERE guild_id = $1
+                  AND role_id = $2
+                """,
+                guild_id,
+                role_id,
+            )
+            return False
+    
+        if not 1 <= required_level <= 10000:
+            raise ValueError(
+                "Le niveau doit être compris entre 1 et 10 000."
+            )
+    
+        await pool.execute(
+            """
+            INSERT INTO progression_level_roles (
+                guild_id,
+                role_id,
+                required_level,
+                updated_at
+            )
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (guild_id, role_id)
+            DO UPDATE SET
+                required_level = EXCLUDED.required_level,
+                updated_at = NOW()
+            """,
+            guild_id,
+            role_id,
+            required_level,
+        )
+    
+        return True
+    
+    
+    async def grant_earned_level_roles(
+        self,
+        member: discord.Member,
+        level: int,
+    ) -> list[discord.Role]:
+        """
+        Donne tous les rôles dont le niveau demandé est atteint.
+    
+        Cette méthode ne retire jamais les anciens rôles.
+        """
+        pool = self.get_pool()
+    
+        records = await pool.fetch(
+            """
+            SELECT
+                role_id,
+                required_level
+            FROM progression_level_roles
+            WHERE guild_id = $1
+              AND required_level <= $2
+            ORDER BY required_level ASC
+            """,
+            member.guild.id,
+            level,
+        )
+    
+        if not records:
+            return []
+    
+        bot_member = member.guild.me
+    
+        if bot_member is None:
+            return []
+    
+        if not bot_member.guild_permissions.manage_roles:
+            LOGGER.warning(
+                "Le bot n'a pas la permission Gérer les rôles "
+                "sur le serveur %s.",
+                member.guild.id,
+            )
+            return []
+    
+        roles_to_add: list[discord.Role] = []
+    
+        for record in records:
+            role = member.guild.get_role(
+                int(record["role_id"])
+            )
+    
+            if role is None:
+                continue
+    
+            if role.is_default():
+                continue
+    
+            if role.managed:
+                continue
+    
+            if role >= bot_member.top_role:
+                LOGGER.warning(
+                    "Le rôle de niveau %s est au-dessus du bot.",
+                    role.id,
+                )
+                continue
+    
+            if role in member.roles:
+                continue
+    
+            roles_to_add.append(role)
+    
+        if not roles_to_add:
+            return []
+    
+        try:
+            await member.add_roles(
+                *roles_to_add,
+                reason=(
+                    f"Récompenses automatiques de progression "
+                    f"— niveau {level}"
+                ),
+            )
+        except discord.HTTPException:
+            LOGGER.exception(
+                "Impossible de donner les rôles de niveau à %s.",
+                member.id,
+            )
+            return []
+    
+        return roles_to_add
+    
+    
+    async def build_progression_rules_embed(
+        self,
+        guild: discord.Guild,
+    ) -> discord.Embed:
+        pool = self.get_pool()
+    
+        multiplier_records = await pool.fetch(
+            """
+            SELECT
+                role_id,
+                multiplier
+            FROM progression_role_multipliers
+            WHERE guild_id = $1
+            ORDER BY multiplier DESC, role_id ASC
+            """,
+            guild.id,
+        )
+    
+        level_records = await pool.fetch(
+            """
+            SELECT
+                role_id,
+                required_level
+            FROM progression_level_roles
+            WHERE guild_id = $1
+            ORDER BY required_level ASC, role_id ASC
+            """,
+            guild.id,
+        )
+    
+        embed = discord.Embed(
+            title="⚙️ Règles de progression",
+            description=(
+                "Configuration des multiplicateurs d'XP "
+                "et des récompenses de niveau."
+            ),
+            color=discord.Color.blurple(),
+        )
+    
+        if multiplier_records:
+            multiplier_lines: list[str] = []
+    
+            for record in multiplier_records:
+                role_id = int(record["role_id"])
+                multiplier = Decimal(
+                    str(record["multiplier"])
+                )
+    
+                role = guild.get_role(role_id)
+    
+                role_text = (
+                    role.mention
+                    if role is not None
+                    else f"Rôle supprimé (`{role_id}`)"
+                )
+    
+                multiplier_lines.append(
+                    f"• {role_text} → **x{multiplier.normalize()} XP**"
+                )
+    
+            embed.add_field(
+                name="✨ Multiplicateurs d'XP",
+                value="\n".join(multiplier_lines)[:1024],
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="✨ Multiplicateurs d'XP",
+                value="Aucun multiplicateur configuré.",
+                inline=False,
+            )
+    
+        if level_records:
+            level_lines: list[str] = []
+    
+            for record in level_records:
+                role_id = int(record["role_id"])
+                required_level = int(
+                    record["required_level"]
+                )
+    
+                role = guild.get_role(role_id)
+    
+                role_text = (
+                    role.mention
+                    if role is not None
+                    else f"Rôle supprimé (`{role_id}`)"
+                )
+    
+                level_lines.append(
+                    f"• Niveau **{required_level}** → {role_text}"
+                )
+    
+            embed.add_field(
+                name="🎭 Rôles de niveau",
+                value="\n".join(level_lines)[:1024],
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="🎭 Rôles de niveau",
+                value="Aucun rôle de niveau configuré.",
+                inline=False,
+            )
+    
+        embed.set_footer(
+            text=(
+                "Entre 0 dans un formulaire pour supprimer une règle."
+            )
+        )
+    
+        return embed
+
 
     async def initialize_database(self) -> None:
         pool = self.get_pool()
@@ -873,6 +1737,67 @@ class ProgressionCog(commands.Cog):
             )
             """
         )
+
+
+
+        await pool.execute(
+            """
+            CREATE TABLE IF NOT EXISTS progression_role_multipliers (
+                guild_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                multiplier NUMERIC(6, 2) NOT NULL
+                    CHECK (
+                        multiplier >= 1.00
+                        AND multiplier <= 10.00
+                    ),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (guild_id, role_id)
+            )
+            """
+        )
+        
+        await pool.execute(
+            """
+            CREATE TABLE IF NOT EXISTS progression_level_roles (
+                guild_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                required_level INTEGER NOT NULL
+                    CHECK (
+                        required_level >= 1
+                        AND required_level <= 10000
+                    ),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (guild_id, role_id)
+            )
+            """
+        )
+        
+        await pool.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                progression_level_roles_level_idx
+            ON progression_level_roles (
+                guild_id,
+                required_level
+            )
+            """
+        )
+        
+        await pool.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                progression_role_multipliers_guild_idx
+            ON progression_role_multipliers (
+                guild_id
+            )
+            """
+        )
+
+
+
+        
 
         await pool.execute(
             """
@@ -1124,6 +2049,7 @@ class ProgressionCog(commands.Cog):
         guild_id: int,
         user_id: int,
         settings: dict[str, Any],
+        xp_multiplier: Decimal = Decimal("1.00"),
     ) -> dict[str, int] | None:
         pool = self.get_pool()
         current_time = datetime.now(timezone.utc)
@@ -1194,10 +2120,21 @@ class ProgressionCog(commands.Cog):
                     ]:
                         return None
 
-                xp_gain = random.randint(
-                    settings["xp_min"],
-                    settings["xp_max"],
+                base_xp_gain = random.randint(
+                    int(settings["minimum_xp"]),
+                    int(settings["maximum_xp"]),
                 )
+                
+                xp_gain = int(
+                    (
+                        Decimal(base_xp_gain)
+                        * xp_multiplier
+                    ).quantize(
+                        Decimal("1"),
+                        rounding=ROUND_HALF_UP,
+                    )
+                )
+
                 coins_gain = random.randint(
                     settings["coins_min"],
                     settings["coins_max"],
@@ -1273,6 +2210,8 @@ class ProgressionCog(commands.Cog):
                 return {
                     "xp_gain": xp_gain,
                     "coins_gain": coins_gain,
+                    "base_xp_gain": base_xp_gain,
+                    "xp_multiplier": xp_multiplier,
                     "total_xp": total_xp,
                     "wallet": int(
                         updated["wallet"]
@@ -1684,14 +2623,32 @@ class ProgressionCog(commands.Cog):
             if not settings["enabled"]:
                 return
 
-            result = await self.award_message(
-                guild_id=guild.id,
+            if not isinstance(message.author, discord.Member):
+                return
+            
+            xp_multiplier = await self.get_member_xp_multiplier(
+                message.author
+            )
+            
+            rresult = await self.award_message(
+                guild_id=message.guild.id,
                 user_id=message.author.id,
                 settings=settings,
+                xp_multiplier=xp_multiplier,
             )
 
             if result is None:
                 return
+
+            granted_roles = await self.grant_earned_level_roles(
+                message.author,
+                int(result["new_level"]),
+            )
+
+            multiplier = Decimal(
+                str(result["xp_multiplier"])
+            )
+
 
             if (
                 result["new_level"]
@@ -1702,6 +2659,25 @@ class ProgressionCog(commands.Cog):
             if not settings["level_notifications"]:
                 return
 
+            roles_text = ""
+
+            if granted_roles:
+                roles_text = (
+                    "\n\n🎭 **Rôle(s) débloqué(s) :** "
+                    + ", ".join(
+                        role.mention
+                        for role in granted_roles
+                    )
+                )
+
+            multiplier_text = ""
+
+            if multiplier > Decimal("1.00"):
+                multiplier_text = (
+                    f"\n✨ Multiplicateur de rôle : "
+                    f"**x{multiplier.normalize()}**"
+                )
+
             embed = success_embed(
                 "Niveau supérieur !",
                 (
@@ -1710,6 +2686,8 @@ class ProgressionCog(commands.Cog):
                     f"✨ XP gagné : **{result['xp_gain']}**\n"
                     f"💰 Argent gagné : "
                     f"**{result['coins_gain']} pièces**"
+                    f"{roles_text}"
+                    f"(multiplier_text)"
                 ),
             )
 
