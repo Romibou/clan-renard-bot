@@ -2121,8 +2121,8 @@ class ProgressionCog(commands.Cog):
                         return None
 
                 base_xp_gain = random.randint(
-                    int(settings["minimum_xp"]),
-                    int(settings["maximum_xp"]),
+                    int(settings["xp_min"]),
+                    int(settings["xp_max"]),
                 )
                 
                 xp_gain = int(
