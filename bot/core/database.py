@@ -50,6 +50,15 @@ class Database:
 
         return self.pool
 
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[asyncpg.Connection]:
+        pool = self.require_pool()
+    
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                yield connection
+
     async def apply_schema(self) -> None:
         """
         Applique le schéma de manière idempotente.
