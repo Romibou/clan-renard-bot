@@ -1906,10 +1906,91 @@ class PermanentShop(commands.Cog):
                         "completed",
                     )
                 ):
+                    # Pour un rôle déjà acheté mais perdu, on le restaure
+                    # gratuitement au lieu de bloquer l'utilisateur.
+                    if item_type == "role" and role is not None:
+                        try:
+                            fresh_member = await guild.fetch_member(
+                                member.id
+                            )
+                        except (
+                            discord.NotFound,
+                            discord.Forbidden,
+                            discord.HTTPException,
+                        ):
+                            fresh_member = member
+                
+                        if role in fresh_member.roles:
+                            return warning_embed(
+                                "Rôle déjà possédé",
+                                (
+                                    f"Tu possèdes déjà le rôle "
+                                    f"{role.mention}."
+                                ),
+                            )
+                
+                        try:
+                            await fresh_member.add_roles(
+                                role,
+                                reason=(
+                                    "Restauration d'un rôle acheté "
+                                    "dans la boutique permanente"
+                                ),
+                            )
+                        except discord.Forbidden:
+                            return error_embed(
+                                "Restauration impossible",
+                                (
+                                    "Le bot n'a pas la permission "
+                                    "d'attribuer ce rôle.\n"
+                                    "Vérifie la hiérarchie des rôles."
+                                ),
+                            )
+                        except discord.HTTPException:
+                            LOGGER.exception(
+                                "Impossible de restaurer le rôle %s à %s",
+                                role.id,
+                                fresh_member.id,
+                            )
+                
+                            return error_embed(
+                                "Restauration impossible",
+                                (
+                                    "Discord a refusé l'attribution du rôle.\n"
+                                    "Aucune pièce supplémentaire n'a été retirée."
+                                ),
+                            )
+                
+                        # Une ancienne transaction restée en pending est finalisée.
+                        await connection.execute(
+                            """
+                            UPDATE permanent_shop_purchases
+                            SET
+                                status = 'completed',
+                                completed_at = COALESCE(
+                                    completed_at,
+                                    NOW()
+                                )
+                            WHERE id = $1
+                            """,
+                            int(existing_purchase["id"]),
+                        )
+                
+                        return success_embed(
+                            "Rôle restauré",
+                            (
+                                f"Le rôle {role.mention} t'a été rendu.\n\n"
+                                "💰 **Aucune pièce supplémentaire "
+                                "n'a été retirée.**"
+                            ),
+                        )
+                
+                    # Les cosmétiques ne nécessitent aucune restauration Discord.
                     return warning_embed(
                         "Déjà acheté",
                         "Tu as déjà acheté cet article.",
                     )
+
 
                 progression = await connection.fetchrow(
                     """
