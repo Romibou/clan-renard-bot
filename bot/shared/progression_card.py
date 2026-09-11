@@ -546,28 +546,74 @@ def render_progression_card(
     rank_text = (
         f"RANG #{rank}"
         if rank is not None
-        else "NON CLASSE"
+        else "NON CLASSÉ"
     )
+
+    rank_font = get_font(17, bold=True)
 
     rank_box = draw.textbbox(
         (0, 0),
         rank_text,
-        font=get_font(17, bold=True),
+        font=rank_font,
     )
+
     rank_width = rank_box[2] - rank_box[0]
 
+    rank_padding_x = 24
+    rank_left = 1150 - rank_width - (rank_padding_x * 2)
+    rank_top = 58
+    rank_right = 1150
+    rank_bottom = 102
+
+    # Ombre derrière le badge
     draw.rounded_rectangle(
         (
-            1018 - rank_width,
-            61,
-            1150,
-            101,
+            rank_left + 4,
+            rank_top + 5,
+            rank_right + 4,
+            rank_bottom + 5,
         ),
-        radius=20,
-        fill=(226, 104, 161, 35),
-        outline=(226, 104, 161, 100),
-        width=1,
+        radius=22,
+        fill=(0, 0, 0, 110),
     )
+
+    # Badge sombre pour contraster avec la lumière rose
+    draw.rounded_rectangle(
+        (
+            rank_left,
+            rank_top,
+            rank_right,
+            rank_bottom,
+        ),
+        radius=22,
+        fill=(39, 34, 52, 245),
+        outline=(242, 159, 198, 255),
+        width=2,
+    )
+
+    # Petit accent rose à gauche du badge
+    draw.rounded_rectangle(
+        (
+            rank_left + 7,
+            rank_top + 8,
+            rank_left + 12,
+            rank_bottom - 8,
+        ),
+        radius=3,
+        fill=(226, 104, 161, 255),
+    )
+
+    draw.text(
+        (
+            (rank_left + rank_right) / 2 + 4,
+            (rank_top + rank_bottom) / 2,
+        ),
+        rank_text,
+        anchor="mm",
+        font=rank_font,
+        fill=(255, 245, 250, 255),
+    )
+
 
     draw.text(
         (
