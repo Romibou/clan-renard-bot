@@ -2460,7 +2460,7 @@ class ProgressionCog(commands.Cog):
             )
             return
 
-       view = ProgressionView(
+        view = ProgressionView(
             cog=self,
             owner_id=interaction.user.id,
             guild_id=guild.id,
