@@ -2209,7 +2209,6 @@ class ProgressionCog(commands.Cog):
             current_xp=current_xp,
             required_xp=required_xp,
             wallet=stats["wallet"],
-            rewarded_messages=stats["rewarded_messages"],
             lifetime_coins=stats["lifetime_coins"],
         )
 
@@ -2461,25 +2460,18 @@ class ProgressionCog(commands.Cog):
             )
             return
 
-        embed = discord.Embed(
-            color=COLOR
-        )
-        embed.set_image(
-            url=f"attachment://{progression_file.filename}"
-        )
-
-        view = ProgressionView(
+       view = ProgressionView(
             cog=self,
             owner_id=interaction.user.id,
             guild_id=guild.id,
         )
-
+        
         await interaction.followup.send(
-            embed=embed,
             file=progression_file,
             view=view,
             ephemeral=True,
         )
+
 
     @app_commands.command(
         name="progression-admin",
