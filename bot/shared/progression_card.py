@@ -633,26 +633,23 @@ def render_progression_card(
     )
 
     draw_stat_box(
-        draw=draw,
+        image,
         x=342,
-        y=278,
+        y=279,
         width=390,
-        height=105,
         title="ARGENT",
         value=f"{format_number(wallet)} pièces",
-        accent=(255, 199, 79),
     )
     
     draw_stat_box(
-        draw=draw,
+        image,
         x=758,
-        y=278,
+        y=279,
         width=390,
-        height=105,
         title="ARGENT GAGNÉ AU TOTAL",
         value=f"{format_number(lifetime_coins)} pièces",
-        accent=(123, 221, 160),
     )
+
 
 
     draw.text(
