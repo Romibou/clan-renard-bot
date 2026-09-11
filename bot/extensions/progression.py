@@ -23,7 +23,6 @@ SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
 
-VOICE_XP_PER_MINUTE = 5
 VOICE_REWARD_INTERVAL_SECONDS = 60
 
 
@@ -384,7 +383,7 @@ class ProgressionConfigModal(
                     f"Cooldown : **{cooldown} secondes**\n"
                     f"XP : **{xp_min} à {xp_max}**\n"
                     f"Argent : **{coins_min} à {coins_max} pièces**\n"
-                    f"XP vocal : **{VOICE_XP_PER_MINUTE} XP par minute**"
+                    "L'XP vocal se configure avec le bouton **XP vocal**."
                 ),
             ),
             ephemeral=True,
@@ -960,6 +959,91 @@ class ProgressionRuleRoleView(discord.ui.View):
         )
         return False
 
+class VoiceXPConfigModal(discord.ui.Modal):
+    def __init__(
+        self,
+        *,
+        cog: ProgressionCog,
+        guild_id: int,
+        current_value: int,
+    ) -> None:
+        super().__init__(
+            title="Configuration de l'XP vocal",
+            timeout=300,
+        )
+
+        self.cog = cog
+        self.guild_id = guild_id
+
+        self.voice_xp_input = discord.ui.TextInput(
+            label="XP gagnée chaque minute en vocal",
+            placeholder="Exemple : 5",
+            default=str(current_value),
+            required=True,
+            min_length=1,
+            max_length=7,
+        )
+
+        self.add_item(self.voice_xp_input)
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
+            voice_xp = int(
+                str(self.voice_xp_input.value).strip()
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Valeur invalide",
+                    "Entre un nombre entier, par exemple `5`.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if not 0 <= voice_xp <= 1_000_000:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Valeur invalide",
+                    (
+                        "L'XP vocal doit être comprise entre "
+                        "**0 et 1 000 000**."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await self.cog.update_voice_xp(
+            guild_id=self.guild_id,
+            voice_xp_per_minute=voice_xp,
+        )
+
+        if voice_xp == 0:
+            description = (
+                "Le gain automatique d'XP en vocal est maintenant "
+                "**désactivé**."
+            )
+        else:
+            description = (
+                "Les membres éligibles gagneront désormais "
+                f"**{format_number(voice_xp)} XP par minute** "
+                "passée en vocal."
+            )
+
+        await interaction.response.send_message(
+            embed=success_embed(
+                "XP vocal configurée",
+                description,
+            ),
+            ephemeral=True,
+        )
+
+
+
 
 class ProgressionAdminView(discord.ui.View):
     def __init__(
@@ -1239,6 +1323,33 @@ class ProgressionAdminView(discord.ui.View):
             ephemeral=True,
         )
 
+    @discord.ui.button(
+        label="XP vocal",
+        emoji="🎙️",
+        style=discord.ButtonStyle.secondary,
+        row=4,
+    )
+    async def configure_voice_xp(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        settings = await self.cog.get_settings(
+            self.guild_id,
+            use_cache=False,
+        )
+    
+        modal = VoiceXPConfigModal(
+            cog=self.cog,
+            guild_id=self.guild_id,
+            current_value=int(
+                settings["voice_xp_per_minute"]
+            ),
+        )
+    
+        await interaction.response.send_modal(modal)
+
+
 
 class ProgressionCog(commands.Cog):
     def __init__(
@@ -1295,10 +1406,29 @@ class ProgressionCog(commands.Cog):
                     CHECK (coins_min >= 0),
                 coins_max INTEGER NOT NULL DEFAULT 4
                     CHECK (coins_max >= coins_min),
+                voice_xp_per_minute INTEGER NOT NULL DEFAULT 5
+                    CHECK (
+                        voice_xp_per_minute >= 0
+                        AND voice_xp_per_minute <= 1000000
+                    ),
                 level_notifications BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+            """
+        )
+
+        # Migration nécessaire si progression_settings existait
+        # déjà avant l'ajout de l'XP vocal.
+        await pool.execute(
+            """
+            ALTER TABLE progression_settings
+            ADD COLUMN IF NOT EXISTS voice_xp_per_minute INTEGER
+                NOT NULL DEFAULT 5
+                CHECK (
+                    voice_xp_per_minute >= 0
+                    AND voice_xp_per_minute <= 1000000
+                )
             """
         )
 
@@ -1389,8 +1519,7 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS
-                progression_members_xp_idx
+            CREATE INDEX IF NOT EXISTS progression_members_xp_idx
             ON progression_members (
                 guild_id,
                 total_xp DESC
@@ -1400,8 +1529,7 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS
-                progression_members_wallet_idx
+            CREATE INDEX IF NOT EXISTS progression_members_wallet_idx
             ON progression_members (
                 guild_id,
                 wallet DESC
@@ -1411,8 +1539,7 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS
-                progression_transactions_user_idx
+            CREATE INDEX IF NOT EXISTS progression_transactions_user_idx
             ON progression_transactions (
                 guild_id,
                 user_id,
@@ -1423,8 +1550,7 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS
-                progression_level_roles_level_idx
+            CREATE INDEX IF NOT EXISTS progression_level_roles_level_idx
             ON progression_level_roles (
                 guild_id,
                 required_level
@@ -1434,8 +1560,7 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS
-                progression_role_multipliers_guild_idx
+            CREATE INDEX IF NOT EXISTS progression_role_multipliers_guild_idx
             ON progression_role_multipliers (
                 guild_id
             )
@@ -1492,6 +1617,7 @@ class ProgressionCog(commands.Cog):
                 xp_max,
                 coins_min,
                 coins_max,
+                voice_xp_per_minute,
                 level_notifications
             FROM progression_settings
             WHERE guild_id = $1
@@ -1506,11 +1632,16 @@ class ProgressionCog(commands.Cog):
 
         settings = {
             "enabled": bool(record["enabled"]),
-            "cooldown_seconds": int(record["cooldown_seconds"]),
+            "cooldown_seconds": int(
+                record["cooldown_seconds"]
+            ),
             "xp_min": int(record["xp_min"]),
             "xp_max": int(record["xp_max"]),
             "coins_min": int(record["coins_min"]),
             "coins_max": int(record["coins_max"]),
+            "voice_xp_per_minute": int(
+                record["voice_xp_per_minute"]
+            ),
             "level_notifications": bool(
                 record["level_notifications"]
             ),
@@ -1556,6 +1687,45 @@ class ProgressionCog(commands.Cog):
             coins_min,
             coins_max,
         )
+
+        self._settings_cache.pop(
+            guild_id,
+            None,
+        )
+
+    async def update_voice_xp(
+        self,
+        *,
+        guild_id: int,
+        voice_xp_per_minute: int,
+    ) -> None:
+        if not 0 <= voice_xp_per_minute <= 1_000_000:
+            raise ValueError(
+                "L'XP vocal doit être comprise entre 0 et 1 000 000."
+            )
+
+        await self.ensure_settings(guild_id)
+
+        pool = self.get_pool()
+
+        await pool.execute(
+            """
+            UPDATE progression_settings
+            SET
+                voice_xp_per_minute = $2,
+                updated_at = NOW()
+            WHERE guild_id = $1
+            """,
+            guild_id,
+            voice_xp_per_minute,
+        )
+
+        self._settings_cache.pop(
+            guild_id,
+            None,
+        )
+
+
 
         self._settings_cache.pop(guild_id, None)
 
@@ -1885,6 +2055,16 @@ class ProgressionCog(commands.Cog):
     ) -> discord.Embed:
         pool = self.get_pool()
 
+        settings = await self.get_settings(
+            guild.id,
+            use_cache=False,
+        )
+
+        voice_xp = int(
+            settings["voice_xp_per_minute"]
+        )
+
+
         multiplier_records = await pool.fetch(
             """
             SELECT
@@ -1914,7 +2094,7 @@ class ProgressionCog(commands.Cog):
             (
                 "Configuration des multiplicateurs d'XP "
                 "et des récompenses de niveau.\n\n"
-                f"🎙️ Le vocal rapporte **{VOICE_XP_PER_MINUTE} XP "
+                f"🎙️ Le vocal rapporte **{voice_xp} XP "
                 "par minute** lorsqu'au moins deux membres actifs "
                 "sont présents."
             ),
@@ -2167,6 +2347,7 @@ class ProgressionCog(commands.Cog):
         *,
         member: discord.Member,
         xp_multiplier: Decimal,
+        voice_xp_per_minute: int,
     ) -> dict[str, Any] | None:
         pool = self.get_pool()
         current_time = datetime.now(timezone.utc)
@@ -2260,7 +2441,7 @@ class ProgressionCog(commands.Cog):
 
                 xp_gain = int(
                     (
-                        Decimal(VOICE_XP_PER_MINUTE)
+                        Decimal(voice_xp_per_minute)
                         * xp_multiplier
                     ).quantize(
                         Decimal("1"),
@@ -2422,6 +2603,16 @@ class ProgressionCog(commands.Cog):
                 if not settings["enabled"]:
                     continue
 
+
+                voice_xp_per_minute = int(
+                    settings["voice_xp_per_minute"]
+                )
+
+                if voice_xp_per_minute <= 0:
+                    continue
+
+                
+                
                 channels: list[
                     discord.VoiceChannel | discord.StageChannel
                 ] = [
@@ -2474,7 +2665,9 @@ class ProgressionCog(commands.Cog):
                             result = await self.award_voice_minute(
                                 member=member,
                                 xp_multiplier=multiplier,
+                                voice_xp_per_minute=voice_xp_per_minute,
                             )
+
 
                             if result is None:
                                 continue
@@ -3114,7 +3307,8 @@ class ProgressionCog(commands.Cog):
             (
                 "Configure le gain automatique d'XP et d'argent, "
                 "ou sélectionne un membre pour modifier sa progression.\n\n"
-                f"🎙️ Le vocal rapporte **{VOICE_XP_PER_MINUTE} XP "
+                f"🎙️ Le vocal rapporte actuellement "
+                f"**{settings['voice_xp_per_minute']} XP "
                 "par minute**, sans argent."
             ),
         )
@@ -3148,7 +3342,7 @@ class ProgressionCog(commands.Cog):
         embed.add_field(
             name="🎙️ XP vocal",
             value=(
-                f"**{VOICE_XP_PER_MINUTE} XP/minute**\n"
+                f"**{settings['voice_xp_per_minute']} XP/minute**\n"
                 "Minimum 2 membres actifs."
             ),
             inline=False,
