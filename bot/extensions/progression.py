@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import random
 import time
@@ -10,7 +11,7 @@ from typing import Any
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from bot.shared.progression_card import render_progression_card
 
@@ -21,6 +22,9 @@ COLOR = discord.Color.from_rgb(226, 104, 161)
 SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
+
+VOICE_XP_PER_MINUTE = 5
+VOICE_REWARD_INTERVAL_SECONDS = 60
 
 
 def base_embed(
@@ -73,8 +77,8 @@ def format_number(value: int) -> str:
 
 def xp_for_level(level: int) -> int:
     """
-    XP total nécessaire pour atteindre un niveau,
-    avec la courbe de DraftBot.
+    Quantité totale d'XP nécessaire pour atteindre un niveau,
+    avec la courbe utilisée pour la progression.
     """
     level = max(0, int(level))
 
@@ -89,6 +93,9 @@ def xp_for_level(level: int) -> int:
 
 
 def level_from_xp(total_xp: int) -> int:
+    """
+    Retrouve le niveau correspondant à une quantité totale d'XP.
+    """
     total_xp = max(0, int(total_xp))
 
     low = 0
@@ -149,13 +156,16 @@ class ProgressionView(discord.ui.View):
         label="Classement XP",
         emoji="🏆",
         style=discord.ButtonStyle.primary,
+        row=0,
     )
     async def xp_leaderboard(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        if interaction.guild is None:
+        guild = interaction.guild
+
+        if guild is None:
             await interaction.response.send_message(
                 embed=error_embed(
                     "Serveur requis",
@@ -166,7 +176,7 @@ class ProgressionView(discord.ui.View):
             return
 
         embed = await self.cog.build_leaderboard_embed(
-            guild=interaction.guild,
+            guild=guild,
             ranking_type="xp",
         )
 
@@ -179,13 +189,16 @@ class ProgressionView(discord.ui.View):
         label="Classement argent",
         emoji="💰",
         style=discord.ButtonStyle.secondary,
+        row=0,
     )
     async def money_leaderboard(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        if interaction.guild is None:
+        guild = interaction.guild
+
+        if guild is None:
             await interaction.response.send_message(
                 embed=error_embed(
                     "Serveur requis",
@@ -196,7 +209,7 @@ class ProgressionView(discord.ui.View):
             return
 
         embed = await self.cog.build_leaderboard_embed(
-            guild=interaction.guild,
+            guild=guild,
             ranking_type="money",
         )
 
@@ -242,7 +255,45 @@ class AdminMemberSelect(discord.ui.UserSelect):
         )
 
 
-class ProgressionConfigModal(discord.ui.Modal):
+class ProgressionConfigModal(
+    discord.ui.Modal,
+    title="Configuration de la progression",
+):
+    cooldown = discord.ui.TextInput(
+        label="Délai entre deux gains, en secondes",
+        placeholder="60",
+        min_length=1,
+        max_length=4,
+    )
+
+    xp_min = discord.ui.TextInput(
+        label="XP minimum par message",
+        placeholder="15",
+        min_length=1,
+        max_length=6,
+    )
+
+    xp_max = discord.ui.TextInput(
+        label="XP maximum par message",
+        placeholder="25",
+        min_length=1,
+        max_length=6,
+    )
+
+    coins_min = discord.ui.TextInput(
+        label="Pièces minimum par message",
+        placeholder="2",
+        min_length=1,
+        max_length=6,
+    )
+
+    coins_max = discord.ui.TextInput(
+        label="Pièces maximum par message",
+        placeholder="4",
+        min_length=1,
+        max_length=6,
+    )
+
     def __init__(
         self,
         *,
@@ -250,50 +301,16 @@ class ProgressionConfigModal(discord.ui.Modal):
         guild_id: int,
         settings: dict[str, Any],
     ) -> None:
-        super().__init__(
-            title="Configuration de la progression",
-            timeout=300,
-        )
+        super().__init__(timeout=300)
 
         self.cog = cog
         self.guild_id = guild_id
 
-        self.cooldown = discord.ui.TextInput(
-            label="Délai entre deux gains, en secondes",
-            default=str(settings["cooldown_seconds"]),
-            min_length=1,
-            max_length=4,
-        )
-        self.xp_min = discord.ui.TextInput(
-            label="XP minimum par message",
-            default=str(settings["xp_min"]),
-            min_length=1,
-            max_length=6,
-        )
-        self.xp_max = discord.ui.TextInput(
-            label="XP maximum par message",
-            default=str(settings["xp_max"]),
-            min_length=1,
-            max_length=6,
-        )
-        self.coins_min = discord.ui.TextInput(
-            label="Pièces minimum par message",
-            default=str(settings["coins_min"]),
-            min_length=1,
-            max_length=6,
-        )
-        self.coins_max = discord.ui.TextInput(
-            label="Pièces maximum par message",
-            default=str(settings["coins_max"]),
-            min_length=1,
-            max_length=6,
-        )
-
-        self.add_item(self.cooldown)
-        self.add_item(self.xp_min)
-        self.add_item(self.xp_max)
-        self.add_item(self.coins_min)
-        self.add_item(self.coins_max)
+        self.cooldown.default = str(settings["cooldown_seconds"])
+        self.xp_min.default = str(settings["xp_min"])
+        self.xp_max.default = str(settings["xp_max"])
+        self.coins_min.default = str(settings["coins_min"])
+        self.coins_max.default = str(settings["coins_max"])
 
     async def on_submit(
         self,
@@ -330,8 +347,8 @@ class ProgressionConfigModal(discord.ui.Modal):
                 embed=error_embed(
                     "XP invalide",
                     (
-                        "Les valeurs d'XP doivent être positives et "
-                        "le minimum ne doit pas dépasser le maximum."
+                        "Les valeurs d'XP doivent être positives et le "
+                        "minimum ne doit pas dépasser le maximum."
                     ),
                 ),
                 ephemeral=True,
@@ -343,8 +360,8 @@ class ProgressionConfigModal(discord.ui.Modal):
                 embed=error_embed(
                     "Argent invalide",
                     (
-                        "Les valeurs d'argent doivent être positives et "
-                        "le minimum ne doit pas dépasser le maximum."
+                        "Les valeurs d'argent doivent être positives et le "
+                        "minimum ne doit pas dépasser le maximum."
                     ),
                 ),
                 ephemeral=True,
@@ -366,14 +383,42 @@ class ProgressionConfigModal(discord.ui.Modal):
                 (
                     f"Cooldown : **{cooldown} secondes**\n"
                     f"XP : **{xp_min} à {xp_max}**\n"
-                    f"Argent : **{coins_min} à {coins_max} pièces**"
+                    f"Argent : **{coins_min} à {coins_max} pièces**\n"
+                    f"XP vocal : **{VOICE_XP_PER_MINUTE} XP par minute**"
                 ),
             ),
             ephemeral=True,
         )
 
 
-class AdjustMemberModal(discord.ui.Modal):
+class AdjustMemberModal(
+    discord.ui.Modal,
+    title="Modifier un membre",
+):
+    xp_delta = discord.ui.TextInput(
+        label="XP à ajouter ou retirer",
+        placeholder="Exemples : 500 ou -200",
+        default="0",
+        min_length=1,
+        max_length=12,
+    )
+
+    coins_delta = discord.ui.TextInput(
+        label="Pièces à ajouter ou retirer",
+        placeholder="Exemples : 100 ou -50",
+        default="0",
+        min_length=1,
+        max_length=12,
+    )
+
+    reason = discord.ui.TextInput(
+        label="Raison",
+        placeholder="Correction administrative",
+        default="Correction administrative",
+        max_length=200,
+        required=False,
+    )
+
     def __init__(
         self,
         *,
@@ -381,37 +426,11 @@ class AdjustMemberModal(discord.ui.Modal):
         guild_id: int,
         user_id: int,
     ) -> None:
-        super().__init__(
-            title="Modifier un membre",
-            timeout=300,
-        )
+        super().__init__(timeout=300)
 
         self.cog = cog
         self.guild_id = guild_id
         self.user_id = user_id
-
-        self.xp_delta = discord.ui.TextInput(
-            label="XP à ajouter ou retirer",
-            placeholder="Exemples : 500 ou -200",
-            default="0",
-            max_length=12,
-        )
-        self.coins_delta = discord.ui.TextInput(
-            label="Pièces à ajouter ou retirer",
-            placeholder="Exemples : 100 ou -50",
-            default="0",
-            max_length=12,
-        )
-        self.reason = discord.ui.TextInput(
-            label="Raison",
-            default="Correction administrative",
-            max_length=200,
-            required=False,
-        )
-
-        self.add_item(self.xp_delta)
-        self.add_item(self.coins_delta)
-        self.add_item(self.reason)
 
     async def on_submit(
         self,
@@ -462,16 +481,14 @@ class AdjustMemberModal(discord.ui.Modal):
             ),
         )
 
-        if interaction.guild is not None:
-            member = interaction.guild.get_member(
-                self.user_id
-            )
+        guild = interaction.guild
+
+        if guild is not None:
+            member = guild.get_member(self.user_id)
 
             if member is None:
                 try:
-                    member = await interaction.guild.fetch_member(
-                        self.user_id
-                    )
+                    member = await guild.fetch_member(self.user_id)
                 except (
                     discord.NotFound,
                     discord.Forbidden,
@@ -539,9 +556,7 @@ class ConfirmProgressionResetView(discord.ui.View):
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
 
-        await interaction.response.edit_message(
-            view=self
-        )
+        await interaction.response.edit_message(view=self)
 
     @discord.ui.button(
         label="Confirmer la réinitialisation",
@@ -605,6 +620,8 @@ class XPMultiplierModal(discord.ui.Modal):
         self.multiplier_input = discord.ui.TextInput(
             label="Multiplicateur",
             placeholder="Exemple : 1.5, 2 ou 0 pour supprimer",
+            required=True,
+            min_length=1,
             max_length=5,
         )
 
@@ -614,7 +631,9 @@ class XPMultiplierModal(discord.ui.Modal):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        if interaction.guild is None:
+        guild = interaction.guild
+
+        if guild is None:
             await interaction.response.send_message(
                 "❌ Cette action doit être utilisée dans un serveur.",
                 ephemeral=True,
@@ -637,9 +656,7 @@ class XPMultiplierModal(discord.ui.Modal):
             return
 
         if multiplier != Decimal("0") and not (
-            Decimal("1.00")
-            <= multiplier
-            <= Decimal("10.00")
+            Decimal("1.00") <= multiplier <= Decimal("10.00")
         ):
             await interaction.response.send_message(
                 (
@@ -652,7 +669,7 @@ class XPMultiplierModal(discord.ui.Modal):
 
         try:
             saved = await self.cog.set_role_xp_multiplier(
-                guild_id=interaction.guild.id,
+                guild_id=guild.id,
                 role_id=self.role.id,
                 multiplier=multiplier,
             )
@@ -664,32 +681,32 @@ class XPMultiplierModal(discord.ui.Modal):
             return
 
         if saved:
-            normalized = multiplier.quantize(
-                Decimal("0.01")
-            )
+            normalized = multiplier.quantize(Decimal("0.01"))
 
-            description = (
-                f"Les membres possédant {self.role.mention} gagneront "
-                f"maintenant **x{normalized.normalize()} XP**.\n\n"
-                "Si un membre possède plusieurs rôles, seul le "
-                "multiplicateur le plus élevé sera utilisé."
+            await interaction.response.send_message(
+                embed=success_embed(
+                    "Multiplicateur enregistré",
+                    (
+                        f"Les membres possédant {self.role.mention} "
+                        f"gagneront maintenant **x{normalized.normalize()} XP**.\n\n"
+                        "Ce multiplicateur s'applique aux messages et au vocal.\n"
+                        "Si un membre possède plusieurs rôles, seul le "
+                        "multiplicateur le plus élevé sera utilisé."
+                    ),
+                ),
+                ephemeral=True,
             )
-            title = "✅ Multiplicateur enregistré"
         else:
-            description = (
-                f"{self.role.mention} ne possède plus "
-                "de multiplicateur d'XP."
+            await interaction.response.send_message(
+                embed=success_embed(
+                    "Multiplicateur supprimé",
+                    (
+                        f"{self.role.mention} ne possède plus "
+                        "de multiplicateur d'XP."
+                    ),
+                ),
+                ephemeral=True,
             )
-            title = "✅ Multiplicateur supprimé"
-
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title=title,
-                description=description,
-                color=SUCCESS_COLOR,
-            ),
-            ephemeral=True,
-        )
 
 
 class LevelRewardRoleModal(discord.ui.Modal):
@@ -710,6 +727,8 @@ class LevelRewardRoleModal(discord.ui.Modal):
         self.level_input = discord.ui.TextInput(
             label="Niveau demandé",
             placeholder="Exemple : 10 ou 0 pour supprimer",
+            required=True,
+            min_length=1,
             max_length=5,
         )
 
@@ -786,39 +805,49 @@ class LevelRewardRoleModal(discord.ui.Modal):
                         "Hiérarchie incorrecte",
                         (
                             f"Le rôle {self.role.mention} est au-dessus "
-                            "du rôle principal du bot."
+                            "du rôle principal du bot.\n\n"
+                            "Déplace le rôle du bot plus haut."
                         ),
                     ),
                     ephemeral=True,
                 )
                 return
 
-        saved = await self.cog.set_level_reward_role(
-            guild_id=guild.id,
-            role_id=self.role.id,
-            required_level=required_level,
-        )
+        try:
+            saved = await self.cog.set_level_reward_role(
+                guild_id=guild.id,
+                role_id=self.role.id,
+                required_level=required_level,
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                f"❌ {error}",
+                ephemeral=True,
+            )
+            return
 
         if saved:
-            description = (
-                f"Le rôle {self.role.mention} sera donné aux membres "
-                f"ayant atteint le niveau **{required_level}**."
+            await interaction.response.send_message(
+                embed=success_embed(
+                    "Rôle de niveau enregistré",
+                    (
+                        f"Le rôle {self.role.mention} sera donné aux membres "
+                        f"ayant atteint le niveau **{required_level}**."
+                    ),
+                ),
+                ephemeral=True,
             )
-            title = "✅ Rôle de niveau enregistré"
         else:
-            description = (
-                f"{self.role.mention} n'est plus une récompense de niveau."
+            await interaction.response.send_message(
+                embed=success_embed(
+                    "Rôle de niveau supprimé",
+                    (
+                        f"{self.role.mention} n'est plus une "
+                        "récompense de niveau."
+                    ),
+                ),
+                ephemeral=True,
             )
-            title = "✅ Rôle de niveau supprimé"
-
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title=title,
-                description=description,
-                color=SUCCESS_COLOR,
-            ),
-            ephemeral=True,
-        )
 
 
 class ProgressionRuleRoleSelect(discord.ui.RoleSelect):
@@ -835,6 +864,7 @@ class ProgressionRuleRoleSelect(discord.ui.RoleSelect):
             placeholder="Choisis un rôle…",
             min_values=1,
             max_values=1,
+            row=0,
         )
 
     async def callback(
@@ -842,23 +872,34 @@ class ProgressionRuleRoleSelect(discord.ui.RoleSelect):
         interaction: discord.Interaction,
     ) -> None:
         if not self.values:
+            await interaction.response.send_message(
+                "❌ Aucun rôle sélectionné.",
+                ephemeral=True,
+            )
             return
 
         selected = self.values[0]
 
         if isinstance(selected, discord.Role):
             role = selected
-        elif interaction.guild is not None:
-            role = interaction.guild.get_role(selected.id)
         else:
-            role = None
+            guild = interaction.guild
 
-        if role is None:
-            await interaction.response.send_message(
-                "❌ Rôle introuvable.",
-                ephemeral=True,
-            )
-            return
+            if guild is None:
+                await interaction.response.send_message(
+                    "❌ Serveur introuvable.",
+                    ephemeral=True,
+                )
+                return
+
+            role = guild.get_role(selected.id)
+
+            if role is None:
+                await interaction.response.send_message(
+                    "❌ Rôle introuvable.",
+                    ephemeral=True,
+                )
+                return
 
         if self.action == "multiplier":
             await interaction.response.send_modal(
@@ -912,8 +953,8 @@ class ProgressionRuleRoleView(discord.ui.View):
 
         await interaction.response.send_message(
             (
-                "❌ Seul l'administrateur ayant ouvert "
-                "ce menu peut l'utiliser."
+                "❌ Seul l'administrateur ayant ouvert ce menu "
+                "peut l'utiliser."
             ),
             ephemeral=True,
         )
@@ -992,6 +1033,7 @@ class ProgressionAdminView(discord.ui.View):
             self.guild_id,
             use_cache=False,
         )
+
         enabled = not settings["enabled"]
 
         await self.cog.set_setting_boolean(
@@ -1004,7 +1046,7 @@ class ProgressionAdminView(discord.ui.View):
             embed=success_embed(
                 "État modifié",
                 (
-                    "Le gain automatique est maintenant "
+                    "Le gain automatique d'XP et d'argent est maintenant "
                     f"**{'activé' if enabled else 'désactivé'}**."
                 ),
             ),
@@ -1026,6 +1068,7 @@ class ProgressionAdminView(discord.ui.View):
             self.guild_id,
             use_cache=False,
         )
+
         enabled = not settings["level_notifications"]
 
         await self.cog.set_setting_boolean(
@@ -1038,7 +1081,7 @@ class ProgressionAdminView(discord.ui.View):
             embed=success_embed(
                 "Notifications modifiées",
                 (
-                    "Les notifications sont maintenant "
+                    "Les annonces de montée de niveau sont maintenant "
                     f"**{'activées' if enabled else 'désactivées'}**."
                 ),
             ),
@@ -1060,7 +1103,7 @@ class ProgressionAdminView(discord.ui.View):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Aucun membre",
-                    "Sélectionne d'abord un membre.",
+                    "Sélectionne d'abord un membre dans le menu.",
                 ),
                 ephemeral=True,
             )
@@ -1089,7 +1132,7 @@ class ProgressionAdminView(discord.ui.View):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Aucun membre",
-                    "Sélectionne d'abord un membre.",
+                    "Sélectionne d'abord un membre dans le menu.",
                 ),
                 ephemeral=True,
             )
@@ -1129,8 +1172,8 @@ class ProgressionAdminView(discord.ui.View):
                 "✨ Multiplicateur d'XP",
                 (
                     "Choisis le rôle auquel appliquer un multiplicateur.\n\n"
-                    "Entre une valeur entre **1 et 10**, ou `0` "
-                    "pour supprimer la règle."
+                    "Ensuite, entre une valeur entre **1 et 10**.\n"
+                    "Entre `0` pour supprimer son multiplicateur."
                 ),
             ),
             view=ProgressionRuleRoleView(
@@ -1156,9 +1199,9 @@ class ProgressionAdminView(discord.ui.View):
             embed=base_embed(
                 "🎭 Rôle de niveau",
                 (
-                    "Choisis le rôle à donner automatiquement.\n\n"
-                    "Indique ensuite le niveau nécessaire, ou `0` "
-                    "pour supprimer la récompense."
+                    "Choisis le rôle qui devra être donné automatiquement.\n\n"
+                    "Ensuite, indique le niveau nécessaire.\n"
+                    "Entre `0` pour supprimer cette récompense."
                 ),
             ),
             view=ProgressionRuleRoleView(
@@ -1180,16 +1223,16 @@ class ProgressionAdminView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        if interaction.guild is None:
+        guild = interaction.guild
+
+        if guild is None:
             await interaction.response.send_message(
                 "❌ Cette action doit être utilisée dans un serveur.",
                 ephemeral=True,
             )
             return
 
-        embed = await self.cog.build_progression_rules_embed(
-            interaction.guild
-        )
+        embed = await self.cog.build_progression_rules_embed(guild)
 
         await interaction.response.send_message(
             embed=embed,
@@ -1203,10 +1246,19 @@ class ProgressionCog(commands.Cog):
         bot: commands.Bot,
     ) -> None:
         self.bot = bot
+
         self._settings_cache: dict[
             int,
             tuple[float, dict[str, Any]],
         ] = {}
+
+    async def cog_load(self) -> None:
+        if not self.voice_xp_loop.is_running():
+            self.voice_xp_loop.start()
+
+    def cog_unload(self) -> None:
+        if self.voice_xp_loop.is_running():
+            self.voice_xp_loop.cancel()
 
     def get_pool(self):
         database = getattr(
@@ -1322,21 +1374,45 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS progression_members_xp_idx
-            ON progression_members (guild_id, total_xp DESC)
+            CREATE TABLE IF NOT EXISTS progression_voice_rewards (
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                last_reward_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                rewarded_minutes BIGINT NOT NULL DEFAULT 0
+                    CHECK (rewarded_minutes >= 0),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (guild_id, user_id)
+            )
             """
         )
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS progression_members_wallet_idx
-            ON progression_members (guild_id, wallet DESC)
+            CREATE INDEX IF NOT EXISTS
+                progression_members_xp_idx
+            ON progression_members (
+                guild_id,
+                total_xp DESC
+            )
             """
         )
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS progression_transactions_user_idx
+            CREATE INDEX IF NOT EXISTS
+                progression_members_wallet_idx
+            ON progression_members (
+                guild_id,
+                wallet DESC
+            )
+            """
+        )
+
+        await pool.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                progression_transactions_user_idx
             ON progression_transactions (
                 guild_id,
                 user_id,
@@ -1347,10 +1423,21 @@ class ProgressionCog(commands.Cog):
 
         await pool.execute(
             """
-            CREATE INDEX IF NOT EXISTS progression_level_roles_level_idx
+            CREATE INDEX IF NOT EXISTS
+                progression_level_roles_level_idx
             ON progression_level_roles (
                 guild_id,
                 required_level
+            )
+            """
+        )
+
+        await pool.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                progression_role_multipliers_guild_idx
+            ON progression_role_multipliers (
+                guild_id
             )
             """
         )
@@ -1363,9 +1450,13 @@ class ProgressionCog(commands.Cog):
         self,
         guild_id: int,
     ) -> None:
-        await self.get_pool().execute(
+        pool = self.get_pool()
+
+        await pool.execute(
             """
-            INSERT INTO progression_settings (guild_id)
+            INSERT INTO progression_settings (
+                guild_id
+            )
             VALUES ($1)
             ON CONFLICT (guild_id) DO NOTHING
             """,
@@ -1378,19 +1469,21 @@ class ProgressionCog(commands.Cog):
         *,
         use_cache: bool = True,
     ) -> dict[str, Any]:
-        now = time.monotonic()
+        current_time = time.monotonic()
         cached = self._settings_cache.get(guild_id)
 
         if (
             use_cache
             and cached is not None
-            and cached[0] > now
+            and cached[0] > current_time
         ):
             return cached[1]
 
         await self.ensure_settings(guild_id)
 
-        record = await self.get_pool().fetchrow(
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
             """
             SELECT
                 enabled,
@@ -1424,7 +1517,7 @@ class ProgressionCog(commands.Cog):
         }
 
         self._settings_cache[guild_id] = (
-            now + 60,
+            current_time + 60,
             settings,
         )
 
@@ -1442,7 +1535,9 @@ class ProgressionCog(commands.Cog):
     ) -> None:
         await self.ensure_settings(guild_id)
 
-        await self.get_pool().execute(
+        pool = self.get_pool()
+
+        await pool.execute(
             """
             UPDATE progression_settings
             SET
@@ -1481,7 +1576,9 @@ class ProgressionCog(commands.Cog):
 
         await self.ensure_settings(guild_id)
 
-        await self.get_pool().execute(
+        pool = self.get_pool()
+
+        await pool.execute(
             f"""
             UPDATE progression_settings
             SET
@@ -1501,7 +1598,9 @@ class ProgressionCog(commands.Cog):
         guild_id: int,
         user_id: int,
     ) -> dict[str, int]:
-        record = await self.get_pool().fetchrow(
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
             """
             SELECT
                 total_xp,
@@ -1524,9 +1623,7 @@ class ProgressionCog(commands.Cog):
         else:
             total_xp = int(record["total_xp"] or 0)
             wallet = int(record["wallet"] or 0)
-            lifetime_coins = int(
-                record["lifetime_coins"] or 0
-            )
+            lifetime_coins = int(record["lifetime_coins"] or 0)
             rewarded_messages = int(
                 record["rewarded_messages"] or 0
             )
@@ -1544,35 +1641,32 @@ class ProgressionCog(commands.Cog):
         *,
         guild_id: int,
         user_id: int,
+        total_xp: int,
     ) -> int | None:
-        pool = self.get_pool()
-
-        total_xp = await pool.fetchval(
-            """
-            SELECT total_xp
-            FROM progression_members
-            WHERE guild_id = $1
-              AND user_id = $2
-            """,
-            guild_id,
-            user_id,
-        )
-
-        if total_xp is None:
+        if total_xp <= 0:
             return None
+
+        pool = self.get_pool()
 
         rank = await pool.fetchval(
             """
             SELECT COUNT(*) + 1
             FROM progression_members
             WHERE guild_id = $1
-              AND total_xp > $2
+              AND (
+                    total_xp > $2
+                    OR (
+                        total_xp = $2
+                        AND user_id < $3
+                    )
+              )
             """,
             guild_id,
-            int(total_xp),
+            total_xp,
+            user_id,
         )
 
-        return int(rank or 1)
+        return int(rank) if rank is not None else None
 
     async def get_member_xp_multiplier(
         self,
@@ -1586,7 +1680,9 @@ class ProgressionCog(commands.Cog):
         if not role_ids:
             return Decimal("1.00")
 
-        value = await self.get_pool().fetchval(
+        pool = self.get_pool()
+
+        value = await pool.fetchval(
             """
             SELECT MAX(multiplier)
             FROM progression_role_multipliers
@@ -1600,10 +1696,12 @@ class ProgressionCog(commands.Cog):
         if value is None:
             return Decimal("1.00")
 
-        return max(
-            Decimal("1.00"),
-            Decimal(str(value)),
-        )
+        multiplier = Decimal(str(value))
+
+        if multiplier < Decimal("1.00"):
+            return Decimal("1.00")
+
+        return multiplier
 
     async def set_role_xp_multiplier(
         self,
@@ -1708,9 +1806,13 @@ class ProgressionCog(commands.Cog):
         member: discord.Member,
         level: int,
     ) -> list[discord.Role]:
-        records = await self.get_pool().fetch(
+        pool = self.get_pool()
+
+        records = await pool.fetch(
             """
-            SELECT role_id
+            SELECT
+                role_id,
+                required_level
             FROM progression_level_roles
             WHERE guild_id = $1
               AND required_level <= $2
@@ -1720,13 +1822,20 @@ class ProgressionCog(commands.Cog):
             level,
         )
 
+        if not records:
+            return []
+
         bot_member = member.guild.me
 
-        if (
-            not records
-            or bot_member is None
-            or not bot_member.guild_permissions.manage_roles
-        ):
+        if bot_member is None:
+            return []
+
+        if not bot_member.guild_permissions.manage_roles:
+            LOGGER.warning(
+                "Le bot n'a pas la permission Gérer les rôles "
+                "sur le serveur %s.",
+                member.guild.id,
+            )
             return []
 
         roles_to_add: list[discord.Role] = []
@@ -1736,13 +1845,16 @@ class ProgressionCog(commands.Cog):
                 int(record["role_id"])
             )
 
-            if (
-                role is None
-                or role.is_default()
-                or role.managed
-                or role >= bot_member.top_role
-                or role in member.roles
-            ):
+            if role is None:
+                continue
+
+            if role.is_default() or role.managed:
+                continue
+
+            if role >= bot_member.top_role:
+                continue
+
+            if role in member.roles:
                 continue
 
             roles_to_add.append(role)
@@ -1753,11 +1865,14 @@ class ProgressionCog(commands.Cog):
         try:
             await member.add_roles(
                 *roles_to_add,
-                reason=f"Récompenses de progression — niveau {level}",
+                reason=(
+                    "Récompenses automatiques de progression "
+                    f"— niveau {level}"
+                ),
             )
         except discord.HTTPException:
             LOGGER.exception(
-                "Impossible de donner les rôles de niveau à %s",
+                "Impossible de donner les rôles de niveau à %s.",
                 member.id,
             )
             return []
@@ -1772,20 +1887,24 @@ class ProgressionCog(commands.Cog):
 
         multiplier_records = await pool.fetch(
             """
-            SELECT role_id, multiplier
+            SELECT
+                role_id,
+                multiplier
             FROM progression_role_multipliers
             WHERE guild_id = $1
-            ORDER BY multiplier DESC
+            ORDER BY multiplier DESC, role_id ASC
             """,
             guild.id,
         )
 
         level_records = await pool.fetch(
             """
-            SELECT role_id, required_level
+            SELECT
+                role_id,
+                required_level
             FROM progression_level_roles
             WHERE guild_id = $1
-            ORDER BY required_level ASC
+            ORDER BY required_level ASC, role_id ASC
             """,
             guild.id,
         )
@@ -1794,61 +1913,75 @@ class ProgressionCog(commands.Cog):
             "⚙️ Règles de progression",
             (
                 "Configuration des multiplicateurs d'XP "
-                "et des récompenses de niveau."
+                "et des récompenses de niveau.\n\n"
+                f"🎙️ Le vocal rapporte **{VOICE_XP_PER_MINUTE} XP "
+                "par minute** lorsqu'au moins deux membres actifs "
+                "sont présents."
             ),
         )
 
-        multiplier_lines = []
+        if multiplier_records:
+            lines: list[str] = []
 
-        for record in multiplier_records:
-            role_id = int(record["role_id"])
-            role = guild.get_role(role_id)
-            role_text = (
-                role.mention
-                if role is not None
-                else f"Rôle supprimé (`{role_id}`)"
+            for record in multiplier_records:
+                role_id = int(record["role_id"])
+                multiplier = Decimal(str(record["multiplier"]))
+                role = guild.get_role(role_id)
+
+                role_text = (
+                    role.mention
+                    if role is not None
+                    else f"Rôle supprimé (`{role_id}`)"
+                )
+
+                lines.append(
+                    f"• {role_text} → **x{multiplier.normalize()} XP**"
+                )
+
+            embed.add_field(
+                name="✨ Multiplicateurs d'XP",
+                value="\n".join(lines)[:1024],
+                inline=False,
             )
-            multiplier = Decimal(
-                str(record["multiplier"])
-            ).normalize()
-
-            multiplier_lines.append(
-                f"• {role_text} → **x{multiplier} XP**"
-            )
-
-        embed.add_field(
-            name="✨ Multiplicateurs d'XP",
-            value=(
-                "\n".join(multiplier_lines)[:1024]
-                if multiplier_lines
-                else "Aucun multiplicateur configuré."
-            ),
-            inline=False,
-        )
-
-        level_lines = []
-
-        for record in level_records:
-            role_id = int(record["role_id"])
-            role = guild.get_role(role_id)
-            role_text = (
-                role.mention
-                if role is not None
-                else f"Rôle supprimé (`{role_id}`)"
+        else:
+            embed.add_field(
+                name="✨ Multiplicateurs d'XP",
+                value="Aucun multiplicateur configuré.",
+                inline=False,
             )
 
-            level_lines.append(
-                f"• Niveau **{record['required_level']}** → {role_text}"
+        if level_records:
+            lines = []
+
+            for record in level_records:
+                role_id = int(record["role_id"])
+                required_level = int(record["required_level"])
+                role = guild.get_role(role_id)
+
+                role_text = (
+                    role.mention
+                    if role is not None
+                    else f"Rôle supprimé (`{role_id}`)"
+                )
+
+                lines.append(
+                    f"• Niveau **{required_level}** → {role_text}"
+                )
+
+            embed.add_field(
+                name="🎭 Rôles de niveau",
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="🎭 Rôles de niveau",
+                value="Aucun rôle de niveau configuré.",
+                inline=False,
             )
 
-        embed.add_field(
-            name="🎭 Rôles de niveau",
-            value=(
-                "\n".join(level_lines)[:1024]
-                if level_lines
-                else "Aucun rôle de niveau configuré."
-            ),
-            inline=False,
+        embed.set_footer(
+            text="Entre 0 dans un formulaire pour supprimer une règle."
         )
 
         return embed
@@ -1891,7 +2024,9 @@ class ProgressionCog(commands.Cog):
 
                 current = await connection.fetchrow(
                     """
-                    SELECT total_xp, last_reward_at
+                    SELECT
+                        total_xp,
+                        last_reward_at
                     FROM progression_members
                     WHERE guild_id = $1
                       AND user_id = $2
@@ -1915,8 +2050,8 @@ class ProgressionCog(commands.Cog):
                         return None
 
                 base_xp_gain = random.randint(
-                    settings["xp_min"],
-                    settings["xp_max"],
+                    int(settings["xp_min"]),
+                    int(settings["xp_max"]),
                 )
 
                 xp_gain = int(
@@ -1930,8 +2065,8 @@ class ProgressionCog(commands.Cog):
                 )
 
                 coins_gain = random.randint(
-                    settings["coins_min"],
-                    settings["coins_max"],
+                    int(settings["coins_min"]),
+                    int(settings["coins_max"]),
                 )
 
                 old_xp = int(current["total_xp"] or 0)
@@ -1949,7 +2084,9 @@ class ProgressionCog(commands.Cog):
                         updated_at = NOW()
                     WHERE guild_id = $1
                       AND user_id = $2
-                    RETURNING total_xp, wallet
+                    RETURNING
+                        total_xp,
+                        wallet
                     """,
                     guild_id,
                     user_id,
@@ -1961,7 +2098,7 @@ class ProgressionCog(commands.Cog):
                 if updated is None:
                     return None
 
-                if coins_gain:
+                if coins_gain != 0:
                     await connection.execute(
                         """
                         INSERT INTO progression_transactions (
@@ -1998,6 +2135,421 @@ class ProgressionCog(commands.Cog):
                     "old_level": old_level,
                     "new_level": level_from_xp(total_xp),
                 }
+
+    async def reset_voice_timer(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        pool = self.get_pool()
+
+        await pool.execute(
+            """
+            INSERT INTO progression_voice_rewards (
+                guild_id,
+                user_id,
+                last_reward_at,
+                updated_at
+            )
+            VALUES ($1, $2, NOW(), NOW())
+            ON CONFLICT (guild_id, user_id)
+            DO UPDATE SET
+                last_reward_at = NOW(),
+                updated_at = NOW()
+            """,
+            guild_id,
+            user_id,
+        )
+
+    async def award_voice_minute(
+        self,
+        *,
+        member: discord.Member,
+        xp_multiplier: Decimal,
+    ) -> dict[str, Any] | None:
+        pool = self.get_pool()
+        current_time = datetime.now(timezone.utc)
+
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended($1, 0)
+                    )
+                    """,
+                    f"progression:{member.guild.id}:{member.id}",
+                )
+
+                await connection.execute(
+                    """
+                    INSERT INTO progression_members (
+                        guild_id,
+                        user_id
+                    )
+                    VALUES ($1, $2)
+                    ON CONFLICT (guild_id, user_id)
+                    DO NOTHING
+                    """,
+                    member.guild.id,
+                    member.id,
+                )
+
+                insert_status = await connection.execute(
+                    """
+                    INSERT INTO progression_voice_rewards (
+                        guild_id,
+                        user_id,
+                        last_reward_at,
+                        rewarded_minutes,
+                        updated_at
+                    )
+                    VALUES ($1, $2, $3, 0, NOW())
+                    ON CONFLICT (guild_id, user_id)
+                    DO NOTHING
+                    """,
+                    member.guild.id,
+                    member.id,
+                    current_time,
+                )
+
+                if insert_status == "INSERT 0 1":
+                    return None
+
+                voice_record = await connection.fetchrow(
+                    """
+                    SELECT
+                        last_reward_at
+                    FROM progression_voice_rewards
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    FOR UPDATE
+                    """,
+                    member.guild.id,
+                    member.id,
+                )
+
+                if voice_record is None:
+                    return None
+
+                last_reward_at = voice_record["last_reward_at"]
+
+                elapsed = (
+                    current_time - last_reward_at
+                ).total_seconds()
+
+                if elapsed < VOICE_REWARD_INTERVAL_SECONDS:
+                    return None
+
+                current = await connection.fetchrow(
+                    """
+                    SELECT
+                        total_xp
+                    FROM progression_members
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    FOR UPDATE
+                    """,
+                    member.guild.id,
+                    member.id,
+                )
+
+                if current is None:
+                    return None
+
+                xp_gain = int(
+                    (
+                        Decimal(VOICE_XP_PER_MINUTE)
+                        * xp_multiplier
+                    ).quantize(
+                        Decimal("1"),
+                        rounding=ROUND_HALF_UP,
+                    )
+                )
+
+                xp_gain = max(0, xp_gain)
+
+                old_xp = int(current["total_xp"] or 0)
+                old_level = level_from_xp(old_xp)
+
+                resulting_xp = await connection.fetchval(
+                    """
+                    UPDATE progression_members
+                    SET
+                        total_xp = total_xp + $3,
+                        updated_at = NOW()
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    RETURNING total_xp
+                    """,
+                    member.guild.id,
+                    member.id,
+                    xp_gain,
+                )
+
+                if resulting_xp is None:
+                    return None
+
+                await connection.execute(
+                    """
+                    UPDATE progression_voice_rewards
+                    SET
+                        last_reward_at = $3,
+                        rewarded_minutes = rewarded_minutes + 1,
+                        updated_at = NOW()
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    """,
+                    member.guild.id,
+                    member.id,
+                    current_time,
+                )
+
+                total_xp = int(resulting_xp)
+
+                return {
+                    "xp_gain": xp_gain,
+                    "xp_multiplier": xp_multiplier,
+                    "total_xp": total_xp,
+                    "old_level": old_level,
+                    "new_level": level_from_xp(total_xp),
+                }
+
+    def is_active_voice_member(
+        self,
+        member: discord.Member,
+    ) -> bool:
+        if member.bot:
+            return False
+
+        voice = member.voice
+
+        if voice is None or voice.channel is None:
+            return False
+
+        if member.guild.afk_channel is not None:
+            if voice.channel.id == member.guild.afk_channel.id:
+                return False
+
+        if voice.self_mute or voice.mute:
+            return False
+
+        if voice.self_deaf or voice.deaf:
+            return False
+
+        return True
+
+    async def send_voice_level_notification(
+        self,
+        *,
+        member: discord.Member,
+        result: dict[str, Any],
+        granted_roles: list[discord.Role],
+    ) -> None:
+        settings = await self.get_settings(member.guild.id)
+
+        if not settings["level_notifications"]:
+            return
+
+        channel = member.guild.system_channel
+
+        if channel is None:
+            return
+
+        bot_member = member.guild.me
+
+        if bot_member is None:
+            return
+
+        permissions = channel.permissions_for(bot_member)
+
+        if not (
+            permissions.view_channel
+            and permissions.send_messages
+            and permissions.embed_links
+        ):
+            return
+
+        multiplier = Decimal(
+            str(result["xp_multiplier"])
+        )
+
+        multiplier_text = ""
+
+        if multiplier > Decimal("1.00"):
+            multiplier_text = (
+                "\n✨ Multiplicateur de rôle : "
+                f"**x{multiplier.normalize()}**"
+            )
+
+        roles_text = ""
+
+        if granted_roles:
+            roles_text = (
+                "\n🎭 Rôle(s) débloqué(s) : "
+                + ", ".join(
+                    role.mention
+                    for role in granted_roles
+                )
+            )
+
+        embed = success_embed(
+            "Niveau supérieur !",
+            (
+                f"{member.mention} vient d'atteindre le "
+                f"**niveau {result['new_level']}** grâce au vocal !\n\n"
+                f"🎙️ XP gagné : **{result['xp_gain']}**"
+                f"{multiplier_text}"
+                f"{roles_text}"
+            ),
+        )
+
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            LOGGER.debug(
+                "Impossible d'envoyer la notification de niveau vocal.",
+                exc_info=True,
+            )
+
+    @tasks.loop(seconds=60)
+    async def voice_xp_loop(self) -> None:
+        for guild in self.bot.guilds:
+            try:
+                settings = await self.get_settings(guild.id)
+
+                if not settings["enabled"]:
+                    continue
+
+                channels: list[
+                    discord.VoiceChannel | discord.StageChannel
+                ] = [
+                    *guild.voice_channels,
+                    *guild.stage_channels,
+                ]
+
+                for channel in channels:
+                    human_members = [
+                        member
+                        for member in channel.members
+                        if not member.bot
+                    ]
+
+                    active_members = [
+                        member
+                        for member in human_members
+                        if self.is_active_voice_member(member)
+                    ]
+
+                    if len(active_members) < 2:
+                        for member in human_members:
+                            await self.reset_voice_timer(
+                                guild_id=guild.id,
+                                user_id=member.id,
+                            )
+
+                        continue
+
+                    active_ids = {
+                        member.id
+                        for member in active_members
+                    }
+
+                    for member in human_members:
+                        if member.id not in active_ids:
+                            await self.reset_voice_timer(
+                                guild_id=guild.id,
+                                user_id=member.id,
+                            )
+
+                    for member in active_members:
+                        try:
+                            multiplier = (
+                                await self.get_member_xp_multiplier(
+                                    member
+                                )
+                            )
+
+                            result = await self.award_voice_minute(
+                                member=member,
+                                xp_multiplier=multiplier,
+                            )
+
+                            if result is None:
+                                continue
+
+                            granted_roles = (
+                                await self.grant_earned_level_roles(
+                                    member,
+                                    int(result["new_level"]),
+                                )
+                            )
+
+                            if (
+                                result["new_level"]
+                                > result["old_level"]
+                            ):
+                                await self.send_voice_level_notification(
+                                    member=member,
+                                    result=result,
+                                    granted_roles=granted_roles,
+                                )
+
+                        except Exception:
+                            LOGGER.exception(
+                                (
+                                    "Impossible d'attribuer l'XP vocal "
+                                    "à %s dans le serveur %s"
+                                ),
+                                member.id,
+                                guild.id,
+                            )
+
+            except Exception:
+                LOGGER.exception(
+                    (
+                        "Impossible de traiter les récompenses vocales "
+                        "du serveur %s"
+                    ),
+                    guild.id,
+                )
+
+    @voice_xp_loop.before_loop
+    async def before_voice_xp_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        if member.bot:
+            return
+
+        changed = (
+            before.channel != after.channel
+            or before.self_mute != after.self_mute
+            or before.self_deaf != after.self_deaf
+            or before.mute != after.mute
+            or before.deaf != after.deaf
+        )
+
+        if not changed:
+            return
+
+        try:
+            await self.reset_voice_timer(
+                guild_id=member.guild.id,
+                user_id=member.id,
+            )
+        except Exception:
+            LOGGER.exception(
+                "Impossible de réinitialiser le minuteur vocal de %s.",
+                member.id,
+            )
 
     async def adjust_member(
         self,
@@ -2038,7 +2590,10 @@ class ProgressionCog(commands.Cog):
 
                 current = await connection.fetchrow(
                     """
-                    SELECT total_xp, wallet, lifetime_coins
+                    SELECT
+                        total_xp,
+                        wallet,
+                        lifetime_coins
                     FROM progression_members
                     WHERE guild_id = $1
                       AND user_id = $2
@@ -2060,13 +2615,10 @@ class ProgressionCog(commands.Cog):
                 )
 
                 new_xp = max(0, old_xp + xp_delta)
-                new_wallet = max(
-                    0,
-                    old_wallet + coins_delta,
-                )
-                actual_coins_delta = (
-                    new_wallet - old_wallet
-                )
+                new_wallet = max(0, old_wallet + coins_delta)
+
+                actual_coins_delta = new_wallet - old_wallet
+
                 new_lifetime_coins = (
                     lifetime_coins
                     + max(0, actual_coins_delta)
@@ -2090,7 +2642,7 @@ class ProgressionCog(commands.Cog):
                     new_lifetime_coins,
                 )
 
-                if actual_coins_delta:
+                if actual_coins_delta != 0:
                     await connection.execute(
                         """
                         INSERT INTO progression_transactions (
@@ -2145,6 +2697,16 @@ class ProgressionCog(commands.Cog):
 
                 await connection.execute(
                     """
+                    DELETE FROM progression_voice_rewards
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    """,
+                    guild_id,
+                    user_id,
+                )
+
+                await connection.execute(
+                    """
                     DELETE FROM progression_members
                     WHERE guild_id = $1
                       AND user_id = $2
@@ -2164,37 +2726,35 @@ class ProgressionCog(commands.Cog):
             user_id=member.id,
         )
 
+        total_xp = stats["total_xp"]
+        level = stats["level"]
+
+        current_level_xp = xp_for_level(level)
+        next_level_xp = xp_for_level(level + 1)
+
+        current_progress = max(
+            0,
+            total_xp - current_level_xp,
+        )
+
+        required_progress = max(
+            1,
+            next_level_xp - current_level_xp,
+        )
+
         rank = await self.get_member_rank(
             guild_id=guild_id,
             user_id=member.id,
-        )
-
-        level = stats["level"]
-        total_xp = stats["total_xp"]
-
-        level_start_xp = xp_for_level(level)
-        next_level_xp = xp_for_level(level + 1)
-
-        current_xp = max(
-            0,
-            total_xp - level_start_xp,
-        )
-        required_xp = max(
-            1,
-            next_level_xp - level_start_xp,
+            total_xp=total_xp,
         )
 
         avatar_bytes: bytes | None = None
 
         try:
-            avatar_asset = member.display_avatar.replace(
-                size=256,
-                static_format="png",
-            )
-            avatar_bytes = await avatar_asset.read()
+            avatar_bytes = await member.display_avatar.read()
         except discord.HTTPException:
             LOGGER.debug(
-                "Impossible de télécharger l'avatar de %s",
+                "Impossible de télécharger l'avatar de %s.",
                 member.id,
                 exc_info=True,
             )
@@ -2206,14 +2766,24 @@ class ProgressionCog(commands.Cog):
             level=level,
             rank=rank,
             total_xp=total_xp,
-            current_xp=current_xp,
-            required_xp=required_xp,
+            current_xp=current_progress,
+            required_xp=required_progress,
             wallet=stats["wallet"],
             lifetime_coins=stats["lifetime_coins"],
         )
 
+        if isinstance(image, io.BytesIO):
+            image.seek(0)
+            buffer = image
+        elif isinstance(image, bytes):
+            buffer = io.BytesIO(image)
+        else:
+            raise TypeError(
+                "render_progression_card doit retourner bytes ou BytesIO."
+            )
+
         return discord.File(
-            image,
+            buffer,
             filename=f"progression-{member.id}.png",
         )
 
@@ -2223,23 +2793,46 @@ class ProgressionCog(commands.Cog):
         guild: discord.Guild,
         ranking_type: str,
     ) -> discord.Embed:
+        pool = self.get_pool()
+
         if ranking_type == "money":
-            order = "wallet DESC, total_xp DESC, user_id ASC"
+            records = await pool.fetch(
+                """
+                SELECT
+                    user_id,
+                    wallet,
+                    total_xp
+                FROM progression_members
+                WHERE guild_id = $1
+                ORDER BY
+                    wallet DESC,
+                    total_xp DESC,
+                    user_id ASC
+                LIMIT 10
+                """,
+                guild.id,
+            )
+
             title = "💰 Classement de l'argent"
         else:
-            order = "total_xp DESC, wallet DESC, user_id ASC"
-            title = "🏆 Classement XP"
+            records = await pool.fetch(
+                """
+                SELECT
+                    user_id,
+                    wallet,
+                    total_xp
+                FROM progression_members
+                WHERE guild_id = $1
+                ORDER BY
+                    total_xp DESC,
+                    wallet DESC,
+                    user_id ASC
+                LIMIT 10
+                """,
+                guild.id,
+            )
 
-        records = await self.get_pool().fetch(
-            f"""
-            SELECT user_id, wallet, total_xp
-            FROM progression_members
-            WHERE guild_id = $1
-            ORDER BY {order}
-            LIMIT 10
-            """,
-            guild.id,
-        )
+            title = "🏆 Classement XP"
 
         if not records:
             return base_embed(
@@ -2252,7 +2845,8 @@ class ProgressionCog(commands.Cog):
             2: "🥈",
             3: "🥉",
         }
-        lines = []
+
+        lines: list[str] = []
 
         for position, record in enumerate(
             records,
@@ -2260,11 +2854,13 @@ class ProgressionCog(commands.Cog):
         ):
             user_id = int(record["user_id"])
             member = guild.get_member(user_id)
+
             member_text = (
                 member.mention
                 if member is not None
                 else f"<@{user_id}>"
             )
+
             prefix = medals.get(
                 position,
                 f"**{position}.**",
@@ -2276,8 +2872,10 @@ class ProgressionCog(commands.Cog):
             if ranking_type == "money":
                 value = f"**{format_number(wallet)} pièces**"
             else:
+                level = level_from_xp(total_xp)
+
                 value = (
-                    f"niveau **{level_from_xp(total_xp)}** — "
+                    f"niveau **{level}** — "
                     f"**{format_number(total_xp)} XP**"
                 )
 
@@ -2297,20 +2895,22 @@ class ProgressionCog(commands.Cog):
     ) -> None:
         guild = message.guild
 
-        if (
-            guild is None
-            or message.author.bot
-            or message.webhook_id is not None
-            or not isinstance(message.author, discord.Member)
-        ):
+        if guild is None:
+            return
+
+        if message.author.bot:
+            return
+
+        if message.webhook_id is not None:
             return
 
         try:
-            settings = await self.get_settings(
-                guild.id
-            )
+            settings = await self.get_settings(guild.id)
 
             if not settings["enabled"]:
+                return
+
+            if not isinstance(message.author, discord.Member):
                 return
 
             xp_multiplier = await self.get_member_xp_multiplier(
@@ -2342,7 +2942,7 @@ class ProgressionCog(commands.Cog):
 
             if granted_roles:
                 roles_text = (
-                    "\n\n🎭 **Rôle(s) débloqué(s) :** "
+                    "\n🎭 Rôle(s) débloqué(s) : "
                     + ", ".join(
                         role.mention
                         for role in granted_roles
@@ -2352,6 +2952,7 @@ class ProgressionCog(commands.Cog):
             multiplier = Decimal(
                 str(result["xp_multiplier"])
             )
+
             multiplier_text = ""
 
             if multiplier > Decimal("1.00"):
@@ -2374,12 +2975,10 @@ class ProgressionCog(commands.Cog):
             )
 
             try:
-                await message.channel.send(
-                    embed=embed
-                )
+                await message.channel.send(embed=embed)
             except discord.HTTPException:
                 LOGGER.debug(
-                    "Impossible d'envoyer la notification de niveau",
+                    "Impossible d'envoyer la notification de niveau.",
                     exc_info=True,
                 )
 
@@ -2450,28 +3049,33 @@ class ProgressionCog(commands.Cog):
 
             await interaction.followup.send(
                 embed=error_embed(
-                    "Génération impossible",
+                    "Erreur de génération",
                     (
                         "La carte de progression n'a pas pu être générée. "
-                        "Vérifie que Pillow est installé."
+                        "Consulte les logs du bot."
                     ),
                 ),
                 ephemeral=True,
             )
             return
 
+        embed = discord.Embed(color=COLOR)
+        embed.set_image(
+            url=f"attachment://{progression_file.filename}"
+        )
+
         view = ProgressionView(
             cog=self,
             owner_id=interaction.user.id,
             guild_id=guild.id,
         )
-        
+
         await interaction.followup.send(
+            embed=embed,
             file=progression_file,
             view=view,
             ephemeral=True,
         )
-
 
     @app_commands.command(
         name="progression-admin",
@@ -2509,7 +3113,9 @@ class ProgressionCog(commands.Cog):
             "⚙️ Administration de la progression",
             (
                 "Configure le gain automatique d'XP et d'argent, "
-                "ou sélectionne un membre pour modifier sa progression."
+                "ou sélectionne un membre pour modifier sa progression.\n\n"
+                f"🎙️ Le vocal rapporte **{VOICE_XP_PER_MINUTE} XP "
+                "par minute**, sans argent."
             ),
         )
 
@@ -2524,7 +3130,7 @@ class ProgressionCog(commands.Cog):
         )
 
         embed.add_field(
-            name="Cooldown",
+            name="Cooldown messages",
             value=f"**{settings['cooldown_seconds']} secondes**",
             inline=True,
         )
@@ -2540,39 +3146,23 @@ class ProgressionCog(commands.Cog):
         )
 
         embed.add_field(
-            name="Gain d'XP",
+            name="🎙️ XP vocal",
             value=(
-                f"**{settings['xp_min']} à "
-                f"{settings['xp_max']} XP**"
-            ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Gain d'argent",
-            value=(
-                f"**{settings['coins_min']} à "
-                f"{settings['coins_max']} pièces**"
-            ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Gestion d'un membre",
-            value=(
-                "1. Sélectionne le membre dans le menu.\n"
-                "2. Utilise **Modifier** ou **Réinitialiser**."
+                f"**{VOICE_XP_PER_MINUTE} XP/minute**\n"
+                "Minimum 2 membres actifs."
             ),
             inline=False,
         )
 
+        view = ProgressionAdminView(
+            cog=self,
+            owner_id=interaction.user.id,
+            guild_id=guild.id,
+        )
+
         await interaction.response.send_message(
             embed=embed,
-            view=ProgressionAdminView(
-                cog=self,
-                owner_id=interaction.user.id,
-                guild_id=guild.id,
-            ),
+            view=view,
             ephemeral=True,
         )
 
