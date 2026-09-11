@@ -1725,10 +1725,6 @@ class ProgressionCog(commands.Cog):
             None,
         )
 
-
-
-        self._settings_cache.pop(guild_id, None)
-
     async def set_setting_boolean(
         self,
         *,
