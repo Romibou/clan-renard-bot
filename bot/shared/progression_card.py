@@ -591,18 +591,6 @@ def render_progression_card(
         width=2,
     )
 
-    # Petit accent rose à gauche du badge
-    draw.rounded_rectangle(
-        (
-            rank_left + 7,
-            rank_top + 8,
-            rank_left + 12,
-            rank_bottom - 8,
-        ),
-        radius=3,
-        fill=(226, 104, 161, 255),
-    )
-
     draw.text(
         (
             (rank_left + rank_right) / 2 + 4,
