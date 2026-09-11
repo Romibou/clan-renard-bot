@@ -505,7 +505,6 @@ def render_progression_card(
     current_xp: int,
     required_xp: int,
     wallet: int,
-    rewarded_messages: int,
     lifetime_coins: int,
 ) -> io.BytesIO:
     image = create_vertical_gradient()
@@ -634,31 +633,27 @@ def render_progression_card(
     )
 
     draw_stat_box(
-        image,
+        draw=draw,
         x=342,
-        y=279,
-        width=250,
-        title="Argent",
+        y=278,
+        width=390,
+        height=105,
+        title="ARGENT",
         value=f"{format_number(wallet)} pièces",
+        accent=(255, 199, 79),
     )
-
+    
     draw_stat_box(
-        image,
-        x=610,
-        y=279,
-        width=250,
-        title="Messages récompensés",
-        value=format_number(rewarded_messages),
-    )
-
-    draw_stat_box(
-        image,
-        x=878,
-        y=279,
-        width=270,
-        title="Argent gagné",
+        draw=draw,
+        x=758,
+        y=278,
+        width=390,
+        height=105,
+        title="ARGENT GAGNÉ AU TOTAL",
         value=f"{format_number(lifetime_coins)} pièces",
+        accent=(123, 221, 160),
     )
+
 
     draw.text(
         (68, 390),
@@ -667,13 +662,6 @@ def render_progression_card(
         fill=MUTED_TEXT_COLOR,
     )
 
-    draw.text(
-        (1148, 405),
-        "Progression permanente",
-        anchor="ra",
-        font=get_font(16),
-        fill=MUTED_TEXT_COLOR,
-    )
 
     output = io.BytesIO()
 
