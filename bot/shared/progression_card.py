@@ -616,17 +616,6 @@ def render_progression_card(
 
 
     draw.text(
-        (
-            1084 - rank_width / 2,
-            81,
-        ),
-        rank_text,
-        anchor="mm",
-        font=get_font(17, bold=True),
-        fill=(242, 159, 198),
-    )
-
-    draw.text(
         (342, 127),
         f"NIVEAU {level}",
         font=get_font(24, bold=True),
