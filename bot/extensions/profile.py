@@ -2177,18 +2177,6 @@ class ProfileCog(commands.Cog):
             member=member,
         )
 
-        embed = discord.Embed(
-            title=f"🦊 Profil de {member.display_name}",
-            description=(
-                f"Profil personnalisé de {member.mention}."
-            ),
-            color=PROFILE_COLOR,
-        )
-
-        embed.set_image(
-            url=f"attachment://{profile_file.filename}"
-        )
-
         view = None
 
         if member.id == interaction.user.id:
@@ -2198,7 +2186,6 @@ class ProfileCog(commands.Cog):
             )
 
         await interaction.followup.send(
-            embed=embed,
             file=profile_file,
             view=view,
             ephemeral=ephemeral,
