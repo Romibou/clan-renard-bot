@@ -19,13 +19,10 @@ Il regroupe plusieurs systèmes connectés entre eux :
 
 Le projet est conçu pour fonctionner localement ou être hébergé sur Render avec Docker.
 
-La liste complète des fonctionnalités et des commandes est disponible dans :
+La liste complète des fonctionnalités et des commandes est disponible ici :
 
-```text
-FONCTIONNALITES.md
-```
+[📚 Voir toutes les fonctionnalités et commandes](./FONCTIONNALITES.md)
 
----
 
 ## Technologies utilisées
 
