@@ -1974,6 +1974,9 @@ class ProgressionCog(commands.Cog):
     ) -> list[discord.Role]:
         pool = self.get_pool()
 
+        # On récupère TOUS les rôles de palier du serveur (pas seulement
+        # ceux débloqués) afin de pouvoir retirer les anciens paliers
+        # que le membre possède déjà.
         records = await pool.fetch(
             """
             SELECT
@@ -1981,11 +1984,9 @@ class ProgressionCog(commands.Cog):
                 required_level
             FROM progression_level_roles
             WHERE guild_id = $1
-              AND required_level <= $2
             ORDER BY required_level ASC
             """,
             member.guild.id,
-            level,
         )
 
         if not records:
@@ -2004,7 +2005,40 @@ class ProgressionCog(commands.Cog):
             )
             return []
 
+        # Le palier le plus élevé que le membre a débloqué avec ce
+        # niveau (les enregistrements sont triés par required_level
+        # croissant, donc le dernier qui convient est le plus haut).
+        target_record = None
+
+        for record in records:
+            if int(record["required_level"]) <= level:
+                target_record = record
+            else:
+                break
+
+        target_role: discord.Role | None = None
+
+        if target_record is not None:
+            role = member.guild.get_role(
+                int(target_record["role_id"])
+            )
+
+            if (
+                role is not None
+                and not role.is_default()
+                and not role.managed
+                and role < bot_member.top_role
+            ):
+                target_role = role
+
         roles_to_add: list[discord.Role] = []
+
+        if target_role is not None and target_role not in member.roles:
+            roles_to_add.append(target_role)
+
+        # Tous les autres rôles de palier que le membre possède déjà
+        # doivent être retirés pour qu'il n'en garde qu'un seul.
+        roles_to_remove: list[discord.Role] = []
 
         for record in records:
             role = member.guild.get_role(
@@ -2014,6 +2048,9 @@ class ProgressionCog(commands.Cog):
             if role is None:
                 continue
 
+            if target_role is not None and role.id == target_role.id:
+                continue
+
             if role.is_default() or role.managed:
                 continue
 
@@ -2021,24 +2058,32 @@ class ProgressionCog(commands.Cog):
                 continue
 
             if role in member.roles:
-                continue
+                roles_to_remove.append(role)
 
-            roles_to_add.append(role)
-
-        if not roles_to_add:
+        if not roles_to_add and not roles_to_remove:
             return []
 
         try:
-            await member.add_roles(
-                *roles_to_add,
-                reason=(
-                    "Récompenses automatiques de progression "
-                    f"— niveau {level}"
-                ),
-            )
+            if roles_to_add:
+                await member.add_roles(
+                    *roles_to_add,
+                    reason=(
+                        "Récompenses automatiques de progression "
+                        f"— niveau {level}"
+                    ),
+                )
+
+            if roles_to_remove:
+                await member.remove_roles(
+                    *roles_to_remove,
+                    reason=(
+                        "Nettoyage des anciens rôles de niveau "
+                        f"— niveau {level}"
+                    ),
+                )
         except discord.HTTPException:
             LOGGER.exception(
-                "Impossible de donner les rôles de niveau à %s.",
+                "Impossible de mettre à jour les rôles de niveau de %s.",
                 member.id,
             )
             return []
