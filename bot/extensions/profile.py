@@ -178,6 +178,11 @@ def load_rgba_asset(
             return None
 
         if not target.is_file():
+            LOGGER.warning(
+                "Asset de profil introuvable : chemin reçu=%r, chemin final=%s",
+                relative_path,
+                target,
+            )
             return None
 
         with Image.open(target) as image:
