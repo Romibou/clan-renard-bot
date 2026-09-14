@@ -35,6 +35,10 @@ def error_embed(
 
 
 def xp_for_level(level: int) -> int:
+    """
+    Retourne la quantité totale d'XP nécessaire
+    pour atteindre un niveau.
+    """
     level = max(0, int(level))
 
     if level == 0:
@@ -48,6 +52,9 @@ def xp_for_level(level: int) -> int:
 
 
 def level_from_xp(total_xp: int) -> int:
+    """
+    Retourne le niveau correspondant à une quantité totale d'XP.
+    """
     total_xp = max(0, int(total_xp))
 
     low = 0
@@ -68,10 +75,16 @@ def level_from_xp(total_xp: int) -> int:
 
 
 def current_paris_date() -> date:
+    """
+    Retourne la date actuelle dans le fuseau Europe/Paris.
+    """
     return datetime.now(PARIS_TIMEZONE).date()
 
 
 def normalize_period(period: str) -> str:
+    """
+    Vérifie et normalise la période demandée.
+    """
     normalized = str(period).strip().lower()
 
     if normalized not in {
@@ -387,19 +400,26 @@ class StatisticsCog(commands.Cog):
                     ] = []
 
                     for record in current_records:
-                        user_id = int(record["user_id"])
+                        user_id = int(
+                            record["user_id"]
+                        )
+
                         total_xp = int(
                             record["total_xp"] or 0
                         )
+
                         wallet = int(
                             record["wallet"] or 0
                         )
+
                         lifetime_coins = int(
                             record["lifetime_coins"] or 0
                         )
+
                         rewarded_messages = int(
                             record["rewarded_messages"] or 0
                         )
+
                         rewarded_minutes = int(
                             record["rewarded_minutes"] or 0
                         )
@@ -412,15 +432,19 @@ class StatisticsCog(commands.Cog):
                             previous_xp = int(
                                 previous["total_xp"] or 0
                             )
+
                             previous_wallet = int(
                                 previous["wallet"] or 0
                             )
+
                             previous_lifetime = int(
                                 previous["lifetime_coins"] or 0
                             )
+
                             previous_messages = int(
                                 previous["rewarded_messages"] or 0
                             )
+
                             previous_minutes = int(
                                 previous["rewarded_minutes"] or 0
                             )
@@ -682,6 +706,15 @@ class StatisticsCog(commands.Cog):
             start_date,
         )
 
+        if record is None:
+            return {
+                "xp_gained": 0,
+                "coins_gained": 0,
+                "coins_spent": 0,
+                "rewarded_messages": 0,
+                "voice_minutes": 0,
+            }
+
         return {
             "xp_gained": int(
                 record["xp_gained"] or 0
@@ -748,7 +781,9 @@ class StatisticsCog(commands.Cog):
             }
 
         return {
-            "xp_rank": int(record["xp_rank"]),
+            "xp_rank": int(
+                record["xp_rank"]
+            ),
             "money_rank": int(
                 record["money_rank"]
             ),
@@ -787,7 +822,9 @@ class StatisticsCog(commands.Cog):
             }
 
         return {
-            "xp_rank": int(record["xp_rank"]),
+            "xp_rank": int(
+                record["xp_rank"]
+            ),
             "money_rank": int(
                 record["money_rank"]
             ),
@@ -939,6 +976,7 @@ class StatisticsCog(commands.Cog):
             current_xp_rank = current_ranks[
                 "xp_rank"
             ]
+
             old_xp_rank = historical_ranks[
                 "xp_rank"
             ]
@@ -946,6 +984,7 @@ class StatisticsCog(commands.Cog):
             current_money_rank = current_ranks[
                 "money_rank"
             ]
+
             old_money_rank = historical_ranks[
                 "money_rank"
             ]
@@ -971,6 +1010,23 @@ class StatisticsCog(commands.Cog):
                     - current_money_rank
                 )
 
+            total_xp = int(
+                current_data["total_xp"]
+            )
+
+            current_level = level_from_xp(
+                total_xp
+            )
+
+            next_level_total_xp = xp_for_level(
+                current_level + 1
+            )
+
+            xp_to_next_level = max(
+                0,
+                next_level_total_xp - total_xp,
+            )
+
             avatar_bytes: bytes | None = None
 
             try:
@@ -994,24 +1050,27 @@ class StatisticsCog(commands.Cog):
                 ),
                 avatar_bytes=avatar_bytes,
                 period_label=period_label,
-                level=level_from_xp(
-                    current_data["total_xp"]
+                level=current_level,
+                total_xp=total_xp,
+                wallet=int(
+                    current_data["wallet"]
                 ),
-                total_xp=current_data["total_xp"],
-                wallet=current_data["wallet"],
-                xp_gained=period_data["xp_gained"],
-                coins_gained=period_data[
-                    "coins_gained"
-                ],
-                coins_spent=period_data[
-                    "coins_spent"
-                ],
-                rewarded_messages=period_data[
-                    "rewarded_messages"
-                ],
-                voice_minutes=period_data[
-                    "voice_minutes"
-                ],
+                xp_to_next_level=xp_to_next_level,
+                xp_gained=int(
+                    period_data["xp_gained"]
+                ),
+                coins_gained=int(
+                    period_data["coins_gained"]
+                ),
+                coins_spent=int(
+                    period_data["coins_spent"]
+                ),
+                rewarded_messages=int(
+                    period_data["rewarded_messages"]
+                ),
+                voice_minutes=int(
+                    period_data["voice_minutes"]
+                ),
                 xp_rank=current_xp_rank,
                 money_rank=current_money_rank,
                 xp_rank_change=xp_rank_change,
@@ -1021,11 +1080,21 @@ class StatisticsCog(commands.Cog):
                 ),
             )
 
-            if isinstance(image, io.BytesIO):
+            if isinstance(
+                image,
+                io.BytesIO,
+            ):
                 image.seek(0)
                 buffer = image
-            elif isinstance(image, bytes):
-                buffer = io.BytesIO(image)
+
+            elif isinstance(
+                image,
+                bytes,
+            ):
+                buffer = io.BytesIO(
+                    image
+                )
+
             else:
                 raise TypeError(
                     (
