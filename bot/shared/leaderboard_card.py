@@ -133,6 +133,87 @@ def _load_username_font(
 
 
 
+@lru_cache(maxsize=16)
+def _load_cjk_font(
+    size: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    project_root = Path(__file__).resolve().parents[2]
+
+    candidates = [
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansSC-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansCJKsc-Regular.otf",
+
+        Path(
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansCJK-Regular.ttc"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/msyh.ttc"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/msgothic.ttc"
+        ),
+    ]
+
+    for font_path in candidates:
+        if not font_path.is_file():
+            continue
+
+        try:
+            return ImageFont.truetype(
+                str(font_path),
+                size=size,
+            )
+        except OSError:
+            continue
+
+    LOGGER.warning(
+        "Aucune police CJK compatible trouvée."
+    )
+
+    return _load_username_font(size)
+
+
+def _contains_cjk(
+    text: str,
+) -> bool:
+    for character in str(text):
+        codepoint = ord(character)
+
+        if (
+            0x3400 <= codepoint <= 0x4DBF
+            or 0x4E00 <= codepoint <= 0x9FFF
+            or 0xF900 <= codepoint <= 0xFAFF
+            or 0x20000 <= codepoint <= 0x2FA1F
+            or 0x3040 <= codepoint <= 0x30FF
+            or 0xAC00 <= codepoint <= 0xD7AF
+        ):
+            return True
+
+    return False
+
+
+def _get_username_font(
+    text: str,
+    size: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    if _contains_cjk(text):
+        return _load_cjk_font(size)
+
+    return _load_username_font(size)
+
+
+
+
 
 def _create_fallback_background() -> Image.Image:
     image = Image.new(
@@ -431,8 +512,6 @@ def render_leaderboard_card(
     row_value_font = _load_font(24, bold=True)
     footer_label_font = _load_font(17, bold=True)
     footer_font = _load_font(23, bold=True)
-    username_font = _load_username_font(25)
-    personal_username_font = _load_username_font(23)
 
 
     if normalized_type == "money":
@@ -575,6 +654,12 @@ def render_leaderboard_card(
             )
         )
 
+        username_font = _get_username_font(
+            display_name,
+             25,
+         )
+
+
         value = int(
             _get_row_value(
                 row,
@@ -670,6 +755,13 @@ def render_leaderboard_card(
         )
     )
 
+
+   personal_username_font = _get_username_font(
+       personal_name,
+       23,
+   )
+
+   
     personal_value = int(
         _get_row_value(
             personal_row,
