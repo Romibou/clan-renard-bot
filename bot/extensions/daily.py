@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 import discord
@@ -17,8 +19,14 @@ SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
 
-DAILY_COOLDOWN_HOURS = 24
-DAILY_STREAK_GRACE_HOURS = 48
+DAILY_COOLDOWN = timedelta(hours=24)
+DAILY_STREAK_GRACE = timedelta(hours=48)
+
+MAXIMUM_BASE_REWARD = 100_000_000
+MAXIMUM_RULE_BONUS = 100_000_000
+MAXIMUM_MULTIPLIER = Decimal("100")
+MAXIMUM_RULES = 30
+MAXIMUM_STREAK_DAY = 100_000
 
 
 def base_embed(
@@ -71,27 +79,61 @@ def format_number(
     return f"{int(value):,}".replace(",", " ")
 
 
-def discord_timestamp(
-    value: datetime,
-    style: str = "R",
+def format_duration(
+    duration: timedelta,
 ) -> str:
-    timestamp = int(
-        value.astimezone(timezone.utc).timestamp()
+    total_seconds = max(
+        0,
+        int(duration.total_seconds()),
     )
 
-    return f"<t:{timestamp}:{style}>"
+    hours, remaining = divmod(
+        total_seconds,
+        3600,
+    )
+
+    minutes, seconds = divmod(
+        remaining,
+        60,
+    )
+
+    parts: list[str] = []
+
+    if hours > 0:
+        parts.append(
+            f"{hours} h"
+        )
+
+    if minutes > 0:
+        parts.append(
+            f"{minutes} min"
+        )
+
+    if not parts:
+        parts.append(
+            f"{seconds} s"
+        )
+
+    return " ".join(parts)
 
 
 def xp_for_level(
     level: int,
 ) -> int:
-    level = max(0, int(level))
+    level = max(
+        0,
+        int(level),
+    )
 
     if level == 0:
         return 0
 
     return (
-        5 * (level - 1) * level * (2 * level - 1) // 6
+        5
+        * (level - 1)
+        * level
+        * (2 * level - 1)
+        // 6
         + 25 * level * (level - 1)
         + 100 * level
     )
@@ -100,7 +142,10 @@ def xp_for_level(
 def level_from_xp(
     total_xp: int,
 ) -> int:
-    total_xp = max(0, int(total_xp))
+    total_xp = max(
+        0,
+        int(total_xp),
+    )
 
     low = 0
     high = 1
@@ -109,7 +154,9 @@ def level_from_xp(
         high *= 2
 
     while low + 1 < high:
-        middle = (low + high) // 2
+        middle = (
+            low + high
+        ) // 2
 
         if xp_for_level(middle) <= total_xp:
             low = middle
@@ -119,10 +166,669 @@ def level_from_xp(
     return low
 
 
+def decimal_from_value(
+    value: Any,
+    *,
+    field_name: str,
+) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError(
+            f"`{field_name}` doit être un nombre."
+        )
+
+    try:
+        decimal_value = Decimal(
+            str(value).strip().replace(",", ".")
+        )
+    except (
+        InvalidOperation,
+        ValueError,
+        AttributeError,
+    ) as error:
+        raise ValueError(
+            f"`{field_name}` doit être un nombre valide."
+        ) from error
+
+    if not decimal_value.is_finite():
+        raise ValueError(
+            f"`{field_name}` doit être un nombre fini."
+        )
+
+    return decimal_value
+
+
+def integer_from_value(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool):
+        raise ValueError(
+            f"`{field_name}` doit être un nombre entier."
+        )
+
+    try:
+        integer_value = int(value)
+    except (
+        TypeError,
+        ValueError,
+    ) as error:
+        raise ValueError(
+            f"`{field_name}` doit être un nombre entier."
+        ) from error
+
+    if str(value).strip() != str(integer_value):
+        try:
+            decimal_value = Decimal(
+                str(value).strip()
+            )
+        except InvalidOperation as error:
+            raise ValueError(
+                f"`{field_name}` doit être un nombre entier."
+            ) from error
+
+        if decimal_value != Decimal(integer_value):
+            raise ValueError(
+                f"`{field_name}` doit être un nombre entier."
+            )
+
+    if not minimum <= integer_value <= maximum:
+        raise ValueError(
+            (
+                f"`{field_name}` doit être compris entre "
+                f"{format_number(minimum)} et "
+                f"{format_number(maximum)}."
+            )
+        )
+
+    return integer_value
+
+
+def decimal_to_json_value(
+    value: Decimal,
+) -> int | float:
+    normalized = value.normalize()
+
+    if normalized == normalized.to_integral_value():
+        return int(normalized)
+
+    return float(normalized)
+
+
+def format_multiplier(
+    multiplier: Decimal,
+) -> str:
+    normalized = multiplier.normalize()
+
+    return str(normalized).replace(
+        ".",
+        ",",
+    )
+
+
+def parse_database_json(
+    value: Any,
+) -> Any:
+    if value is None:
+        return []
+
+    if isinstance(
+        value,
+        (
+            list,
+            dict,
+        ),
+    ):
+        return value
+
+    if isinstance(
+        value,
+        (
+            str,
+            bytes,
+            bytearray,
+        ),
+    ):
+        try:
+            return json.loads(value)
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            TypeError,
+        ):
+            return []
+
+    return []
+
+
+def validate_bonus_rules(
+    raw_rules: str | list[Any],
+) -> list[dict[str, Any]]:
+    if isinstance(
+        raw_rules,
+        str,
+    ):
+        cleaned = raw_rules.strip()
+
+        if not cleaned:
+            return []
+
+        try:
+            decoded = json.loads(
+                cleaned
+            )
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                (
+                    "Le JSON est invalide à la ligne "
+                    f"{error.lineno}, colonne {error.colno}."
+                )
+            ) from error
+    else:
+        decoded = raw_rules
+
+    if not isinstance(
+        decoded,
+        list,
+    ):
+        raise ValueError(
+            (
+                "Le JSON principal doit être une liste entourée "
+                "de crochets `[` et `]`."
+            )
+        )
+
+    if len(decoded) > MAXIMUM_RULES:
+        raise ValueError(
+            (
+                "Tu peux configurer au maximum "
+                f"{MAXIMUM_RULES} règles."
+            )
+        )
+
+    normalized_rules: list[
+        dict[str, Any]
+    ] = []
+
+    allowed_keys = {
+        "name",
+        "day",
+        "every",
+        "priority",
+        "xp_multiplier",
+        "coins_multiplier",
+        "xp_bonus",
+        "coins_bonus",
+    }
+
+    for index, raw_rule in enumerate(
+        decoded,
+        start=1,
+    ):
+        if not isinstance(
+            raw_rule,
+            dict,
+        ):
+            raise ValueError(
+                (
+                    f"La règle n°{index} doit être "
+                    "un objet JSON `{ ... }`."
+                )
+            )
+
+        unknown_keys = (
+            set(raw_rule)
+            - allowed_keys
+        )
+
+        if unknown_keys:
+            unknown_text = ", ".join(
+                sorted(unknown_keys)
+            )
+
+            raise ValueError(
+                (
+                    f"La règle n°{index} contient "
+                    f"des champs inconnus : `{unknown_text}`."
+                )
+            )
+
+        has_day = "day" in raw_rule
+        has_every = "every" in raw_rule
+
+        if has_day == has_every:
+            raise ValueError(
+                (
+                    f"La règle n°{index} doit contenir "
+                    "soit `day`, soit `every`, mais pas les deux."
+                )
+            )
+
+        normalized_rule: dict[
+            str,
+            Any
+        ] = {}
+
+        if has_day:
+            day = integer_from_value(
+                raw_rule["day"],
+                field_name="day",
+                minimum=1,
+                maximum=MAXIMUM_STREAK_DAY,
+            )
+
+            normalized_rule["day"] = day
+
+            default_name = (
+                f"Bonus du jour {day}"
+            )
+        else:
+            every = integer_from_value(
+                raw_rule["every"],
+                field_name="every",
+                minimum=1,
+                maximum=MAXIMUM_STREAK_DAY,
+            )
+
+            normalized_rule["every"] = every
+
+            default_name = (
+                f"Bonus tous les {every} jours"
+            )
+
+        name = str(
+            raw_rule.get(
+                "name",
+                default_name,
+            )
+        ).strip()
+
+        if not name:
+            name = default_name
+
+        if len(name) > 100:
+            raise ValueError(
+                (
+                    f"Le nom de la règle n°{index} "
+                    "ne peut pas dépasser 100 caractères."
+                )
+            )
+
+        priority = integer_from_value(
+            raw_rule.get(
+                "priority",
+                0,
+            ),
+            field_name="priority",
+            minimum=0,
+            maximum=100_000,
+        )
+
+        xp_multiplier = decimal_from_value(
+            raw_rule.get(
+                "xp_multiplier",
+                1,
+            ),
+            field_name="xp_multiplier",
+        )
+
+        coins_multiplier = decimal_from_value(
+            raw_rule.get(
+                "coins_multiplier",
+                1,
+            ),
+            field_name="coins_multiplier",
+        )
+
+        if not (
+            Decimal("1")
+            <= xp_multiplier
+            <= MAXIMUM_MULTIPLIER
+        ):
+            raise ValueError(
+                (
+                    f"Le multiplicateur d'XP de la règle n°{index} "
+                    "doit être compris entre 1 et "
+                    f"{MAXIMUM_MULTIPLIER}."
+                )
+            )
+
+        if not (
+            Decimal("1")
+            <= coins_multiplier
+            <= MAXIMUM_MULTIPLIER
+        ):
+            raise ValueError(
+                (
+                    f"Le multiplicateur de pièces de la règle n°{index} "
+                    "doit être compris entre 1 et "
+                    f"{MAXIMUM_MULTIPLIER}."
+                )
+            )
+
+        xp_bonus = integer_from_value(
+            raw_rule.get(
+                "xp_bonus",
+                0,
+            ),
+            field_name="xp_bonus",
+            minimum=0,
+            maximum=MAXIMUM_RULE_BONUS,
+        )
+
+        coins_bonus = integer_from_value(
+            raw_rule.get(
+                "coins_bonus",
+                0,
+            ),
+            field_name="coins_bonus",
+            minimum=0,
+            maximum=MAXIMUM_RULE_BONUS,
+        )
+
+        if (
+            xp_multiplier == Decimal("1")
+            and coins_multiplier == Decimal("1")
+            and xp_bonus == 0
+            and coins_bonus == 0
+        ):
+            raise ValueError(
+                (
+                    f"La règle n°{index} ne donne aucun bonus.\n"
+                    "Ajoute un multiplicateur supérieur à 1 "
+                    "ou un bonus fixe."
+                )
+            )
+
+        normalized_rule.update(
+            {
+                "name": name,
+                "priority": priority,
+                "xp_multiplier": (
+                    decimal_to_json_value(
+                        xp_multiplier
+                    )
+                ),
+                "coins_multiplier": (
+                    decimal_to_json_value(
+                        coins_multiplier
+                    )
+                ),
+                "xp_bonus": xp_bonus,
+                "coins_bonus": coins_bonus,
+            }
+        )
+
+        normalized_rules.append(
+            normalized_rule
+        )
+
+    return normalized_rules
+
+
+def rule_is_applicable(
+    rule: dict[str, Any],
+    streak: int,
+) -> bool:
+    if "day" in rule:
+        return int(
+            rule["day"]
+        ) == streak
+
+    if "every" in rule:
+        interval = int(
+            rule["every"]
+        )
+
+        return (
+            interval > 0
+            and streak % interval == 0
+        )
+
+    return False
+
+
+def rule_selection_key(
+    rule: dict[str, Any],
+    index: int,
+) -> tuple[
+    int,
+    int,
+    Decimal,
+    Decimal,
+    int,
+    int,
+]:
+    priority = int(
+        rule.get(
+            "priority",
+            0,
+        )
+    )
+
+    exact_day_priority = (
+        1
+        if "day" in rule
+        else 0
+    )
+
+    xp_multiplier = Decimal(
+        str(
+            rule.get(
+                "xp_multiplier",
+                1,
+            )
+        )
+    )
+
+    coins_multiplier = Decimal(
+        str(
+            rule.get(
+                "coins_multiplier",
+                1,
+            )
+        )
+    )
+
+    fixed_bonus = (
+        int(
+            rule.get(
+                "xp_bonus",
+                0,
+            )
+        )
+        + int(
+            rule.get(
+                "coins_bonus",
+                0,
+            )
+        )
+    )
+
+    return (
+        priority,
+        exact_day_priority,
+        max(
+            xp_multiplier,
+            coins_multiplier,
+        ),
+        xp_multiplier
+        + coins_multiplier,
+        fixed_bonus,
+        -index,
+    )
+
+
+def select_bonus_rule(
+    rules: list[dict[str, Any]],
+    streak: int,
+) -> dict[str, Any] | None:
+    applicable_rules: list[
+        tuple[
+            int,
+            dict[str, Any],
+        ]
+    ] = []
+
+    for index, rule in enumerate(
+        rules
+    ):
+        if rule_is_applicable(
+            rule,
+            streak,
+        ):
+            applicable_rules.append(
+                (
+                    index,
+                    rule,
+                )
+            )
+
+    if not applicable_rules:
+        return None
+
+    _, selected_rule = max(
+        applicable_rules,
+        key=lambda item: rule_selection_key(
+            item[1],
+            item[0],
+        ),
+    )
+
+    return selected_rule
+
+
+def calculate_reward(
+    *,
+    base_reward: int,
+    multiplier: Decimal,
+    fixed_bonus: int,
+) -> int:
+    multiplied_reward = (
+        Decimal(base_reward)
+        * multiplier
+    ).quantize(
+        Decimal("1"),
+        rounding=ROUND_HALF_UP,
+    )
+
+    return max(
+        0,
+        int(multiplied_reward)
+        + int(fixed_bonus),
+    )
+
+
+def describe_rule(
+    rule: dict[str, Any],
+) -> str:
+    name = str(
+        rule.get(
+            "name",
+            "Bonus de série",
+        )
+    )
+
+    if "day" in rule:
+        trigger = (
+            f"jour **{int(rule['day'])}**"
+        )
+    else:
+        trigger = (
+            "tous les "
+            f"**{int(rule['every'])} jours**"
+        )
+
+    effects: list[str] = []
+
+    xp_multiplier = Decimal(
+        str(
+            rule.get(
+                "xp_multiplier",
+                1,
+            )
+        )
+    )
+
+    coins_multiplier = Decimal(
+        str(
+            rule.get(
+                "coins_multiplier",
+                1,
+            )
+        )
+    )
+
+    xp_bonus = int(
+        rule.get(
+            "xp_bonus",
+            0,
+        )
+    )
+
+    coins_bonus = int(
+        rule.get(
+            "coins_bonus",
+            0,
+        )
+    )
+
+    if xp_multiplier > Decimal("1"):
+        effects.append(
+            "XP "
+            f"×{format_multiplier(xp_multiplier)}"
+        )
+
+    if coins_multiplier > Decimal("1"):
+        effects.append(
+            "pièces "
+            f"×{format_multiplier(coins_multiplier)}"
+        )
+
+    if xp_bonus > 0:
+        effects.append(
+            f"+{format_number(xp_bonus)} XP"
+        )
+
+    if coins_bonus > 0:
+        effects.append(
+            (
+                f"+{format_number(coins_bonus)} "
+                "pièces"
+            )
+        )
+
+    effects_text = (
+        ", ".join(effects)
+        if effects
+        else "aucun effet"
+    )
+
+    priority = int(
+        rule.get(
+            "priority",
+            0,
+        )
+    )
+
+    priority_text = ""
+
+    if priority > 0:
+        priority_text = (
+            f" · priorité {priority}"
+        )
+
+    return (
+        f"• **{name}** — {trigger}\n"
+        f"  ↳ {effects_text}{priority_text}"
+    )
+
+
 @dataclass(slots=True)
 class DailyClaimResult:
-    claimed: bool
-    enabled: bool
+    status: str
 
     current_streak: int
     best_streak: int
@@ -136,21 +842,24 @@ class DailyClaimResult:
 
     bonus_xp: int
     bonus_coins: int
-    bonus_steps: int
 
-    total_xp: int
-    wallet: int
+    xp_multiplier: Decimal
+    coins_multiplier: Decimal
+
+    applied_rule: dict[str, Any] | None
 
     old_level: int
     new_level: int
 
-    last_claim_at: datetime | None
+    total_xp: int
+    wallet: int
+
     next_claim_at: datetime | None
-    streak_expires_at: datetime | None
 
 
-class DailyConfigurationModal(
+class DailyBaseConfigModal(
     discord.ui.Modal,
+    title="Récompense quotidienne",
 ):
     def __init__(
         self,
@@ -160,65 +869,35 @@ class DailyConfigurationModal(
         settings: dict[str, Any],
     ) -> None:
         super().__init__(
-            title="Configuration du quotidien",
             timeout=300,
         )
 
         self.cog = cog
         self.guild_id = guild_id
 
-        self.base_xp_input = discord.ui.TextInput(
-            label="XP de base",
-            placeholder="Exemple : 100",
-            default=str(settings["base_xp"]),
-            required=True,
-            min_length=1,
-            max_length=9,
-        )
-
-        self.base_coins_input = discord.ui.TextInput(
-            label="Pièces de base",
-            placeholder="Exemple : 50",
-            default=str(settings["base_coins"]),
-            required=True,
-            min_length=1,
-            max_length=9,
-        )
-
-        self.streak_xp_bonus_input = discord.ui.TextInput(
-            label="Bonus XP par jour de série",
-            placeholder="Exemple : 10",
-            default=str(
-                settings["streak_xp_bonus"]
-            ),
-            required=True,
-            min_length=1,
-            max_length=9,
-        )
-
-        self.streak_coins_bonus_input = (
+        self.base_xp_input = (
             discord.ui.TextInput(
-                label="Bonus pièces par jour de série",
-                placeholder="Exemple : 5",
+                label="XP quotidienne",
+                placeholder="Exemple : 100",
                 default=str(
-                    settings["streak_coins_bonus"]
+                    settings["base_xp"]
                 ),
                 required=True,
                 min_length=1,
-                max_length=9,
+                max_length=10,
             )
         )
 
-        self.maximum_bonus_days_input = (
+        self.base_coins_input = (
             discord.ui.TextInput(
-                label="Nombre maximum de jours de bonus",
-                placeholder="Exemple : 30",
+                label="Pièces quotidiennes",
+                placeholder="Exemple : 15",
                 default=str(
-                    settings["maximum_bonus_days"]
+                    settings["base_coins"]
                 ),
                 required=True,
                 min_length=1,
-                max_length=4,
+                max_length=10,
             )
         )
 
@@ -227,15 +906,6 @@ class DailyConfigurationModal(
         )
         self.add_item(
             self.base_coins_input
-        )
-        self.add_item(
-            self.streak_xp_bonus_input
-        )
-        self.add_item(
-            self.streak_coins_bonus_input
-        )
-        self.add_item(
-            self.maximum_bonus_days_input
         )
 
     async def on_submit(
@@ -254,30 +924,12 @@ class DailyConfigurationModal(
                     self.base_coins_input.value
                 ).strip()
             )
-
-            streak_xp_bonus = int(
-                str(
-                    self.streak_xp_bonus_input.value
-                ).strip()
-            )
-
-            streak_coins_bonus = int(
-                str(
-                    self.streak_coins_bonus_input.value
-                ).strip()
-            )
-
-            maximum_bonus_days = int(
-                str(
-                    self.maximum_bonus_days_input.value
-                ).strip()
-            )
         except ValueError:
             await interaction.response.send_message(
                 embed=error_embed(
                     "Valeur invalide",
                     (
-                        "Tous les champs doivent contenir "
+                        "Les récompenses doivent être "
                         "des nombres entiers."
                     ),
                 ),
@@ -285,123 +937,160 @@ class DailyConfigurationModal(
             )
             return
 
-        if not 0 <= base_xp <= 100_000_000:
+        if not (
+            0
+            <= base_xp
+            <= MAXIMUM_BASE_REWARD
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
-                    "XP de base invalide",
+                    "XP invalide",
                     (
-                        "L'XP de base doit être comprise "
-                        "entre **0** et **100 000 000**."
+                        "La récompense d'XP doit être "
+                        "comprise entre 0 et "
+                        f"{format_number(MAXIMUM_BASE_REWARD)}."
                     ),
                 ),
                 ephemeral=True,
             )
             return
 
-        if not 0 <= base_coins <= 100_000_000:
+        if not (
+            0
+            <= base_coins
+            <= MAXIMUM_BASE_REWARD
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
-                    "Pièces de base invalides",
+                    "Pièces invalides",
                     (
-                        "Les pièces de base doivent être "
-                        "comprises entre **0** et "
-                        "**100 000 000**."
+                        "La récompense en pièces doit être "
+                        "comprise entre 0 et "
+                        f"{format_number(MAXIMUM_BASE_REWARD)}."
                     ),
                 ),
                 ephemeral=True,
             )
             return
 
-        if not 0 <= streak_xp_bonus <= 10_000_000:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Bonus XP invalide",
-                    (
-                        "Le bonus d'XP doit être compris "
-                        "entre **0** et **10 000 000**."
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
-
-        if not 0 <= streak_coins_bonus <= 10_000_000:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Bonus de pièces invalide",
-                    (
-                        "Le bonus de pièces doit être compris "
-                        "entre **0** et **10 000 000**."
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
-
-        if not 0 <= maximum_bonus_days <= 1_000:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Limite invalide",
-                    (
-                        "Le nombre maximum de jours de bonus "
-                        "doit être compris entre **0** et "
-                        "**1 000**."
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
-
-        await self.cog.update_settings(
+        await self.cog.update_base_rewards(
             guild_id=self.guild_id,
             base_xp=base_xp,
             base_coins=base_coins,
-            streak_xp_bonus=streak_xp_bonus,
-            streak_coins_bonus=streak_coins_bonus,
-            maximum_bonus_days=maximum_bonus_days,
-        )
-
-        maximum_reward_xp = (
-            base_xp
-            + streak_xp_bonus
-            * maximum_bonus_days
-        )
-
-        maximum_reward_coins = (
-            base_coins
-            + streak_coins_bonus
-            * maximum_bonus_days
         )
 
         await interaction.response.send_message(
             embed=success_embed(
-                "Configuration enregistrée",
+                "Récompense enregistrée",
                 (
-                    f"XP de base : "
-                    f"**{format_number(base_xp)} XP**\n"
-                    f"Pièces de base : "
-                    f"**{format_number(base_coins)} pièces**\n\n"
-                    f"Bonus par jour de série : "
-                    f"**+{format_number(streak_xp_bonus)} XP** "
-                    f"et "
-                    f"**+{format_number(streak_coins_bonus)} "
-                    f"pièces**\n"
-                    f"Bonus limité à "
-                    f"**{format_number(maximum_bonus_days)} "
-                    f"jours**\n\n"
-                    f"Récompense maximale : "
-                    f"**{format_number(maximum_reward_xp)} XP** "
-                    f"et "
-                    f"**{format_number(maximum_reward_coins)} "
-                    f"pièces**."
+                    "La récompense quotidienne fixe est maintenant :\n\n"
+                    f"✨ **{format_number(base_xp)} XP**\n"
+                    f"💰 **{format_number(base_coins)} pièces**\n\n"
+                    "Les bonus de série configurés dans le JSON "
+                    "peuvent modifier cette récompense à certains paliers."
                 ),
             ),
             ephemeral=True,
         )
 
 
+class DailyRulesModal(
+    discord.ui.Modal,
+    title="Bonus de série en JSON",
+):
+    def __init__(
+        self,
+        *,
+        cog: DailyCog,
+        guild_id: int,
+        rules: list[dict[str, Any]],
+    ) -> None:
+        super().__init__(
+            timeout=600,
+        )
+
+        self.cog = cog
+        self.guild_id = guild_id
+
+        serialized_rules = json.dumps(
+            rules,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        if len(serialized_rules) > 4000:
+            serialized_rules = "[]"
+
+        self.rules_input = (
+            discord.ui.TextInput(
+                label="Règles JSON",
+                placeholder=(
+                    '[{"every":7,"coins_multiplier":2},'
+                    '{"day":30,"xp_multiplier":2}]'
+                ),
+                default=serialized_rules,
+                style=discord.TextStyle.paragraph,
+                required=True,
+                min_length=2,
+                max_length=4000,
+            )
+        )
+
+        self.add_item(
+            self.rules_input
+        )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
+            normalized_rules = (
+                validate_bonus_rules(
+                    str(
+                        self.rules_input.value
+                    )
+                )
+            )
+        except ValueError as error:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "JSON invalide",
+                    str(error),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await self.cog.update_bonus_rules(
+            guild_id=self.guild_id,
+            rules=normalized_rules,
+        )
+
+        if normalized_rules:
+            description = (
+                f"**{len(normalized_rules)} règle(s)** "
+                "de bonus ont été enregistrées.\n\n"
+                "Si plusieurs règles correspondent au même jour, "
+                "une seule règle sera appliquée."
+            )
+        else:
+            description = (
+                "Toutes les règles de bonus ont été supprimées.\n\n"
+                "La récompense restera identique tous les jours."
+            )
+
+        await interaction.response.send_message(
+            embed=success_embed(
+                "Bonus enregistrés",
+                description,
+            ),
+            ephemeral=True,
+        )
+
+
 class DailyAdminView(
-    discord.ui.View,
+    discord.ui.View
 ):
     def __init__(
         self,
@@ -422,7 +1111,10 @@ class DailyAdminView(
         self,
         interaction: discord.Interaction,
     ) -> bool:
-        if interaction.user.id == self.owner_id:
+        if (
+            interaction.user.id
+            == self.owner_id
+        ):
             return True
 
         await interaction.response.send_message(
@@ -430,7 +1122,7 @@ class DailyAdminView(
                 "Panneau personnel",
                 (
                     "Seul l'administrateur ayant ouvert "
-                    "ce panneau peut utiliser ses boutons."
+                    "ce panneau peut l'utiliser."
                 ),
             ),
             ephemeral=True,
@@ -439,25 +1131,50 @@ class DailyAdminView(
         return False
 
     @discord.ui.button(
-        label="Configuration",
-        emoji="⚙️",
+        label="Récompense",
+        emoji="🎁",
         style=discord.ButtonStyle.primary,
         row=0,
     )
-    async def configure_daily(
+    async def configure_rewards(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
         settings = await self.cog.get_settings(
             self.guild_id,
+            use_cache=False,
         )
 
         await interaction.response.send_modal(
-            DailyConfigurationModal(
+            DailyBaseConfigModal(
                 cog=self.cog,
                 guild_id=self.guild_id,
                 settings=settings,
+            )
+        )
+
+    @discord.ui.button(
+        label="Bonus de série",
+        emoji="🔥",
+        style=discord.ButtonStyle.primary,
+        row=0,
+    )
+    async def configure_rules(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        settings = await self.cog.get_settings(
+            self.guild_id,
+            use_cache=False,
+        )
+
+        await interaction.response.send_modal(
+            DailyRulesModal(
+                cog=self.cog,
+                guild_id=self.guild_id,
+                rules=settings["bonus_rules"],
             )
         )
 
@@ -467,78 +1184,128 @@ class DailyAdminView(
         style=discord.ButtonStyle.secondary,
         row=0,
     )
-    async def toggle_daily(
+    async def toggle_system(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
         settings = await self.cog.get_settings(
             self.guild_id,
+            use_cache=False,
         )
 
-        new_state = not bool(
+        enabled = not bool(
             settings["enabled"]
         )
 
         await self.cog.set_enabled(
             guild_id=self.guild_id,
-            enabled=new_state,
+            enabled=enabled,
         )
 
-        updated_embed = (
-            await self.cog.build_admin_embed(
-                self.guild_id
-            )
-        )
-
-        await interaction.response.edit_message(
-            embed=updated_embed,
-            view=self,
-        )
-
-        await interaction.followup.send(
+        await interaction.response.send_message(
             embed=success_embed(
                 "État modifié",
                 (
-                    "La récompense quotidienne est "
-                    f"maintenant "
-                    f"**{'activée' if new_state else 'désactivée'}**."
+                    "La récompense quotidienne est maintenant "
+                    f"**{'activée' if enabled else 'désactivée'}**."
                 ),
             ),
             ephemeral=True,
         )
 
     @discord.ui.button(
-        label="Actualiser",
-        emoji="🔄",
+        label="Voir la configuration",
+        emoji="📋",
         style=discord.ButtonStyle.secondary,
-        row=0,
+        row=1,
     )
-    async def refresh_panel(
+    async def show_configuration(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        updated_embed = (
-            await self.cog.build_admin_embed(
-                self.guild_id
-            )
+        embed = await self.cog.build_admin_embed(
+            self.guild_id
         )
 
-        await interaction.response.edit_message(
-            embed=updated_embed,
-            view=self,
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Exemple JSON",
+        emoji="🧩",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def show_json_example(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        example = [
+            {
+                "name": "Septième jour",
+                "every": 7,
+                "coins_multiplier": 2,
+            },
+            {
+                "name": "Trentième jour",
+                "day": 30,
+                "priority": 10,
+                "xp_multiplier": 2,
+                "coins_multiplier": 3,
+            },
+            {
+                "name": "Centième jour",
+                "day": 100,
+                "priority": 20,
+                "xp_bonus": 5000,
+                "coins_bonus": 1000,
+            },
+        ]
+
+        json_example = json.dumps(
+            example,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        await interaction.response.send_message(
+            embed=base_embed(
+                "🧩 Exemple de configuration JSON",
+                (
+                    "Copie et adapte cet exemple dans "
+                    "**Bonus de série** :\n\n"
+                    f"```json\n{json_example}\n```\n"
+                    "`every` applique une règle tous les X jours.\n"
+                    "`day` applique une règle à un jour précis.\n"
+                    "`priority` permet de choisir une règle "
+                    "si plusieurs correspondent au même jour."
+                ),
+            ),
+            ephemeral=True,
         )
 
 
 class DailyCog(
-    commands.Cog,
+    commands.Cog
 ):
     def __init__(
         self,
         bot: commands.Bot,
     ) -> None:
         self.bot = bot
+
+        self._settings_cache: dict[
+            int,
+            tuple[
+                float,
+                dict[str, Any],
+            ],
+        ] = {}
 
     def get_pool(self):
         database = getattr(
@@ -554,6 +1321,13 @@ class DailyCog(
 
         return database.require_pool()
 
+    def get_progression_cog(
+        self,
+    ) -> commands.Cog | None:
+        return self.bot.get_cog(
+            "ProgressionCog"
+        )
+
     async def initialize_database(
         self,
     ) -> None:
@@ -567,38 +1341,33 @@ class DailyCog(
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
 
                 base_xp BIGINT NOT NULL DEFAULT 100
-                    CHECK (
-                        base_xp >= 0
-                        AND base_xp <= 100000000
-                    ),
+                    CHECK (base_xp >= 0),
 
-                base_coins BIGINT NOT NULL DEFAULT 50
-                    CHECK (
-                        base_coins >= 0
-                        AND base_coins <= 100000000
-                    ),
+                base_coins BIGINT NOT NULL DEFAULT 15
+                    CHECK (base_coins >= 0),
 
-                streak_xp_bonus BIGINT NOT NULL DEFAULT 10
-                    CHECK (
-                        streak_xp_bonus >= 0
-                        AND streak_xp_bonus <= 10000000
-                    ),
+                streak_xp_bonus BIGINT NOT NULL DEFAULT 0
+                    CHECK (streak_xp_bonus >= 0),
 
-                streak_coins_bonus BIGINT NOT NULL DEFAULT 5
-                    CHECK (
-                        streak_coins_bonus >= 0
-                        AND streak_coins_bonus <= 10000000
-                    ),
+                streak_coins_bonus BIGINT NOT NULL DEFAULT 0
+                    CHECK (streak_coins_bonus >= 0),
 
-                maximum_bonus_days INTEGER NOT NULL DEFAULT 30
-                    CHECK (
-                        maximum_bonus_days >= 0
-                        AND maximum_bonus_days <= 1000
-                    ),
+                maximum_bonus_days INTEGER NOT NULL DEFAULT 0
+                    CHECK (maximum_bonus_days >= 0),
+
+                bonus_rules JSONB NOT NULL DEFAULT '[]'::JSONB,
 
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+            """
+        )
+
+        await pool.execute(
+            """
+            ALTER TABLE daily_settings
+            ADD COLUMN IF NOT EXISTS bonus_rules JSONB
+                NOT NULL DEFAULT '[]'::JSONB
             """
         )
 
@@ -653,11 +1422,19 @@ class DailyCog(
                 base_coins BIGINT NOT NULL
                     CHECK (base_coins >= 0),
 
-                bonus_xp BIGINT NOT NULL
+                bonus_xp BIGINT NOT NULL DEFAULT 0
                     CHECK (bonus_xp >= 0),
 
-                bonus_coins BIGINT NOT NULL
+                bonus_coins BIGINT NOT NULL DEFAULT 0
                     CHECK (bonus_coins >= 0),
+
+                xp_multiplier NUMERIC(10, 2)
+                    NOT NULL DEFAULT 1.00,
+
+                coins_multiplier NUMERIC(10, 2)
+                    NOT NULL DEFAULT 1.00,
+
+                applied_rules JSONB NOT NULL DEFAULT '[]'::JSONB,
 
                 claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -666,10 +1443,34 @@ class DailyCog(
 
         await pool.execute(
             """
+            ALTER TABLE daily_claims
+            ADD COLUMN IF NOT EXISTS xp_multiplier
+                NUMERIC(10, 2) NOT NULL DEFAULT 1.00
+            """
+        )
+
+        await pool.execute(
+            """
+            ALTER TABLE daily_claims
+            ADD COLUMN IF NOT EXISTS coins_multiplier
+                NUMERIC(10, 2) NOT NULL DEFAULT 1.00
+            """
+        )
+
+        await pool.execute(
+            """
+            ALTER TABLE daily_claims
+            ADD COLUMN IF NOT EXISTS applied_rules
+                JSONB NOT NULL DEFAULT '[]'::JSONB
+            """
+        )
+
+        await pool.execute(
+            """
             CREATE INDEX IF NOT EXISTS daily_members_claim_idx
             ON daily_members (
                 guild_id,
-                last_claim_at
+                last_claim_at DESC
             )
             """
         )
@@ -686,7 +1487,7 @@ class DailyCog(
         )
 
         LOGGER.info(
-            "Tables du système quotidien vérifiées"
+            "Tables des récompenses quotidiennes vérifiées"
         )
 
     async def ensure_settings(
@@ -710,7 +1511,26 @@ class DailyCog(
     async def get_settings(
         self,
         guild_id: int,
+        *,
+        use_cache: bool = True,
     ) -> dict[str, Any]:
+        import time
+
+        current_time = (
+            time.monotonic()
+        )
+
+        cached = self._settings_cache.get(
+            guild_id
+        )
+
+        if (
+            use_cache
+            and cached is not None
+            and cached[0] > current_time
+        ):
+            return cached[1]
+
         await self.ensure_settings(
             guild_id
         )
@@ -723,9 +1543,7 @@ class DailyCog(
                 enabled,
                 base_xp,
                 base_coins,
-                streak_xp_bonus,
-                streak_coins_bonus,
-                maximum_bonus_days
+                bonus_rules
             FROM daily_settings
             WHERE guild_id = $1
             """,
@@ -734,39 +1552,61 @@ class DailyCog(
 
         if record is None:
             raise RuntimeError(
-                "La configuration quotidienne est introuvable."
+                (
+                    "La configuration des récompenses "
+                    "quotidiennes est introuvable."
+                )
             )
 
-        return {
+        raw_rules = parse_database_json(
+            record["bonus_rules"]
+        )
+
+        try:
+            normalized_rules = (
+                validate_bonus_rules(
+                    raw_rules
+                )
+            )
+        except ValueError:
+            LOGGER.exception(
+                (
+                    "Les règles quotidiennes du serveur %s "
+                    "sont invalides."
+                ),
+                guild_id,
+            )
+
+            normalized_rules = []
+
+        settings = {
             "enabled": bool(
                 record["enabled"]
             ),
             "base_xp": int(
-                record["base_xp"]
+                record["base_xp"] or 0
             ),
             "base_coins": int(
-                record["base_coins"]
+                record["base_coins"] or 0
             ),
-            "streak_xp_bonus": int(
-                record["streak_xp_bonus"]
-            ),
-            "streak_coins_bonus": int(
-                record["streak_coins_bonus"]
-            ),
-            "maximum_bonus_days": int(
-                record["maximum_bonus_days"]
-            ),
+            "bonus_rules": normalized_rules,
         }
 
-    async def update_settings(
+        self._settings_cache[
+            guild_id
+        ] = (
+            current_time + 60,
+            settings,
+        )
+
+        return settings
+
+    async def update_base_rewards(
         self,
         *,
         guild_id: int,
         base_xp: int,
         base_coins: int,
-        streak_xp_bonus: int,
-        streak_coins_bonus: int,
-        maximum_bonus_days: int,
     ) -> None:
         await self.ensure_settings(
             guild_id
@@ -780,18 +1620,65 @@ class DailyCog(
             SET
                 base_xp = $2,
                 base_coins = $3,
-                streak_xp_bonus = $4,
-                streak_coins_bonus = $5,
-                maximum_bonus_days = $6,
+
+                -- Ces anciennes colonnes sont conservées
+                -- pour la compatibilité avec la base,
+                -- mais elles ne sont plus utilisées.
+                streak_xp_bonus = 0,
+                streak_coins_bonus = 0,
+                maximum_bonus_days = 0,
+
                 updated_at = NOW()
             WHERE guild_id = $1
             """,
             guild_id,
             base_xp,
             base_coins,
-            streak_xp_bonus,
-            streak_coins_bonus,
-            maximum_bonus_days,
+        )
+
+        self._settings_cache.pop(
+            guild_id,
+            None,
+        )
+
+    async def update_bonus_rules(
+        self,
+        *,
+        guild_id: int,
+        rules: list[dict[str, Any]],
+    ) -> None:
+        normalized_rules = (
+            validate_bonus_rules(
+                rules
+            )
+        )
+
+        serialized_rules = json.dumps(
+            normalized_rules,
+            ensure_ascii=False,
+        )
+
+        await self.ensure_settings(
+            guild_id
+        )
+
+        pool = self.get_pool()
+
+        await pool.execute(
+            """
+            UPDATE daily_settings
+            SET
+                bonus_rules = $2::JSONB,
+                updated_at = NOW()
+            WHERE guild_id = $1
+            """,
+            guild_id,
+            serialized_rules,
+        )
+
+        self._settings_cache.pop(
+            guild_id,
+            None,
         )
 
     async def set_enabled(
@@ -818,112 +1705,59 @@ class DailyCog(
             enabled,
         )
 
-    async def build_admin_embed(
+        self._settings_cache.pop(
+            guild_id,
+            None,
+        )
+
+    async def get_member_daily_data(
         self,
+        *,
         guild_id: int,
-    ) -> discord.Embed:
-        settings = await self.get_settings(
-            guild_id
+        user_id: int,
+    ) -> dict[str, Any]:
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
+            """
+            SELECT
+                current_streak,
+                best_streak,
+                total_claims,
+                last_claim_at
+            FROM daily_members
+            WHERE guild_id = $1
+              AND user_id = $2
+            """,
+            guild_id,
+            user_id,
         )
 
-        maximum_reward_xp = (
-            settings["base_xp"]
-            + settings["streak_xp_bonus"]
-            * settings["maximum_bonus_days"]
-        )
+        if record is None:
+            return {
+                "current_streak": 0,
+                "best_streak": 0,
+                "total_claims": 0,
+                "last_claim_at": None,
+            }
 
-        maximum_reward_coins = (
-            settings["base_coins"]
-            + settings["streak_coins_bonus"]
-            * settings["maximum_bonus_days"]
-        )
-
-        embed = base_embed(
-            "🎁 Administration du quotidien",
-            (
-                "Configure les récompenses obtenues avec "
-                "`/quotidien`.\n\n"
-                "Une récompense peut être récupérée toutes "
-                "les **24 heures**.\n"
-                "La série est perdue après **48 heures** "
-                "sans récupération."
+        return {
+            "current_streak": int(
+                record["current_streak"]
+                or 0
             ),
-        )
-
-        embed.add_field(
-            name="État",
-            value=(
-                "Activé ✅"
-                if settings["enabled"]
-                else "Désactivé ❌"
+            "best_streak": int(
+                record["best_streak"]
+                or 0
             ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Délai",
-            value=(
-                f"**{DAILY_COOLDOWN_HOURS} heures**"
+            "total_claims": int(
+                record["total_claims"]
+                or 0
             ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Expiration de la série",
-            value=(
-                f"Après **{DAILY_STREAK_GRACE_HOURS} heures**"
+            "last_claim_at": (
+                record["last_claim_at"]
             ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Récompense de base",
-            value=(
-                f"✨ **{format_number(settings['base_xp'])} XP**\n"
-                f"💰 **{format_number(settings['base_coins'])} "
-                "pièces**"
-            ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Bonus par jour de série",
-            value=(
-                f"✨ **+{format_number(settings['streak_xp_bonus'])} "
-                "XP**\n"
-                f"💰 **+{format_number(settings['streak_coins_bonus'])} "
-                "pièces**"
-            ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Limite du bonus",
-            value=(
-                f"**{format_number(settings['maximum_bonus_days'])} "
-                "jours**"
-            ),
-            inline=True,
-        )
-
-        embed.add_field(
-            name="Récompense maximale",
-            value=(
-                f"✨ **{format_number(maximum_reward_xp)} XP**\n"
-                f"💰 **{format_number(maximum_reward_coins)} "
-                "pièces**"
-            ),
-            inline=False,
-        )
-
-        embed.set_footer(
-            text=(
-                "Le premier jour donne uniquement la récompense "
-                "de base. Le bonus commence au deuxième jour."
-            )
-        )
-
-        return embed
+        }
 
     async def claim_daily_reward(
         self,
@@ -931,21 +1765,9 @@ class DailyCog(
         guild_id: int,
         user_id: int,
     ) -> DailyClaimResult:
-        await self.ensure_settings(
-            guild_id
-        )
-
         pool = self.get_pool()
         current_time = datetime.now(
             timezone.utc
-        )
-
-        cooldown_duration = timedelta(
-            hours=DAILY_COOLDOWN_HOURS
-        )
-
-        streak_grace_duration = timedelta(
-            hours=DAILY_STREAK_GRACE_HOURS
         )
 
         async with pool.acquire() as connection:
@@ -959,26 +1781,77 @@ class DailyCog(
                     f"daily:{guild_id}:{user_id}",
                 )
 
-                settings = await connection.fetchrow(
+                await connection.execute(
                     """
-                    SELECT
-                        enabled,
-                        base_xp,
-                        base_coins,
-                        streak_xp_bonus,
-                        streak_coins_bonus,
-                        maximum_bonus_days
-                    FROM daily_settings
-                    WHERE guild_id = $1
-                    FOR SHARE
+                    INSERT INTO daily_settings (
+                        guild_id
+                    )
+                    VALUES ($1)
+                    ON CONFLICT (guild_id)
+                    DO NOTHING
                     """,
                     guild_id,
                 )
 
-                if settings is None:
-                    raise RuntimeError(
-                        "La configuration quotidienne est introuvable."
+                settings_record = (
+                    await connection.fetchrow(
+                        """
+                        SELECT
+                            enabled,
+                            base_xp,
+                            base_coins,
+                            bonus_rules
+                        FROM daily_settings
+                        WHERE guild_id = $1
+                        """,
+                        guild_id,
                     )
+                )
+
+                if settings_record is None:
+                    raise RuntimeError(
+                        (
+                            "La configuration quotidienne "
+                            "est introuvable."
+                        )
+                    )
+
+                enabled = bool(
+                    settings_record["enabled"]
+                )
+
+                base_xp = int(
+                    settings_record["base_xp"]
+                    or 0
+                )
+
+                base_coins = int(
+                    settings_record["base_coins"]
+                    or 0
+                )
+
+                raw_rules = parse_database_json(
+                    settings_record[
+                        "bonus_rules"
+                    ]
+                )
+
+                try:
+                    bonus_rules = (
+                        validate_bonus_rules(
+                            raw_rules
+                        )
+                    )
+                except ValueError:
+                    LOGGER.exception(
+                        (
+                            "Règles quotidiennes invalides "
+                            "pour le serveur %s."
+                        ),
+                        guild_id,
+                    )
+
+                    bonus_rules = []
 
                 await connection.execute(
                     """
@@ -997,172 +1870,31 @@ class DailyCog(
                     user_id,
                 )
 
-                daily_member = await connection.fetchrow(
-                    """
-                    SELECT
-                        current_streak,
-                        best_streak,
-                        total_claims,
-                        last_claim_at
-                    FROM daily_members
-                    WHERE guild_id = $1
-                      AND user_id = $2
-                    FOR UPDATE
-                    """,
-                    guild_id,
-                    user_id,
+                daily_record = (
+                    await connection.fetchrow(
+                        """
+                        SELECT
+                            current_streak,
+                            best_streak,
+                            total_claims,
+                            last_claim_at
+                        FROM daily_members
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        FOR UPDATE
+                        """,
+                        guild_id,
+                        user_id,
+                    )
                 )
 
-                if daily_member is None:
+                if daily_record is None:
                     raise RuntimeError(
-                        "Le profil quotidien n'a pas pu être créé."
-                    )
-
-                current_streak = int(
-                    daily_member["current_streak"] or 0
-                )
-
-                best_streak = int(
-                    daily_member["best_streak"] or 0
-                )
-
-                total_claims = int(
-                    daily_member["total_claims"] or 0
-                )
-
-                last_claim_at = (
-                    daily_member["last_claim_at"]
-                )
-
-                if not bool(settings["enabled"]):
-                    return DailyClaimResult(
-                        claimed=False,
-                        enabled=False,
-                        current_streak=current_streak,
-                        best_streak=best_streak,
-                        total_claims=total_claims,
-                        xp_reward=0,
-                        coins_reward=0,
-                        base_xp=0,
-                        base_coins=0,
-                        bonus_xp=0,
-                        bonus_coins=0,
-                        bonus_steps=0,
-                        total_xp=0,
-                        wallet=0,
-                        old_level=0,
-                        new_level=0,
-                        last_claim_at=last_claim_at,
-                        next_claim_at=None,
-                        streak_expires_at=None,
-                    )
-
-                if last_claim_at is not None:
-                    next_claim_at = (
-                        last_claim_at
-                        + cooldown_duration
-                    )
-
-                    streak_expires_at = (
-                        last_claim_at
-                        + streak_grace_duration
-                    )
-
-                    if current_time < next_claim_at:
-                        return DailyClaimResult(
-                            claimed=False,
-                            enabled=True,
-                            current_streak=current_streak,
-                            best_streak=best_streak,
-                            total_claims=total_claims,
-                            xp_reward=0,
-                            coins_reward=0,
-                            base_xp=int(
-                                settings["base_xp"]
-                            ),
-                            base_coins=int(
-                                settings["base_coins"]
-                            ),
-                            bonus_xp=0,
-                            bonus_coins=0,
-                            bonus_steps=0,
-                            total_xp=0,
-                            wallet=0,
-                            old_level=0,
-                            new_level=0,
-                            last_claim_at=last_claim_at,
-                            next_claim_at=next_claim_at,
-                            streak_expires_at=streak_expires_at,
+                        (
+                            "Les données quotidiennes "
+                            "du membre sont introuvables."
                         )
-
-                if last_claim_at is None:
-                    new_streak = 1
-                else:
-                    elapsed = (
-                        current_time
-                        - last_claim_at
                     )
-
-                    if elapsed <= streak_grace_duration:
-                        new_streak = (
-                            current_streak + 1
-                        )
-                    else:
-                        new_streak = 1
-
-                new_best_streak = max(
-                    best_streak,
-                    new_streak,
-                )
-
-                new_total_claims = (
-                    total_claims + 1
-                )
-
-                base_xp = int(
-                    settings["base_xp"]
-                )
-
-                base_coins = int(
-                    settings["base_coins"]
-                )
-
-                streak_xp_bonus = int(
-                    settings["streak_xp_bonus"]
-                )
-
-                streak_coins_bonus = int(
-                    settings["streak_coins_bonus"]
-                )
-
-                maximum_bonus_days = int(
-                    settings["maximum_bonus_days"]
-                )
-
-                bonus_steps = min(
-                    max(0, new_streak - 1),
-                    maximum_bonus_days,
-                )
-
-                bonus_xp = (
-                    streak_xp_bonus
-                    * bonus_steps
-                )
-
-                bonus_coins = (
-                    streak_coins_bonus
-                    * bonus_steps
-                )
-
-                xp_reward = (
-                    base_xp
-                    + bonus_xp
-                )
-
-                coins_reward = (
-                    base_coins
-                    + bonus_coins
-                )
 
                 await connection.execute(
                     """
@@ -1181,7 +1913,7 @@ class DailyCog(
                     user_id,
                 )
 
-                progression_member = (
+                progression_record = (
                     await connection.fetchrow(
                         """
                         SELECT
@@ -1197,17 +1929,235 @@ class DailyCog(
                     )
                 )
 
-                if progression_member is None:
+                if progression_record is None:
                     raise RuntimeError(
-                        "Le profil de progression est introuvable."
+                        (
+                            "La progression du membre "
+                            "est introuvable."
+                        )
                     )
 
-                old_total_xp = int(
-                    progression_member["total_xp"] or 0
+                current_streak = int(
+                    daily_record[
+                        "current_streak"
+                    ]
+                    or 0
+                )
+
+                best_streak = int(
+                    daily_record[
+                        "best_streak"
+                    ]
+                    or 0
+                )
+
+                total_claims = int(
+                    daily_record[
+                        "total_claims"
+                    ]
+                    or 0
+                )
+
+                last_claim_at = (
+                    daily_record[
+                        "last_claim_at"
+                    ]
+                )
+
+                old_xp = int(
+                    progression_record[
+                        "total_xp"
+                    ]
+                    or 0
+                )
+
+                old_wallet = int(
+                    progression_record[
+                        "wallet"
+                    ]
+                    or 0
                 )
 
                 old_level = level_from_xp(
-                    old_total_xp
+                    old_xp
+                )
+
+                if not enabled:
+                    return DailyClaimResult(
+                        status="disabled",
+                        current_streak=current_streak,
+                        best_streak=best_streak,
+                        total_claims=total_claims,
+                        xp_reward=0,
+                        coins_reward=0,
+                        base_xp=base_xp,
+                        base_coins=base_coins,
+                        bonus_xp=0,
+                        bonus_coins=0,
+                        xp_multiplier=Decimal("1"),
+                        coins_multiplier=Decimal("1"),
+                        applied_rule=None,
+                        old_level=old_level,
+                        new_level=old_level,
+                        total_xp=old_xp,
+                        wallet=old_wallet,
+                        next_claim_at=None,
+                    )
+
+                if last_claim_at is not None:
+                    next_claim_at = (
+                        last_claim_at
+                        + DAILY_COOLDOWN
+                    )
+
+                    if (
+                        current_time
+                        < next_claim_at
+                    ):
+                        return DailyClaimResult(
+                            status="cooldown",
+                            current_streak=(
+                                current_streak
+                            ),
+                            best_streak=(
+                                best_streak
+                            ),
+                            total_claims=(
+                                total_claims
+                            ),
+                            xp_reward=0,
+                            coins_reward=0,
+                            base_xp=base_xp,
+                            base_coins=base_coins,
+                            bonus_xp=0,
+                            bonus_coins=0,
+                            xp_multiplier=(
+                                Decimal("1")
+                            ),
+                            coins_multiplier=(
+                                Decimal("1")
+                            ),
+                            applied_rule=None,
+                            old_level=old_level,
+                            new_level=old_level,
+                            total_xp=old_xp,
+                            wallet=old_wallet,
+                            next_claim_at=(
+                                next_claim_at
+                            ),
+                        )
+
+                    streak_deadline = (
+                        last_claim_at
+                        + DAILY_STREAK_GRACE
+                    )
+
+                    if (
+                        current_time
+                        <= streak_deadline
+                    ):
+                        new_streak = (
+                            current_streak + 1
+                        )
+                    else:
+                        new_streak = 1
+                else:
+                    new_streak = 1
+
+                new_best_streak = max(
+                    best_streak,
+                    new_streak,
+                )
+
+                new_total_claims = (
+                    total_claims + 1
+                )
+
+                selected_rule = (
+                    select_bonus_rule(
+                        bonus_rules,
+                        new_streak,
+                    )
+                )
+
+                if selected_rule is None:
+                    xp_multiplier = (
+                        Decimal("1")
+                    )
+
+                    coins_multiplier = (
+                        Decimal("1")
+                    )
+
+                    fixed_xp_bonus = 0
+                    fixed_coins_bonus = 0
+                    applied_rules: list[
+                        dict[str, Any]
+                    ] = []
+                else:
+                    xp_multiplier = Decimal(
+                        str(
+                            selected_rule.get(
+                                "xp_multiplier",
+                                1,
+                            )
+                        )
+                    )
+
+                    coins_multiplier = Decimal(
+                        str(
+                            selected_rule.get(
+                                "coins_multiplier",
+                                1,
+                            )
+                        )
+                    )
+
+                    fixed_xp_bonus = int(
+                        selected_rule.get(
+                            "xp_bonus",
+                            0,
+                        )
+                    )
+
+                    fixed_coins_bonus = int(
+                        selected_rule.get(
+                            "coins_bonus",
+                            0,
+                        )
+                    )
+
+                    applied_rules = [
+                        selected_rule
+                    ]
+
+                xp_reward = calculate_reward(
+                    base_reward=base_xp,
+                    multiplier=xp_multiplier,
+                    fixed_bonus=(
+                        fixed_xp_bonus
+                    ),
+                )
+
+                coins_reward = calculate_reward(
+                    base_reward=base_coins,
+                    multiplier=(
+                        coins_multiplier
+                    ),
+                    fixed_bonus=(
+                        fixed_coins_bonus
+                    ),
+                )
+
+                bonus_xp = max(
+                    0,
+                    xp_reward - base_xp,
+                )
+
+                bonus_coins = max(
+                    0,
+                    coins_reward
+                    - base_coins,
                 )
 
                 updated_progression = (
@@ -1225,10 +2175,8 @@ class DailyCog(
                                 lifetime_coins + $4,
 
                             updated_at = NOW()
-
                         WHERE guild_id = $1
                           AND user_id = $2
-
                         RETURNING
                             total_xp,
                             wallet
@@ -1242,20 +2190,11 @@ class DailyCog(
 
                 if updated_progression is None:
                     raise RuntimeError(
-                        "La progression n'a pas pu être mise à jour."
+                        (
+                            "La récompense n'a pas pu "
+                            "être ajoutée."
+                        )
                     )
-
-                total_xp = int(
-                    updated_progression["total_xp"]
-                )
-
-                wallet = int(
-                    updated_progression["wallet"]
-                )
-
-                new_level = level_from_xp(
-                    total_xp
-                )
 
                 await connection.execute(
                     """
@@ -1277,6 +2216,13 @@ class DailyCog(
                     current_time,
                 )
 
+                serialized_applied_rules = (
+                    json.dumps(
+                        applied_rules,
+                        ensure_ascii=False,
+                    )
+                )
+
                 await connection.execute(
                     """
                     INSERT INTO daily_claims (
@@ -1289,6 +2235,9 @@ class DailyCog(
                         base_coins,
                         bonus_xp,
                         bonus_coins,
+                        xp_multiplier,
+                        coins_multiplier,
+                        applied_rules,
                         claimed_at
                     )
                     VALUES (
@@ -1301,7 +2250,10 @@ class DailyCog(
                         $7,
                         $8,
                         $9,
-                        $10
+                        $10,
+                        $11,
+                        $12::JSONB,
+                        $13
                     )
                     """,
                     guild_id,
@@ -1313,10 +2265,28 @@ class DailyCog(
                     base_coins,
                     bonus_xp,
                     bonus_coins,
+                    xp_multiplier,
+                    coins_multiplier,
+                    serialized_applied_rules,
                     current_time,
                 )
 
-                if coins_reward != 0:
+                if coins_reward > 0:
+                    reason = (
+                        "Récompense quotidienne"
+                    )
+
+                    if selected_rule is not None:
+                        reason += (
+                            " — "
+                            + str(
+                                selected_rule.get(
+                                    "name",
+                                    "bonus de série",
+                                )
+                            )
+                        )
+
                     await connection.execute(
                         """
                         INSERT INTO progression_transactions (
@@ -1333,97 +2303,272 @@ class DailyCog(
                             NULL,
                             $3,
                             'daily_reward',
-                            'Récompense quotidienne'
+                            $4
                         )
                         """,
                         guild_id,
                         user_id,
                         coins_reward,
+                        reason[:200],
                     )
 
-                next_claim_at = (
-                    current_time
-                    + cooldown_duration
+                total_xp = int(
+                    updated_progression[
+                        "total_xp"
+                    ]
+                    or 0
                 )
 
-                streak_expires_at = (
-                    current_time
-                    + streak_grace_duration
+                wallet = int(
+                    updated_progression[
+                        "wallet"
+                    ]
+                    or 0
+                )
+
+                new_level = level_from_xp(
+                    total_xp
                 )
 
                 return DailyClaimResult(
-                    claimed=True,
-                    enabled=True,
-                    current_streak=new_streak,
-                    best_streak=new_best_streak,
-                    total_claims=new_total_claims,
+                    status="claimed",
+                    current_streak=(
+                        new_streak
+                    ),
+                    best_streak=(
+                        new_best_streak
+                    ),
+                    total_claims=(
+                        new_total_claims
+                    ),
                     xp_reward=xp_reward,
                     coins_reward=coins_reward,
                     base_xp=base_xp,
                     base_coins=base_coins,
                     bonus_xp=bonus_xp,
                     bonus_coins=bonus_coins,
-                    bonus_steps=bonus_steps,
-                    total_xp=total_xp,
-                    wallet=wallet,
+                    xp_multiplier=(
+                        xp_multiplier
+                    ),
+                    coins_multiplier=(
+                        coins_multiplier
+                    ),
+                    applied_rule=(
+                        selected_rule
+                    ),
                     old_level=old_level,
                     new_level=new_level,
-                    last_claim_at=current_time,
-                    next_claim_at=next_claim_at,
-                    streak_expires_at=streak_expires_at,
+                    total_xp=total_xp,
+                    wallet=wallet,
+                    next_claim_at=(
+                        current_time
+                        + DAILY_COOLDOWN
+                    ),
                 )
 
-    async def update_level_roles(
+    def find_next_bonus(
         self,
         *,
+        rules: list[dict[str, Any]],
+        current_streak: int,
+    ) -> tuple[
+        int,
+        dict[str, Any],
+    ] | None:
+        if not rules:
+            return None
+
+        start_day = max(
+            1,
+            current_streak + 1,
+        )
+
+        search_limit = min(
+            MAXIMUM_STREAK_DAY,
+            start_day + 100_000,
+        )
+
+        for streak_day in range(
+            start_day,
+            search_limit + 1,
+        ):
+            selected_rule = (
+                select_bonus_rule(
+                    rules,
+                    streak_day,
+                )
+            )
+
+            if selected_rule is not None:
+                return (
+                    streak_day,
+                    selected_rule,
+                )
+
+        return None
+
+    async def update_member_level_role(
+        self,
+        *,
+        guild: discord.Guild,
         member: discord.Member,
         level: int,
     ) -> list[discord.Role]:
-        progression_cog = self.bot.get_cog(
-            "ProgressionCog"
+        progression_cog = (
+            self.get_progression_cog()
         )
 
         if progression_cog is None:
-            LOGGER.warning(
-                (
-                    "Impossible d'actualiser les rôles de niveau "
-                    "de %s : ProgressionCog introuvable."
-                ),
-                member.id,
-            )
             return []
 
-        grant_roles = getattr(
+        role_updater = getattr(
             progression_cog,
             "grant_earned_level_roles",
             None,
         )
 
-        if grant_roles is None:
-            LOGGER.warning(
-                (
-                    "La méthode grant_earned_level_roles "
-                    "est introuvable dans ProgressionCog."
-                )
-            )
+        if role_updater is None:
             return []
 
         try:
-            result = await grant_roles(
+            result = await role_updater(
                 member,
                 level,
             )
         except Exception:
             LOGGER.exception(
                 (
-                    "Impossible d'actualiser les rôles "
-                    "de niveau de %s."
+                    "Impossible d'actualiser le rôle "
+                    "de niveau de %s sur le serveur %s."
                 ),
                 member.id,
+                guild.id,
             )
+
             return []
 
-        return list(result or [])
+        if isinstance(
+            result,
+            list,
+        ):
+            return result
+
+        return []
+
+    async def build_admin_embed(
+        self,
+        guild_id: int,
+    ) -> discord.Embed:
+        settings = await self.get_settings(
+            guild_id,
+            use_cache=False,
+        )
+
+        enabled = bool(
+            settings["enabled"]
+        )
+
+        base_xp = int(
+            settings["base_xp"]
+        )
+
+        base_coins = int(
+            settings["base_coins"]
+        )
+
+        rules: list[
+            dict[str, Any]
+        ] = settings["bonus_rules"]
+
+        embed = base_embed(
+            "🎁 Récompense quotidienne",
+            (
+                "La récompense de base est identique chaque jour.\n"
+                "Seuls les paliers configurés dans le JSON "
+                "peuvent lui ajouter un bonus."
+            ),
+        )
+
+        embed.add_field(
+            name="État",
+            value=(
+                "Activé ✅"
+                if enabled
+                else "Désactivé ❌"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Récompense fixe",
+            value=(
+                f"✨ **{format_number(base_xp)} XP**\n"
+                f"💰 **{format_number(base_coins)} pièces**"
+            ),
+            inline=True,
+        )
+
+        embed.add_field(
+            name="Délais",
+            value=(
+                "⏱️ Réclamation : **24 heures**\n"
+                "🔥 Conservation : **48 heures**"
+            ),
+            inline=True,
+        )
+
+        if rules:
+            displayed_rules = [
+                describe_rule(rule)
+                for rule in rules[:10]
+            ]
+
+            rules_text = "\n\n".join(
+                displayed_rules
+            )
+
+            if len(rules) > 10:
+                rules_text += (
+                    "\n\n"
+                    f"… et {len(rules) - 10} autre(s) règle(s)."
+                )
+
+            embed.add_field(
+                name=(
+                    "🔥 Bonus configurés "
+                    f"({len(rules)})"
+                ),
+                value=rules_text[:1024],
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="🔥 Bonus configurés",
+                value=(
+                    "Aucun bonus de série.\n"
+                    "La récompense restera identique tous les jours."
+                ),
+                inline=False,
+            )
+
+        embed.add_field(
+            name="Fonctionnement des chevauchements",
+            value=(
+                "Une seule règle peut être appliquée par jour.\n"
+                "La priorité la plus élevée gagne. À priorité égale, "
+                "un jour précis est prioritaire sur une règle récurrente."
+            ),
+            inline=False,
+        )
+
+        embed.set_footer(
+            text=(
+                "Utilise le bouton Exemple JSON "
+                "pour voir tous les champs disponibles."
+            )
+        )
+
+        return embed
 
     @app_commands.command(
         name="quotidien",
@@ -1440,7 +2585,7 @@ class DailyCog(
             interaction.user.id,
         ),
     )
-    async def quotidien(
+    async def daily(
         self,
         interaction: discord.Interaction,
     ) -> None:
@@ -1464,203 +2609,27 @@ class DailyCog(
             )
             return
 
+        if not isinstance(
+            interaction.user,
+            discord.Member,
+        ):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Membre introuvable",
+                    (
+                        "Impossible de retrouver ton compte "
+                        "sur ce serveur."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
         try:
             result = await self.claim_daily_reward(
                 guild_id=guild.id,
                 user_id=interaction.user.id,
             )
-
-            if not result.enabled:
-                await interaction.followup.send(
-                    embed=warning_embed(
-                        "Quotidien désactivé",
-                        (
-                            "Les récompenses quotidiennes "
-                            "sont actuellement désactivées "
-                            "sur ce serveur."
-                        ),
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            if not result.claimed:
-                if result.next_claim_at is None:
-                    next_claim_text = "inconnue"
-                else:
-                    next_claim_text = discord_timestamp(
-                        result.next_claim_at,
-                        "R",
-                    )
-
-                if result.streak_expires_at is None:
-                    expiration_text = "inconnue"
-                else:
-                    expiration_text = discord_timestamp(
-                        result.streak_expires_at,
-                        "R",
-                    )
-
-                embed = warning_embed(
-                    "Récompense déjà récupérée",
-                    (
-                        "Tu as déjà récupéré ta récompense "
-                        "quotidienne.\n\n"
-                        f"🔥 Série actuelle : "
-                        f"**{format_number(result.current_streak)} "
-                        f"jour"
-                        f"{'s' if result.current_streak != 1 else ''}**\n"
-                        f"🏆 Meilleure série : "
-                        f"**{format_number(result.best_streak)} "
-                        f"jour"
-                        f"{'s' if result.best_streak != 1 else ''}**\n\n"
-                        f"🎁 Prochaine récompense : "
-                        f"{next_claim_text}\n"
-                        f"⌛ Expiration de la série : "
-                        f"{expiration_text}"
-                    ),
-                )
-
-                if result.next_claim_at is not None:
-                    embed.add_field(
-                        name="Date de disponibilité",
-                        value=discord_timestamp(
-                            result.next_claim_at,
-                            "F",
-                        ),
-                        inline=False,
-                    )
-
-                await interaction.followup.send(
-                    embed=embed,
-                    ephemeral=True,
-                )
-                return
-
-            granted_roles: list[discord.Role] = []
-
-            if isinstance(
-                interaction.user,
-                discord.Member,
-            ):
-                granted_roles = (
-                    await self.update_level_roles(
-                        member=interaction.user,
-                        level=result.new_level,
-                    )
-                )
-
-            bonus_text = ""
-
-            if (
-                result.bonus_xp > 0
-                or result.bonus_coins > 0
-            ):
-                bonus_text = (
-                    "\n\n**Bonus de série :**\n"
-                    f"✨ +{format_number(result.bonus_xp)} XP\n"
-                    f"💰 +{format_number(result.bonus_coins)} "
-                    "pièces"
-                )
-
-            level_text = ""
-
-            if result.new_level > result.old_level:
-                level_text = (
-                    "\n\n🎉 Tu es passé"
-                    f"{'e' if getattr(interaction.user, 'display_name', '').endswith('e') else ''} "
-                    f"du niveau **{result.old_level}** "
-                    f"au niveau **{result.new_level}** !"
-                )
-
-            roles_text = ""
-
-            if granted_roles:
-                roles_text = (
-                    "\n🎭 Nouveau rôle de niveau : "
-                    + ", ".join(
-                        role.mention
-                        for role in granted_roles
-                    )
-                )
-
-            embed = success_embed(
-                "Récompense quotidienne récupérée",
-                (
-                    f"✨ Tu as reçu "
-                    f"**{format_number(result.xp_reward)} XP**.\n"
-                    f"💰 Tu as reçu "
-                    f"**{format_number(result.coins_reward)} "
-                    f"pièces**."
-                    f"{bonus_text}"
-                    f"{level_text}"
-                    f"{roles_text}"
-                ),
-            )
-
-            embed.add_field(
-                name="🔥 Série actuelle",
-                value=(
-                    f"**{format_number(result.current_streak)} "
-                    f"jour"
-                    f"{'s' if result.current_streak != 1 else ''}**"
-                ),
-                inline=True,
-            )
-
-            embed.add_field(
-                name="🏆 Meilleure série",
-                value=(
-                    f"**{format_number(result.best_streak)} "
-                    f"jour"
-                    f"{'s' if result.best_streak != 1 else ''}**"
-                ),
-                inline=True,
-            )
-
-            embed.add_field(
-                name="🎁 Récompenses récupérées",
-                value=(
-                    f"**{format_number(result.total_claims)}**"
-                ),
-                inline=True,
-            )
-
-            embed.add_field(
-                name="Progression actuelle",
-                value=(
-                    f"Niveau : **{result.new_level}**\n"
-                    f"XP totale : "
-                    f"**{format_number(result.total_xp)}**\n"
-                    f"Portefeuille : "
-                    f"**{format_number(result.wallet)} pièces**"
-                ),
-                inline=False,
-            )
-
-            if result.next_claim_at is not None:
-                embed.add_field(
-                    name="Prochaine récompense",
-                    value=(
-                        f"{discord_timestamp(result.next_claim_at, 'R')}\n"
-                        f"{discord_timestamp(result.next_claim_at, 'F')}"
-                    ),
-                    inline=False,
-                )
-
-            if result.streak_expires_at is not None:
-                embed.set_footer(
-                    text=(
-                        "Tu disposes de 48 heures après cette "
-                        "récupération pour conserver ta série."
-                    )
-                )
-
-            await interaction.followup.send(
-                embed=embed,
-                ephemeral=True,
-            )
-
         except Exception:
             LOGGER.exception(
                 (
@@ -1677,11 +2646,266 @@ class DailyCog(
                     (
                         "Ta récompense quotidienne n'a pas "
                         "pu être récupérée.\n"
-                        "Aucune récompense n'a été perdue."
+                        "Consulte les logs du bot."
                     ),
                 ),
                 ephemeral=True,
             )
+            return
+
+        if result.status == "disabled":
+            await interaction.followup.send(
+                embed=warning_embed(
+                    "Système désactivé",
+                    (
+                        "Les récompenses quotidiennes sont "
+                        "actuellement désactivées sur ce serveur."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if result.status == "cooldown":
+            next_claim_at = (
+                result.next_claim_at
+            )
+
+            if next_claim_at is None:
+                remaining = DAILY_COOLDOWN
+                timestamp_text = ""
+            else:
+                current_time = datetime.now(
+                    timezone.utc
+                )
+
+                remaining = max(
+                    timedelta(),
+                    next_claim_at
+                    - current_time,
+                )
+
+                unix_timestamp = int(
+                    next_claim_at.timestamp()
+                )
+
+                timestamp_text = (
+                    f"\nDisponible <t:{unix_timestamp}:R>."
+                )
+
+            await interaction.followup.send(
+                embed=warning_embed(
+                    "Récompense déjà récupérée",
+                    (
+                        "Tu as déjà récupéré ta récompense "
+                        "quotidienne.\n\n"
+                        f"⏱️ Temps restant : "
+                        f"**{format_duration(remaining)}**"
+                        f"{timestamp_text}\n"
+                        f"🔥 Série actuelle : "
+                        f"**{result.current_streak} jour(s)**"
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        granted_roles: list[
+            discord.Role
+        ] = []
+
+        if (
+            result.new_level
+            != result.old_level
+        ):
+            granted_roles = (
+                await self.update_member_level_role(
+                    guild=guild,
+                    member=interaction.user,
+                    level=result.new_level,
+                )
+            )
+
+        settings = await self.get_settings(
+            guild.id
+        )
+
+        reward_lines = [
+            (
+                f"✨ **{format_number(result.xp_reward)} XP**"
+            ),
+            (
+                f"💰 **{format_number(result.coins_reward)} pièces**"
+            ),
+        ]
+
+        if result.applied_rule is not None:
+            rule_name = str(
+                result.applied_rule.get(
+                    "name",
+                    "Bonus de série",
+                )
+            )
+
+            bonus_lines: list[str] = [
+                (
+                    f"\n🔥 Bonus appliqué : "
+                    f"**{rule_name}**"
+                )
+            ]
+
+            if (
+                result.xp_multiplier
+                > Decimal("1")
+            ):
+                bonus_lines.append(
+                    (
+                        "• Multiplicateur XP : "
+                        f"**×{format_multiplier(result.xp_multiplier)}**"
+                    )
+                )
+
+            if (
+                result.coins_multiplier
+                > Decimal("1")
+            ):
+                bonus_lines.append(
+                    (
+                        "• Multiplicateur pièces : "
+                        f"**×{format_multiplier(result.coins_multiplier)}**"
+                    )
+                )
+
+            fixed_xp_bonus = int(
+                result.applied_rule.get(
+                    "xp_bonus",
+                    0,
+                )
+            )
+
+            fixed_coins_bonus = int(
+                result.applied_rule.get(
+                    "coins_bonus",
+                    0,
+                )
+            )
+
+            if fixed_xp_bonus > 0:
+                bonus_lines.append(
+                    (
+                        "• Bonus fixe : "
+                        f"**+{format_number(fixed_xp_bonus)} XP**"
+                    )
+                )
+
+            if fixed_coins_bonus > 0:
+                bonus_lines.append(
+                    (
+                        "• Bonus fixe : "
+                        f"**+{format_number(fixed_coins_bonus)} pièces**"
+                    )
+                )
+
+            reward_lines.extend(
+                bonus_lines
+            )
+
+        information_lines = [
+            (
+                f"\n🔥 Série actuelle : "
+                f"**{result.current_streak} jour(s)**"
+            ),
+            (
+                f"🏆 Meilleure série : "
+                f"**{result.best_streak} jour(s)**"
+            ),
+            (
+                f"🎁 Récompenses récupérées : "
+                f"**{format_number(result.total_claims)}**"
+            ),
+        ]
+
+        next_bonus = self.find_next_bonus(
+            rules=settings["bonus_rules"],
+            current_streak=(
+                result.current_streak
+            ),
+        )
+
+        if next_bonus is not None:
+            next_bonus_day, next_rule = (
+                next_bonus
+            )
+
+            days_remaining = max(
+                0,
+                next_bonus_day
+                - result.current_streak,
+            )
+
+            next_rule_name = str(
+                next_rule.get(
+                    "name",
+                    "Bonus de série",
+                )
+            )
+
+            information_lines.append(
+                (
+                    f"🎯 Prochain bonus : **{next_rule_name}** "
+                    f"dans **{days_remaining} jour(s)** "
+                    f"(jour {next_bonus_day})"
+                )
+            )
+
+        if (
+            result.new_level
+            > result.old_level
+        ):
+            information_lines.append(
+                (
+                    f"\n🌟 Tu as atteint le "
+                    f"**niveau {result.new_level}** !"
+                )
+            )
+
+        if granted_roles:
+            information_lines.append(
+                (
+                    "🎭 Nouveau rôle : "
+                    + ", ".join(
+                        role.mention
+                        for role in granted_roles
+                    )
+                )
+            )
+
+        if result.next_claim_at is not None:
+            unix_timestamp = int(
+                result.next_claim_at.timestamp()
+            )
+
+            information_lines.append(
+                (
+                    f"\n⏱️ Prochaine récompense "
+                    f"<t:{unix_timestamp}:R>."
+                )
+            )
+
+        description = (
+            "Tu as récupéré ta récompense quotidienne !\n\n"
+            + "\n".join(reward_lines)
+            + "\n"
+            + "\n".join(information_lines)
+        )
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "Récompense récupérée",
+                description,
+            ),
+            ephemeral=True,
+        )
 
     @app_commands.command(
         name="quotidien-admin",
@@ -1696,7 +2920,7 @@ class DailyCog(
         manage_guild=True
     )
     @app_commands.guild_only()
-    async def quotidien_admin(
+    async def daily_admin(
         self,
         interaction: discord.Interaction,
     ) -> None:
@@ -1719,50 +2943,38 @@ class DailyCog(
             embed = await self.build_admin_embed(
                 guild.id
             )
-
-            view = DailyAdminView(
-                cog=self,
-                owner_id=interaction.user.id,
-                guild_id=guild.id,
-            )
-
-            await interaction.response.send_message(
-                embed=embed,
-                view=view,
-                ephemeral=True,
-            )
-
         except Exception:
             LOGGER.exception(
                 (
-                    "Impossible d'ouvrir l'administration "
-                    "du quotidien sur le serveur %s."
+                    "Impossible d'ouvrir la configuration "
+                    "quotidienne du serveur %s."
                 ),
                 guild.id,
             )
 
-            if interaction.response.is_done():
-                await interaction.followup.send(
-                    embed=error_embed(
-                        "Erreur",
-                        (
-                            "Le panneau du quotidien "
-                            "n'a pas pu être ouvert."
-                        ),
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "La configuration n'a pas "
+                        "pu être chargée."
                     ),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    embed=error_embed(
-                        "Erreur",
-                        (
-                            "Le panneau du quotidien "
-                            "n'a pas pu être ouvert."
-                        ),
-                    ),
-                    ephemeral=True,
-                )
+                ),
+                ephemeral=True,
+            )
+            return
+
+        view = DailyAdminView(
+            cog=self,
+            owner_id=interaction.user.id,
+            guild_id=guild.id,
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=view,
+            ephemeral=True,
+        )
 
 
 async def setup(
