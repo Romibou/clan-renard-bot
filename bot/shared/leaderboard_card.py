@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
+
+LOGGER = logging.getLogger(__name__)
 
 CARD_WIDTH = 1200
 CARD_HEIGHT = 920
@@ -32,51 +35,110 @@ SILVER_COLOR = (205, 213, 225, 255)
 BRONZE_COLOR = (205, 140, 91, 255)
 
 
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def _font_candidates(
     *,
     bold: bool,
-) -> list[str]:
+) -> list[Path]:
+    project_root = _project_root()
+
     if bold:
         return [
-            "assets/fonts/DejaVuSans-Bold.ttf",
-            "assets/fonts/Montserrat-Bold.ttf",
-            "assets/fonts/Poppins-Bold.ttf",
-            "C:/Windows/Fonts/arialbd.ttf",
-            "C:/Windows/Fonts/segoeuib.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            project_root
+            / "assets"
+            / "fonts"
+            / "DejaVuSans-Bold.ttf",
+
+            project_root
+            / "assets"
+            / "fonts"
+            / "NotoSans-Bold.ttf",
+
+            project_root
+            / "assets"
+            / "fonts"
+            / "Montserrat-Bold.ttf",
+
+            project_root
+            / "assets"
+            / "fonts"
+            / "Poppins-Bold.ttf",
+
+            Path(
+                "C:/Windows/Fonts/arialbd.ttf"
+            ),
+
+            Path(
+                "C:/Windows/Fonts/segoeuib.ttf"
+            ),
+
+            Path(
+                "/usr/share/fonts/truetype/dejavu/"
+                "DejaVuSans-Bold.ttf"
+            ),
+
+            Path(
+                "/usr/share/fonts/truetype/liberation2/"
+                "LiberationSans-Bold.ttf"
+            ),
         ]
 
     return [
-        "assets/fonts/DejaVuSans.ttf",
-        "assets/fonts/Montserrat-Regular.ttf",
-        "assets/fonts/Poppins-Regular.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        project_root
+        / "assets"
+        / "fonts"
+        / "DejaVuSans.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSans-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "Montserrat-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "Poppins-Regular.ttf",
+
+        Path(
+            "C:/Windows/Fonts/arial.ttf"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/segoeui.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/liberation2/"
+            "LiberationSans-Regular.ttf"
+        ),
     ]
 
 
-@lru_cache(maxsize=32)
-def _load_font(
+def _load_first_available_font(
+    *,
+    candidates: Sequence[Path],
     size: int,
-    bold: bool = False,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    project_root = Path(__file__).resolve().parents[2]
-
-    for candidate in _font_candidates(bold=bold):
-        candidate_path = Path(candidate)
-
-        if not candidate_path.is_absolute():
-            candidate_path = project_root / candidate_path
-
-        if not candidate_path.exists():
+    for font_path in candidates:
+        if not font_path.is_file():
             continue
 
         try:
             return ImageFont.truetype(
-                str(candidate_path),
+                str(font_path),
                 size=size,
             )
         except OSError:
@@ -85,13 +147,30 @@ def _load_font(
     return ImageFont.load_default()
 
 
+@lru_cache(maxsize=32)
+def _load_font(
+    size: int,
+    bold: bool = False,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    return _load_first_available_font(
+        candidates=_font_candidates(
+            bold=bold,
+        ),
+        size=size,
+    )
 
 
 @lru_cache(maxsize=16)
 def _load_username_font(
     size: int,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    project_root = Path(__file__).resolve().parents[2]
+    """
+    Police utilisée pour les pseudos classiques.
+
+    Elle prend correctement en charge les accents,
+    notamment é, è, à, ç et ï.
+    """
+    project_root = _project_root()
 
     candidates = [
         project_root
@@ -102,15 +181,20 @@ def _load_username_font(
         project_root
         / "assets"
         / "fonts"
-        / "NotoSansMath-Regular.ttf",
-
-        project_root
-        / "assets"
-        / "fonts"
         / "DejaVuSans.ttf",
 
         Path(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/liberation2/"
+            "LiberationSans-Regular.ttf"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/segoeui.ttf"
         ),
 
         Path(
@@ -118,31 +202,89 @@ def _load_username_font(
         ),
     ]
 
-    for font_path in candidates:
-        if not font_path.is_file():
-            continue
-
-        try:
-            return ImageFont.truetype(
-                str(font_path),
-                size=size,
-            )
-        except OSError:
-            continue
-
-    LOGGER.warning(
-        "Aucune police Unicode compatible trouvée pour les pseudos."
+    font = _load_first_available_font(
+        candidates=candidates,
+        size=size,
     )
 
-    return ImageFont.load_default()
+    if isinstance(font, ImageFont.FreeTypeFont):
+        return font
 
+    LOGGER.warning(
+        "Aucune police Unicode classique n'a été trouvée "
+        "pour les pseudos."
+    )
+
+    return font
+
+
+@lru_cache(maxsize=16)
+def _load_math_font(
+    size: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """
+    Police utilisée pour les lettres Unicode fantaisie.
+
+    Exemples :
+    𝓐 𝕭 𝖈 𝒅 𝐄
+    """
+    project_root = _project_root()
+
+    candidates = [
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansMath-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansSymbols2-Regular.ttf",
+
+        Path(
+            "/usr/share/fonts/truetype/noto/"
+            "NotoSansMath-Regular.ttf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans.ttf"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/seguisym.ttf"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/segoeui.ttf"
+        ),
+    ]
+
+    font = _load_first_available_font(
+        candidates=candidates,
+        size=size,
+    )
+
+    if isinstance(font, ImageFont.FreeTypeFont):
+        return font
+
+    LOGGER.warning(
+        "Aucune police Unicode mathématique n'a été trouvée "
+        "pour les pseudos fantaisie."
+    )
+
+    return _load_username_font(size)
 
 
 @lru_cache(maxsize=16)
 def _load_cjk_font(
     size: int,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    project_root = Path(__file__).resolve().parents[2]
+    """
+    Police utilisée pour les caractères chinois,
+    japonais et coréens.
+    """
+    project_root = _project_root()
 
     candidates = [
         project_root
@@ -153,10 +295,40 @@ def _load_cjk_font(
         project_root
         / "assets"
         / "fonts"
+        / "NotoSansSC-VariableFont_wght.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
         / "NotoSansCJKsc-Regular.otf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansCJK-Regular.ttc",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansJP-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansKR-Regular.ttf",
 
         Path(
             "/usr/share/fonts/opentype/noto/"
+            "NotoSansCJK-Regular.ttc"
+        ),
+
+        Path(
+            "/usr/share/fonts/opentype/noto/"
+            "NotoSansCJKsc-Regular.otf"
+        ),
+
+        Path(
+            "/usr/share/fonts/truetype/noto/"
             "NotoSansCJK-Regular.ttc"
         ),
 
@@ -165,24 +337,33 @@ def _load_cjk_font(
         ),
 
         Path(
+            "C:/Windows/Fonts/msyhbd.ttc"
+        ),
+
+        Path(
             "C:/Windows/Fonts/msgothic.ttc"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/meiryo.ttc"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/malgun.ttf"
         ),
     ]
 
-    for font_path in candidates:
-        if not font_path.is_file():
-            continue
+    font = _load_first_available_font(
+        candidates=candidates,
+        size=size,
+    )
 
-        try:
-            return ImageFont.truetype(
-                str(font_path),
-                size=size,
-            )
-        except OSError:
-            continue
+    if isinstance(font, ImageFont.FreeTypeFont):
+        return font
 
     LOGGER.warning(
-        "Aucune police CJK compatible trouvée."
+        "Aucune police CJK n'a été trouvée. "
+        "Ajoute NotoSansSC-Regular.ttf dans assets/fonts."
     )
 
     return _load_username_font(size)
@@ -191,6 +372,10 @@ def _load_cjk_font(
 def _contains_cjk(
     text: str,
 ) -> bool:
+    """
+    Détecte la présence de caractères chinois,
+    japonais ou coréens.
+    """
     for character in str(text):
         codepoint = ord(character)
 
@@ -198,9 +383,41 @@ def _contains_cjk(
             0x3400 <= codepoint <= 0x4DBF
             or 0x4E00 <= codepoint <= 0x9FFF
             or 0xF900 <= codepoint <= 0xFAFF
-            or 0x20000 <= codepoint <= 0x2FA1F
-            or 0x3040 <= codepoint <= 0x30FF
+            or 0x20000 <= codepoint <= 0x2A6DF
+            or 0x2A700 <= codepoint <= 0x2B73F
+            or 0x2B740 <= codepoint <= 0x2B81F
+            or 0x2B820 <= codepoint <= 0x2CEAF
+            or 0x2CEB0 <= codepoint <= 0x2EBEF
+            or 0x30000 <= codepoint <= 0x3134F
+            or 0x3040 <= codepoint <= 0x309F
+            or 0x30A0 <= codepoint <= 0x30FF
+            or 0x31F0 <= codepoint <= 0x31FF
             or 0xAC00 <= codepoint <= 0xD7AF
+            or 0x1100 <= codepoint <= 0x11FF
+            or 0x3130 <= codepoint <= 0x318F
+        ):
+            return True
+
+    return False
+
+
+def _contains_styled_characters(
+    text: str,
+) -> bool:
+    """
+    Détecte les lettres mathématiques ou fantaisie
+    souvent utilisées dans les pseudos Discord.
+    """
+    for character in str(text):
+        codepoint = ord(character)
+
+        if (
+            0x1D400 <= codepoint <= 0x1D7FF
+            or 0x2100 <= codepoint <= 0x214F
+            or 0x1D2C <= codepoint <= 0x1D7F
+            or 0x1D80 <= codepoint <= 0x1DBF
+            or 0x2460 <= codepoint <= 0x24FF
+            or 0xFF00 <= codepoint <= 0xFFEF
         ):
             return True
 
@@ -211,13 +428,19 @@ def _get_username_font(
     text: str,
     size: int,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    if _contains_cjk(text):
+    """
+    Sélectionne automatiquement la meilleure police
+    selon le contenu du pseudo.
+    """
+    normalized_text = str(text)
+
+    if _contains_cjk(normalized_text):
         return _load_cjk_font(size)
 
+    if _contains_styled_characters(normalized_text):
+        return _load_math_font(size)
+
     return _load_username_font(size)
-
-
-
 
 
 def _create_fallback_background() -> Image.Image:
@@ -233,24 +456,51 @@ def _create_fallback_background() -> Image.Image:
     bottom_color = (18, 12, 29)
 
     for y in range(CARD_HEIGHT):
-        ratio = y / max(1, CARD_HEIGHT - 1)
+        ratio = y / max(
+            1,
+            CARD_HEIGHT - 1,
+        )
 
         red = int(
             top_color[0]
-            + (bottom_color[0] - top_color[0]) * ratio
+            + (
+                bottom_color[0]
+                - top_color[0]
+            )
+            * ratio
         )
+
         green = int(
             top_color[1]
-            + (bottom_color[1] - top_color[1]) * ratio
+            + (
+                bottom_color[1]
+                - top_color[1]
+            )
+            * ratio
         )
+
         blue = int(
             top_color[2]
-            + (bottom_color[2] - top_color[2]) * ratio
+            + (
+                bottom_color[2]
+                - top_color[2]
+            )
+            * ratio
         )
 
         draw.line(
-            (0, y, CARD_WIDTH, y),
-            fill=(red, green, blue, 255),
+            (
+                0,
+                y,
+                CARD_WIDTH,
+                y,
+            ),
+            fill=(
+                red,
+                green,
+                blue,
+                255,
+            ),
         )
 
     glow_layer = Image.new(
@@ -258,12 +508,21 @@ def _create_fallback_background() -> Image.Image:
         image.size,
         (0, 0, 0, 0),
     )
-    glow_draw = ImageDraw.Draw(glow_layer)
+
+    glow_draw = ImageDraw.Draw(
+        glow_layer
+    )
 
     glow_draw.ellipse(
-        (-250, -300, 500, 450),
+        (
+            -250,
+            -300,
+            500,
+            450,
+        ),
         fill=(196, 95, 164, 115),
     )
+
     glow_draw.ellipse(
         (
             CARD_WIDTH - 430,
@@ -293,15 +552,23 @@ def _load_background_cached(
 
     try:
         with Image.open(path) as source:
-            background = source.convert("RGBA")
+            background = source.convert(
+                "RGBA"
+            )
 
         return ImageOps.fit(
             background,
-            (CARD_WIDTH, CARD_HEIGHT),
+            (
+                CARD_WIDTH,
+                CARD_HEIGHT,
+            ),
             method=Image.Resampling.LANCZOS,
             centering=(0.5, 0.5),
         )
-    except (OSError, ValueError):
+    except (
+        OSError,
+        ValueError,
+    ):
         return _create_fallback_background()
 
 
@@ -352,13 +619,20 @@ def _truncate_text(
     if not text:
         return "Utilisateur inconnu"
 
-    if _text_width(draw, text, font) <= maximum_width:
+    if _text_width(
+        draw,
+        text,
+        font,
+    ) <= maximum_width:
         return text
 
     ellipsis = "…"
 
     while text:
-        candidate = text.rstrip() + ellipsis
+        candidate = (
+            text.rstrip()
+            + ellipsis
+        )
 
         if _text_width(
             draw,
@@ -372,8 +646,13 @@ def _truncate_text(
     return ellipsis
 
 
-def _format_number(value: int) -> str:
-    return f"{int(value):,}".replace(",", " ")
+def _format_number(
+    value: int,
+) -> str:
+    return f"{int(value):,}".replace(
+        ",",
+        " ",
+    )
 
 
 def _draw_centered_text(
@@ -392,11 +671,34 @@ def _draw_centered_text(
         font=font,
     )
 
-    text_width = text_box[2] - text_box[0]
-    text_height = text_box[3] - text_box[1]
+    text_width = (
+        text_box[2]
+        - text_box[0]
+    )
 
-    x = left + ((right - left) - text_width) / 2
-    y = top + ((bottom - top) - text_height) / 2 - text_box[1]
+    text_height = (
+        text_box[3]
+        - text_box[1]
+    )
+
+    x = (
+        left
+        + (
+            (right - left)
+            - text_width
+        )
+        / 2
+    )
+
+    y = (
+        top
+        + (
+            (bottom - top)
+            - text_height
+        )
+        / 2
+        - text_box[1]
+    )
 
     draw.text(
         (x, y),
@@ -422,14 +724,19 @@ def _draw_right_aligned_text(
     )
 
     draw.text(
-        (right - width, y),
+        (
+            right - width,
+            y,
+        ),
         text,
         font=font,
         fill=fill,
     )
 
 
-def _rank_color(rank: int) -> tuple[int, int, int, int]:
+def _rank_color(
+    rank: int,
+) -> tuple[int, int, int, int]:
     if rank == 1:
         return GOLD_COLOR
 
@@ -442,7 +749,9 @@ def _rank_color(rank: int) -> tuple[int, int, int, int]:
     return TEXT_COLOR
 
 
-def _rank_text(rank: int | None) -> str:
+def _rank_text(
+    rank: int | None,
+) -> str:
     if rank is None or rank <= 0:
         return "—"
 
@@ -454,7 +763,10 @@ def _get_row_value(
     key: str,
     default: Any,
 ) -> Any:
-    value = row.get(key, default)
+    value = row.get(
+        key,
+        default,
+    )
 
     if value is None:
         return default
@@ -474,17 +786,21 @@ def render_leaderboard_card(
     """
     Génère une image de classement.
 
-    Chaque élément de ``rows`` doit contenir :
+    Chaque élément de rows doit contenir :
 
-    - ``rank`` : position dans le classement ;
-    - ``display_name`` : nom affiché du membre ;
-    - ``value`` : quantité d'XP ou d'argent.
+    - rank : position dans le classement ;
+    - display_name : nom affiché du membre ;
+    - value : quantité d'XP ou d'argent.
 
-    ``personal_row`` utilise les mêmes clés. Son rang peut être ``None``
-    lorsque le membre ne possède encore aucune entrée en base.
+    personal_row utilise les mêmes clés.
+    Son rang peut être None lorsque le membre
+    ne possède encore aucune entrée en base.
     """
-
-    normalized_type = str(ranking_type).lower().strip()
+    normalized_type = (
+        str(ranking_type)
+        .lower()
+        .strip()
+    )
 
     if normalized_type not in {
         "xp",
@@ -492,17 +808,31 @@ def render_leaderboard_card(
     }:
         normalized_type = "xp"
 
-    page = max(1, int(page))
-    total_pages = max(1, int(total_pages))
-    page = min(page, total_pages)
+    page = max(
+        1,
+        int(page),
+    )
 
-    image = _load_background(background_path)
+    total_pages = max(
+        1,
+        int(total_pages),
+    )
+
+    page = min(
+        page,
+        total_pages,
+    )
+
+    image = _load_background(
+        background_path
+    )
 
     overlay = Image.new(
         "RGBA",
         image.size,
         BACKGROUND_OVERLAY,
     )
+
     image = Image.alpha_composite(
         image,
         overlay,
@@ -510,14 +840,39 @@ def render_leaderboard_card(
 
     draw = ImageDraw.Draw(image)
 
-    title_font = _load_font(50, bold=True)
-    subtitle_font = _load_font(22)
-    header_font = _load_font(21, bold=True)
-    row_font = _load_font(25, bold=True)
-    row_value_font = _load_font(24, bold=True)
-    footer_label_font = _load_font(17, bold=True)
-    footer_font = _load_font(23, bold=True)
+    title_font = _load_font(
+        50,
+        bold=True,
+    )
 
+    subtitle_font = _load_font(
+        22
+    )
+
+    header_font = _load_font(
+        21,
+        bold=True,
+    )
+
+    row_font = _load_font(
+        25,
+        bold=True,
+    )
+
+    row_value_font = _load_font(
+        24,
+        bold=True,
+    )
+
+    footer_label_font = _load_font(
+        17,
+        bold=True,
+    )
+
+    footer_font = _load_font(
+        23,
+        bold=True,
+    )
 
     if normalized_type == "money":
         title = "CLASSEMENT ARGENT"
@@ -531,7 +886,12 @@ def render_leaderboard_card(
         accent_color = XP_ACCENT
 
     draw.rounded_rectangle(
-        (38, 30, CARD_WIDTH - 38, 138),
+        (
+            38,
+            30,
+            CARD_WIDTH - 38,
+            138,
+        ),
         radius=26,
         fill=(16, 11, 28, 185),
         outline=(255, 255, 255, 28),
@@ -539,19 +899,29 @@ def render_leaderboard_card(
     )
 
     draw.rounded_rectangle(
-        (56, 51, 67, 117),
+        (
+            56,
+            51,
+            67,
+            117,
+        ),
         radius=6,
         fill=accent_color,
     )
 
     draw.text(
-        (88, 47),
+        (
+            88,
+            47,
+        ),
         title,
         font=title_font,
         fill=TEXT_COLOR,
     )
 
-    page_text = f"PAGE {page} / {total_pages}"
+    page_text = (
+        f"PAGE {page} / {total_pages}"
+    )
 
     _draw_right_aligned_text(
         draw,
@@ -578,8 +948,13 @@ def render_leaderboard_card(
         width=2,
     )
 
-    rank_column = (55, header_top, 205, header_bottom)
-    user_column = (220, header_top, 835, header_bottom)
+    rank_column = (
+        55,
+        header_top,
+        205,
+        header_bottom,
+    )
+
     value_column = (
         850,
         header_top,
@@ -596,7 +971,10 @@ def render_leaderboard_card(
     )
 
     draw.text(
-        (250, 169),
+        (
+            250,
+            169,
+        ),
         "UTILISATEUR",
         font=header_font,
         fill=SECONDARY_TEXT_COLOR,
@@ -614,11 +992,18 @@ def render_leaderboard_card(
     row_height = 54
     row_gap = 7
 
-    displayed_rows = list(rows[:10])
+    displayed_rows = list(
+        rows[:10]
+    )
 
     for index in range(10):
-        y = row_start_y + index * (
-            row_height + row_gap
+        y = (
+            row_start_y
+            + index
+            * (
+                row_height
+                + row_gap
+            )
         )
 
         row = (
@@ -661,9 +1046,8 @@ def render_leaderboard_card(
 
         username_font = _get_username_font(
             display_name,
-             25,
-         )
-
+            25,
+        )
 
         value = int(
             _get_row_value(
@@ -673,7 +1057,9 @@ def render_leaderboard_card(
             )
         )
 
-        rank_value = _rank_text(rank)
+        rank_value = _rank_text(
+            rank
+        )
 
         _draw_centered_text(
             draw,
@@ -701,15 +1087,26 @@ def render_leaderboard_card(
             font=username_font,
         )
 
-        name_height = name_box[3] - name_box[1]
+        name_height = (
+            name_box[3]
+            - name_box[1]
+        )
+
         name_y = (
             y
-            + (row_height - name_height) / 2
+            + (
+                row_height
+                - name_height
+            )
+            / 2
             - name_box[1]
         )
 
         draw.text(
-            (250, name_y),
+            (
+                250,
+                name_y,
+            ),
             fitted_name,
             font=username_font,
             fill=TEXT_COLOR,
@@ -745,7 +1142,10 @@ def render_leaderboard_card(
         width=3,
     )
 
-    personal_rank_raw = personal_row.get("rank")
+    personal_rank_raw = personal_row.get(
+        "rank"
+    )
+
     personal_rank = (
         int(personal_rank_raw)
         if personal_rank_raw is not None
@@ -760,12 +1160,13 @@ def render_leaderboard_card(
         )
     )
 
-    personal_username_font = _get_username_font(
-       personal_name,
-       23,
+    personal_username_font = (
+        _get_username_font(
+            personal_name,
+            23,
+        )
     )
 
-   
     personal_value = int(
         _get_row_value(
             personal_row,
@@ -775,7 +1176,10 @@ def render_leaderboard_card(
     )
 
     draw.text(
-        (58, personal_top + 5),
+        (
+            58,
+            personal_top + 5,
+        ),
         "TON CLASSEMENT",
         font=footer_label_font,
         fill=(255, 201, 229, 255),
@@ -789,7 +1193,9 @@ def render_leaderboard_card(
             205,
             personal_bottom,
         ),
-        text=_rank_text(personal_rank),
+        text=_rank_text(
+            personal_rank
+        ),
         font=footer_font,
         fill=TEXT_COLOR,
     )
@@ -801,15 +1207,42 @@ def render_leaderboard_card(
         545,
     )
 
+    personal_name_box = draw.textbbox(
+        (0, 0),
+        fitted_personal_name,
+        font=personal_username_font,
+    )
+
+    personal_name_height = (
+        personal_name_box[3]
+        - personal_name_box[1]
+    )
+
+    personal_name_y = (
+        personal_top
+        + (
+            personal_bottom
+            - personal_top
+            - personal_name_height
+        )
+        / 2
+        - personal_name_box[1]
+    )
+
     draw.text(
-        (250, personal_top + 20),
+        (
+            250,
+            personal_name_y,
+        ),
         fitted_personal_name,
         font=personal_username_font,
         fill=TEXT_COLOR,
     )
 
     formatted_personal_value = (
-        _format_number(personal_value)
+        _format_number(
+            personal_value
+        )
         + value_suffix
     )
 
