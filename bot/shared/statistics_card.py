@@ -423,10 +423,17 @@ def _draw_stat_card(
     label: str,
     value: str,
     accent: tuple[int, int, int, int],
-    label_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
-    value_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> None:
     left, top, right, bottom = box
+
+    label_font = _load_font(
+        18,
+        bold=True,
+    )
+    value_font = _load_font(
+        30,
+        bold=True,
+    )
 
     draw.rounded_rectangle(
         box,
@@ -439,43 +446,38 @@ def _draw_stat_card(
     draw.rounded_rectangle(
         (
             left + 18,
-            top + 16,
+            top + 20,
             left + 27,
-            bottom - 16,
+            bottom - 20,
         ),
         radius=5,
         fill=accent,
     )
 
-    normalized_label = str(label).upper()
-    normalized_value = str(value)
-
-    # Les deux positions sont toujours calculées depuis le haut
-    # de la carte. Toutes les lignes seront donc identiques.
-    label_baseline_y = top + 40
-    value_baseline_y = top + 91
-
+    # Même ligne de base pour tous les libellés.
     draw.text(
         (
             left + 43,
-            label_baseline_y,
+            top + 40,
         ),
-        normalized_label,
+        str(label),
         font=label_font,
         fill=SECONDARY_TEXT_COLOR,
         anchor="ls",
     )
 
+    # Même ligne de base pour toutes les valeurs.
     draw.text(
         (
             left + 43,
-            value_baseline_y,
+            top + 91,
         ),
-        normalized_value,
+        str(value),
         font=value_font,
         fill=TEXT_COLOR,
         anchor="ls",
     )
+
 
 
 
