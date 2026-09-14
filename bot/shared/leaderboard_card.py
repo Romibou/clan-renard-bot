@@ -85,6 +85,55 @@ def _load_font(
     return ImageFont.load_default()
 
 
+
+
+@lru_cache(maxsize=16)
+def _load_username_font(
+    size: int,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    project_root = Path(__file__).resolve().parents[2]
+
+    candidates = [
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSansMath-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
+        / "NotoSans-Regular.ttf",
+
+        Path(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        ),
+
+        Path(
+            "C:/Windows/Fonts/arial.ttf"
+        ),
+    ]
+
+    for font_path in candidates:
+        if not font_path.is_file():
+            continue
+
+        try:
+            return ImageFont.truetype(
+                str(font_path),
+                size=size,
+            )
+        except OSError:
+            continue
+
+    LOGGER.warning(
+        "Aucune police Unicode compatible trouvée pour les pseudos."
+    )
+
+    return ImageFont.load_default()
+
+
+
+
 def _create_fallback_background() -> Image.Image:
     image = Image.new(
         "RGBA",
@@ -382,6 +431,9 @@ def render_leaderboard_card(
     row_value_font = _load_font(24, bold=True)
     footer_label_font = _load_font(17, bold=True)
     footer_font = _load_font(23, bold=True)
+    username_font = _load_username_font(25)
+    personal_username_font = _load_username_font(23)
+
 
     if normalized_type == "money":
         title = "CLASSEMENT ARGENT"
@@ -549,14 +601,14 @@ def render_leaderboard_card(
         fitted_name = _truncate_text(
             draw,
             display_name,
-            row_font,
+            username_font,
             560,
         )
 
         name_box = draw.textbbox(
             (0, 0),
             fitted_name,
-            font=row_font,
+            font=username_font,
         )
 
         name_height = name_box[3] - name_box[1]
@@ -649,14 +701,14 @@ def render_leaderboard_card(
     fitted_personal_name = _truncate_text(
         draw,
         personal_name,
-        footer_font,
+        personal_username_font,
         545,
     )
 
     draw.text(
         (250, personal_top + 20),
         fitted_personal_name,
-        font=footer_font,
+        font=personal_username_font,
         fill=TEXT_COLOR,
     )
 
