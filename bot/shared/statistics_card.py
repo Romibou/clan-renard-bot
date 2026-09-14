@@ -429,7 +429,7 @@ def _draw_stat_card(
     draw.rounded_rectangle(
         box,
         radius=18,
-        fill=CARD_BACKGROUND,
+        fill=CARD_COLOR,
         outline=CARD_BORDER,
         width=2,
     )
