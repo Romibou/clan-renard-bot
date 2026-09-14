@@ -619,171 +619,107 @@ class RankingsCog(commands.Cog):
         return f"Utilisateur {user_id}"
 
     async def build_leaderboard_file(
-        self,
-        *,
-        guild: discord.Guild,
-        requester_id: int,
-        ranking_type: str,
-        page: int,
-        total_pages: int | None = None,
-    ) -> discord.File:
-        ranking_type = normalize_ranking_type(
-            ranking_type
-        )
-
-        if total_pages is None:
-            total_pages = (
-                await self.get_leaderboard_total_pages(
-                    guild_id=guild.id,
-                )
-            )
-
-        total_pages = max(
-            1,
-            min(
-                LEADERBOARD_MAX_PAGES,
-                int(total_pages),
-            ),
-        )
-
-        page = max(
-            1,
-            min(
-                int(page),
-                total_pages,
-            ),
-        )
-
-        records = await self.get_leaderboard_records(
-            guild_id=guild.id,
-            ranking_type=ranking_type,
-            page=page,
-        )
-
-        offset = (
-            page - 1
-        ) * LEADERBOARD_PAGE_SIZE
-
-        rows: list[dict[str, Any]] = []
-
-        for index, record in enumerate(
-            records,
-            start=1,
-        ):
-            user_id = int(
-                record["user_id"]
-            )
-
-            rows.append(
-                {
-                    "rank": offset + index,
-                    "user_id": user_id,
-                    "name": self.get_display_name(
-                        guild=guild,
-                        user_id=user_id,
-                    ),
-                    "total_xp": int(
-                        record["total_xp"] or 0
-                    ),
-                    "wallet": int(
-                        record["wallet"] or 0
-                    ),
-                }
-            )
-
-        requester_data = (
-            await self.get_personal_leaderboard_data(
-                guild_id=guild.id,
-                user_id=requester_id,
-                ranking_type=ranking_type,
-            )
-        )
-
-        requester_name = self.get_display_name(
-            guild=guild,
-            user_id=requester_id,
-        )
-
-        personal_row = {
-            "rank": requester_data["rank"],
-            "user_id": requester_id,
-            "name": requester_name,
-            "total_xp": int(
-                requester_data["total_xp"] or 0
-            ),
-            "wallet": int(
-                requester_data["wallet"] or 0
-            ),
-        }
-
-        background_path = (
-            self.get_leaderboard_background_path()
-        )
-
-        render_background: Path | None
-
-        if background_path.is_file():
-            render_background = background_path
-        else:
-            render_background = None
-
-        image = await asyncio.to_thread(
-            render_leaderboard_card,
-            ranking_type=ranking_type,
-            rows=rows,
-            personal_row=personal_row,
-            page=page,
-            total_pages=total_pages,
-            guild_name=guild.name,
-            background_path=render_background,
-        )
-
-        if isinstance(
-            image,
-            io.BytesIO,
-        ):
-            image.seek(0)
-            buffer = image
-        elif isinstance(
-            image,
-            bytes,
-        ):
-            buffer = io.BytesIO(
-                image
-            )
-        else:
-            raise TypeError(
-                "render_leaderboard_card doit retourner "
-                "un objet bytes ou BytesIO."
-            )
-
-        return discord.File(
-            buffer,
-            filename=(
-                f"classement-{ranking_type}"
-                f"-page-{page}.png"
-            ),
-        )
-
-    @app_commands.command(
-        name="progression",
-        description="Affiche ton niveau, ton XP et ton argent.",
+    self,
+    *,
+    guild: discord.Guild,
+    requester: discord.Member | discord.User,
+    ranking_type: str,
+    page: int,
+) -> tuple[discord.File, int]:
+    total_entries = await self.get_leaderboard_count(
+        guild_id=guild.id,
     )
-    @app_commands.describe(
-        membre=(
-            "Membre dont tu veux consulter "
-            "la progression."
-        )
-    )
-    @app_commands.guild_only()
-    @app_commands.checks.cooldown(
+
+    total_pages = max(
         1,
-        4.0,
-        key=lambda interaction: (
-            interaction.guild_id,
-            interaction.user.id,
+        min(
+            MAX_LEADERBOARD_PAGES,
+            math.ceil(total_entries / LEADERBOARD_PAGE_SIZE),
         ),
     )
+
+    page = max(0, min(page, total_pages - 1))
+    offset = page * LEADERBOARD_PAGE_SIZE
+
+    records = await self.get_leaderboard_page(
+        guild_id=guild.id,
+        ranking_type=ranking_type,
+        offset=offset,
+    )
+
+    rows: list[dict[str, Any]] = []
+
+    for index, record in enumerate(records, start=1):
+        user_id = int(record["user_id"])
+        total_xp = int(record["total_xp"] or 0)
+        wallet = int(record["wallet"] or 0)
+
+        value = (
+            wallet
+            if ranking_type == "money"
+            else total_xp
+        )
+
+        rows.append(
+            {
+                "rank": offset + index,
+                "user_id": user_id,
+                "display_name": self.get_display_name(
+                    guild,
+                    user_id,
+                ),
+                "value": value,
+            }
+        )
+
+    personal = await self.get_personal_leaderboard_row(
+        guild_id=guild.id,
+        user_id=requester.id,
+        ranking_type=ranking_type,
+    )
+
+    personal_total_xp = int(personal["total_xp"])
+    personal_wallet = int(personal["wallet"])
+
+    personal_value = (
+        personal_wallet
+        if ranking_type == "money"
+        else personal_total_xp
+    )
+
+    personal_row = {
+        "rank": int(personal["rank"]),
+        "user_id": requester.id,
+        "display_name": getattr(
+            requester,
+            "display_name",
+            requester.name,
+        ),
+        "value": personal_value,
+    }
+
+    image = await asyncio.to_thread(
+        render_leaderboard_card,
+        ranking_type=ranking_type,
+        page=page + 1,
+        total_pages=total_pages,
+        rows=rows,
+        personal_row=personal_row,
+        background_path=LEADERBOARD_BACKGROUND_PATH,
+    )
+
+    image.seek(0)
+
+    leaderboard_file = discord.File(
+        image,
+        filename=(
+            f"classement-{ranking_type}-"
+            f"page-{page + 1}.png"
+        ),
+    )
+
+    return leaderboard_file, total_pages
+
     async def progression(
         self,
         interaction: discord.Interaction,
