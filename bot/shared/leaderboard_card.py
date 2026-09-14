@@ -755,10 +755,10 @@ def render_leaderboard_card(
         )
     )
 
-   personal_username_font = _get_username_font(
-      personal_name,
-      23,
-   )
+    personal_username_font = _get_username_font(
+       personal_name,
+       23,
+    )
 
    
     personal_value = int(
