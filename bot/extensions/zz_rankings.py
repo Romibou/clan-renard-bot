@@ -619,215 +619,215 @@ class RankingsCog(commands.Cog):
         return f"Utilisateur {user_id}"
 
     async def build_leaderboard_file(
-    self,
-    *,
-    guild: discord.Guild,
-    requester: discord.Member | discord.User,
-    ranking_type: str,
-    page: int,
-) -> tuple[discord.File, int]:
-    total_entries = await self.get_leaderboard_count(
-        guild_id=guild.id,
-    )
-
-    total_pages = max(
-        1,
-        min(
-            MAX_LEADERBOARD_PAGES,
-            math.ceil(total_entries / LEADERBOARD_PAGE_SIZE),
-        ),
-    )
-
-    page = max(0, min(page, total_pages - 1))
-    offset = page * LEADERBOARD_PAGE_SIZE
-
-    records = await self.get_leaderboard_page(
-        guild_id=guild.id,
-        ranking_type=ranking_type,
-        offset=offset,
-    )
-
-    rows: list[dict[str, Any]] = []
-
-    for index, record in enumerate(records, start=1):
-        user_id = int(record["user_id"])
-        total_xp = int(record["total_xp"] or 0)
-        wallet = int(record["wallet"] or 0)
-
-        value = (
-            wallet
-            if ranking_type == "money"
-            else total_xp
-        )
-
-        rows.append(
-            {
-                "rank": offset + index,
-                "user_id": user_id,
-                "display_name": self.get_display_name(
-                    guild,
-                    user_id,
-                ),
-                "value": value,
-            }
-        )
-
-    personal = await self.get_personal_leaderboard_row(
-        guild_id=guild.id,
-        user_id=requester.id,
-        ranking_type=ranking_type,
-    )
-
-    personal_total_xp = int(personal["total_xp"])
-    personal_wallet = int(personal["wallet"])
-
-    personal_value = (
-        personal_wallet
-        if ranking_type == "money"
-        else personal_total_xp
-    )
-
-    personal_row = {
-        "rank": int(personal["rank"]),
-        "user_id": requester.id,
-        "display_name": getattr(
-            requester,
-            "display_name",
-            requester.name,
-        ),
-        "value": personal_value,
-    }
-
-    image = await asyncio.to_thread(
-        render_leaderboard_card,
-        ranking_type=ranking_type,
-        page=page + 1,
-        total_pages=total_pages,
-        rows=rows,
-        personal_row=personal_row,
-        background_path=LEADERBOARD_BACKGROUND_PATH,
-    )
-
-    image.seek(0)
-
-    leaderboard_file = discord.File(
-        image,
-        filename=(
-            f"classement-{ranking_type}-"
-            f"page-{page + 1}.png"
-        ),
-    )
-
-    return leaderboard_file, total_pages
-
-    async def progression(
         self,
-        interaction: discord.Interaction,
-        membre: discord.Member | None = None,
-    ) -> None:
-        await interaction.response.defer(
-            ephemeral=True,
-            thinking=True,
+        *,
+        guild: discord.Guild,
+        requester: discord.Member | discord.User,
+        ranking_type: str,
+        page: int,
+    ) -> tuple[discord.File, int]:
+        total_entries = await self.get_leaderboard_count(
+            guild_id=guild.id,
         )
-
-        guild = interaction.guild
-
-        if guild is None:
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Serveur requis",
-                    (
-                        "Cette commande doit être utilisée "
-                        "dans un serveur."
+    
+        total_pages = max(
+            1,
+            min(
+                MAX_LEADERBOARD_PAGES,
+                math.ceil(total_entries / LEADERBOARD_PAGE_SIZE),
+            ),
+        )
+    
+        page = max(0, min(page, total_pages - 1))
+        offset = page * LEADERBOARD_PAGE_SIZE
+    
+        records = await self.get_leaderboard_page(
+            guild_id=guild.id,
+            ranking_type=ranking_type,
+            offset=offset,
+        )
+    
+        rows: list[dict[str, Any]] = []
+    
+        for index, record in enumerate(records, start=1):
+            user_id = int(record["user_id"])
+            total_xp = int(record["total_xp"] or 0)
+            wallet = int(record["wallet"] or 0)
+    
+            value = (
+                wallet
+                if ranking_type == "money"
+                else total_xp
+            )
+    
+            rows.append(
+                {
+                    "rank": offset + index,
+                    "user_id": user_id,
+                    "display_name": self.get_display_name(
+                        guild,
+                        user_id,
                     ),
-                ),
-                ephemeral=True,
+                    "value": value,
+                }
             )
-            return
-
-        selected_member = (
-            membre
-            if membre is not None
-            else interaction.user
+    
+        personal = await self.get_personal_leaderboard_row(
+            guild_id=guild.id,
+            user_id=requester.id,
+            ranking_type=ranking_type,
         )
-
-        try:
-            progression_cog = (
-                self.get_progression_cog()
+    
+        personal_total_xp = int(personal["total_xp"])
+        personal_wallet = int(personal["wallet"])
+    
+        personal_value = (
+            personal_wallet
+            if ranking_type == "money"
+            else personal_total_xp
+        )
+    
+        personal_row = {
+            "rank": int(personal["rank"]),
+            "user_id": requester.id,
+            "display_name": getattr(
+                requester,
+                "display_name",
+                requester.name,
+            ),
+            "value": personal_value,
+        }
+    
+        image = await asyncio.to_thread(
+            render_leaderboard_card,
+            ranking_type=ranking_type,
+            page=page + 1,
+            total_pages=total_pages,
+            rows=rows,
+            personal_row=personal_row,
+            background_path=LEADERBOARD_BACKGROUND_PATH,
+        )
+    
+        image.seek(0)
+    
+        leaderboard_file = discord.File(
+            image,
+            filename=(
+                f"classement-{ranking_type}-"
+                f"page-{page + 1}.png"
+            ),
+        )
+    
+        return leaderboard_file, total_pages
+    
+        async def progression(
+            self,
+            interaction: discord.Interaction,
+            membre: discord.Member | None = None,
+        ) -> None:
+            await interaction.response.defer(
+                ephemeral=True,
+                thinking=True,
             )
-
-            build_progression_card = getattr(
-                progression_cog,
-                "build_progression_card",
-            )
-
-            progression_file = (
-                await build_progression_card(
-                    member=selected_member,
-                    guild_id=guild.id,
+    
+            guild = interaction.guild
+    
+            if guild is None:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Serveur requis",
+                        (
+                            "Cette commande doit être utilisée "
+                            "dans un serveur."
+                        ),
+                    ),
+                    ephemeral=True,
                 )
+                return
+    
+            selected_member = (
+                membre
+                if membre is not None
+                else interaction.user
             )
-        except Exception:
-            LOGGER.exception(
-                "Impossible de générer la carte de progression de %s.",
-                selected_member.id,
-            )
-
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Erreur de génération",
-                    (
-                        "La carte de progression n'a pas pu "
-                        "être générée.\n"
-                        "Consulte les logs du bot."
+    
+            try:
+                progression_cog = (
+                    self.get_progression_cog()
+                )
+    
+                build_progression_card = getattr(
+                    progression_cog,
+                    "build_progression_card",
+                )
+    
+                progression_file = (
+                    await build_progression_card(
+                        member=selected_member,
+                        guild_id=guild.id,
+                    )
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Impossible de générer la carte de progression de %s.",
+                    selected_member.id,
+                )
+    
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Erreur de génération",
+                        (
+                            "La carte de progression n'a pas pu "
+                            "être générée.\n"
+                            "Consulte les logs du bot."
+                        ),
                     ),
-                ),
+                    ephemeral=True,
+                )
+                return
+    
+            # La carte est envoyée directement :
+            # aucun embed et aucun bouton.
+            await interaction.followup.send(
+                file=progression_file,
                 ephemeral=True,
             )
-            return
-
-        # La carte est envoyée directement :
-        # aucun embed et aucun bouton.
-        await interaction.followup.send(
-            file=progression_file,
-            ephemeral=True,
+    
+        @app_commands.command(
+            name="classement",
+            description=(
+                "Affiche le classement XP ou argent du serveur."
+            ),
         )
-
-    @app_commands.command(
-        name="classement",
-        description=(
-            "Affiche le classement XP ou argent du serveur."
-        ),
-    )
-    @app_commands.rename(
-        ranking_type="type",
-    )
-    @app_commands.describe(
-        ranking_type=(
-            "Type de classement à afficher."
-        ),
-    )
-    @app_commands.choices(
-        ranking_type=[
-            app_commands.Choice(
-                name="XP",
-                value="xp",
+        @app_commands.rename(
+            ranking_type="type",
+        )
+        @app_commands.describe(
+            ranking_type=(
+                "Type de classement à afficher."
             ),
-            app_commands.Choice(
-                name="Argent",
-                value="money",
+        )
+        @app_commands.choices(
+            ranking_type=[
+                app_commands.Choice(
+                    name="XP",
+                    value="xp",
+                ),
+                app_commands.Choice(
+                    name="Argent",
+                    value="money",
+                ),
+            ]
+        )
+        @app_commands.guild_only()
+        @app_commands.checks.cooldown(
+            1,
+            4.0,
+            key=lambda interaction: (
+                interaction.guild_id,
+                interaction.user.id,
             ),
-        ]
-    )
-    @app_commands.guild_only()
-    @app_commands.checks.cooldown(
-        1,
-        4.0,
-        key=lambda interaction: (
-            interaction.guild_id,
-            interaction.user.id,
-        ),
-    )
+        )
     async def classement(
         self,
         interaction: discord.Interaction,
