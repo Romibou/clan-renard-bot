@@ -423,12 +423,14 @@ def _draw_stat_card(
     label: str,
     value: str,
     accent: tuple[int, int, int, int],
+    label_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    value_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> None:
     left, top, right, bottom = box
 
     draw.rounded_rectangle(
         box,
-        radius=18,
+        radius=22,
         fill=CARD_COLOR,
         outline=CARD_BORDER,
         width=2,
@@ -436,74 +438,43 @@ def _draw_stat_card(
 
     draw.rounded_rectangle(
         (
-            left + 15,
-            top + 15,
-            left + 22,
-            bottom - 15,
+            left + 18,
+            top + 16,
+            left + 27,
+            bottom - 16,
         ),
-        radius=4,
+        radius=5,
         fill=accent,
-    )
-
-    label_font = _load_font(
-        18,
-        bold=True,
-    )
-
-    value_font = _load_font(
-        30,
-        bold=True,
     )
 
     normalized_label = str(label).upper()
     normalized_value = str(value)
 
-    # On récupère les dimensions réelles des caractères.
-    # Certaines polices possèdent un décalage vertical positif,
-    # ce qui peut donner l'impression que le haut est coupé.
-    label_box = draw.textbbox(
-        (0, 0),
-        normalized_label,
-        font=label_font,
-    )
-
-    value_box = draw.textbbox(
-        (0, 0),
-        normalized_value,
-        font=value_font,
-    )
-
-    label_visible_top = top + 15
-    value_visible_top = top + 51
-
-    label_y = (
-        label_visible_top
-        - label_box[1]
-    )
-
-    value_y = (
-        value_visible_top
-        - value_box[1]
-    )
+    # Les deux positions sont toujours calculées depuis le haut
+    # de la carte. Toutes les lignes seront donc identiques.
+    label_baseline_y = top + 40
+    value_baseline_y = top + 91
 
     draw.text(
         (
             left + 43,
-            label_y,
+            label_baseline_y,
         ),
         normalized_label,
         font=label_font,
         fill=SECONDARY_TEXT_COLOR,
+        anchor="ls",
     )
 
     draw.text(
         (
             left + 43,
-            value_y,
+            value_baseline_y,
         ),
         normalized_value,
         font=value_font,
         fill=TEXT_COLOR,
+        anchor="ls",
     )
 
 
