@@ -570,6 +570,7 @@ def render_statistics_card(
     level: int,
     total_xp: int,
     wallet: int,
+    xp_to_next_level: int,
     xp_gained: int,
     coins_gained: int,
     coins_spent: int,
