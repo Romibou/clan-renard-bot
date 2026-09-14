@@ -621,7 +621,7 @@ def render_leaderboard_card(
         draw.text(
             (250, name_y),
             fitted_name,
-            font=row_font,
+            font=username_font,
             fill=TEXT_COLOR,
         )
 
