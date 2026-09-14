@@ -97,12 +97,17 @@ def _load_username_font(
         project_root
         / "assets"
         / "fonts"
+        / "NotoSans-Regular.ttf",
+
+        project_root
+        / "assets"
+        / "fonts"
         / "NotoSansMath-Regular.ttf",
 
         project_root
         / "assets"
         / "fonts"
-        / "NotoSans-Regular.ttf",
+        / "DejaVuSans.ttf",
 
         Path(
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
