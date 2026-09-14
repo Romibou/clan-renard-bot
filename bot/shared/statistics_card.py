@@ -428,18 +428,18 @@ def _draw_stat_card(
 
     draw.rounded_rectangle(
         box,
-        radius=22,
-        fill=CARD_COLOR,
+        radius=18,
+        fill=CARD_BACKGROUND,
         outline=CARD_BORDER,
         width=2,
     )
 
     draw.rounded_rectangle(
         (
-            left + 17,
-            top + 18,
-            left + 25,
-            bottom - 18,
+            left + 15,
+            top + 15,
+            left + 22,
+            bottom - 15,
         ),
         radius=4,
         fill=accent,
@@ -455,12 +455,43 @@ def _draw_stat_card(
         bold=True,
     )
 
+    normalized_label = str(label).upper()
+    normalized_value = str(value)
+
+    # On récupère les dimensions réelles des caractères.
+    # Certaines polices possèdent un décalage vertical positif,
+    # ce qui peut donner l'impression que le haut est coupé.
+    label_box = draw.textbbox(
+        (0, 0),
+        normalized_label,
+        font=label_font,
+    )
+
+    value_box = draw.textbbox(
+        (0, 0),
+        normalized_value,
+        font=value_font,
+    )
+
+    label_visible_top = top + 15
+    value_visible_top = top + 51
+
+    label_y = (
+        label_visible_top
+        - label_box[1]
+    )
+
+    value_y = (
+        value_visible_top
+        - value_box[1]
+    )
+
     draw.text(
         (
             left + 43,
-            top + 17,
+            label_y,
         ),
-        label.upper(),
+        normalized_label,
         font=label_font,
         fill=SECONDARY_TEXT_COLOR,
     )
@@ -468,12 +499,13 @@ def _draw_stat_card(
     draw.text(
         (
             left + 43,
-            top + 49,
+            value_y,
         ),
-        value,
+        normalized_value,
         font=value_font,
         fill=TEXT_COLOR,
     )
+
 
 
 def _draw_rank_card(
