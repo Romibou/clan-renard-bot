@@ -808,13 +808,11 @@ def render_statistics_card(
             third_column_right,
             second_row_bottom,
         ),
-        label="Activités récompensées",
-        value=_format_number(
-            rewarded_messages
-            + voice_minutes
-        ),
+        label="PROCHAIN NIVEAU",
+        value=f"{_format_number(xp_to_next_level)} XP",
         accent=GREEN_ACCENT,
     )
+
 
     draw.text(
         (48, 558),
