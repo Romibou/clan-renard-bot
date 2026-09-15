@@ -2049,19 +2049,23 @@ class DailyCog(
                     if last_claim_paris_date >= current_paris_date:
                         return DailyClaimResult(
                             status="cooldown",
-                            coins_reward=0,
+                            current_streak=current_streak,
+                            best_streak=best_streak,
+                            total_claims=total_claims,
                             xp_reward=0,
-                            streak=current_streak,
-                            previous_level=level_from_xp(
-                                current_total_xp
-                            ),
-                            new_level=level_from_xp(
-                                current_total_xp
-                            ),
+                            coins_reward=0,
+                            base_xp=base_xp,
+                            base_coins=base_coins,
+                            bonus_xp=0,
+                            bonus_coins=0,
+                            xp_multiplier=Decimal("1"),
+                            coins_multiplier=Decimal("1"),
+                            applied_rule=None,
+                            old_level=old_level,
+                            new_level=old_level,
+                            total_xp=old_xp,
+                            wallet=old_wallet,
                             next_claim_at=next_claim_at,
-                            selected_reward=None,
-                            granted_roles=[],
-                            granted_cosmetics=[],
                         )
                 
                     days_since_last_claim = (
