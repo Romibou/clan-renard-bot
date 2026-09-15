@@ -2842,10 +2842,11 @@ class DailyCog(commands.Cog):
         )
 
         embed.add_field(
-            name="Délais",
+            name="Réinitialisation",
             value=(
-                "⏱️ Réclamation : **24 heures**\n"
-                "🔥 Conservation : **48 heures**"
+                "⏱️ Nouvelle récompense : **chaque jour à minuit**\n"
+                "🕰️ Fuseau horaire : **Europe/Paris**\n"
+                "🔥 La série continue en réclamant deux jours consécutifs."
             ),
             inline=True,
         )
