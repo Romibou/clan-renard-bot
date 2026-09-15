@@ -5,8 +5,10 @@ import io
 import logging
 import re
 import textwrap
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -24,6 +26,8 @@ PROFILE_HEIGHT = 500
 PROFILE_COLOR = discord.Color.from_rgb(226, 104, 161)
 SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
+
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 
 HEX_COLOR_PATTERN = re.compile(
     r"^#?[0-9a-fA-F]{6}$"
@@ -88,7 +92,9 @@ def error_embed(
     )
 
 
-def normalize_color(value: str) -> str | None:
+def normalize_color(
+    value: str,
+) -> str | None:
     normalized = value.strip()
 
     if not normalized:
@@ -97,7 +103,9 @@ def normalize_color(value: str) -> str | None:
     if not normalized.startswith("#"):
         normalized = f"#{normalized}"
 
-    if not HEX_COLOR_PATTERN.fullmatch(normalized):
+    if not HEX_COLOR_PATTERN.fullmatch(
+        normalized
+    ):
         return None
 
     return normalized.upper()
@@ -106,7 +114,10 @@ def normalize_color(value: str) -> str | None:
 def color_tuple(
     value: str,
 ) -> tuple[int, int, int]:
-    normalized = normalize_color(value) or "#E268A1"
+    normalized = (
+        normalize_color(value)
+        or "#E268A1"
+    )
 
     return (
         int(normalized[1:3], 16),
@@ -130,20 +141,32 @@ def font(
     *,
     bold: bool = False,
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = []
+    candidates: list[str] = []
 
     if bold:
         candidates.extend(
             [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+                (
+                    "/usr/share/fonts/truetype/dejavu/"
+                    "DejaVuSans-Bold.ttf"
+                ),
+                (
+                    "/usr/share/fonts/truetype/liberation2/"
+                    "LiberationSans-Bold.ttf"
+                ),
             ]
         )
     else:
         candidates.extend(
             [
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+                (
+                    "/usr/share/fonts/truetype/dejavu/"
+                    "DejaVuSans.ttf"
+                ),
+                (
+                    "/usr/share/fonts/truetype/liberation2/"
+                    "LiberationSans-Regular.ttf"
+                ),
             ]
         )
 
@@ -168,9 +191,14 @@ def load_rgba_asset(
 
     try:
         root = assets_root.resolve()
-        target = (root / relative_path).resolve()
+        target = (
+            root / relative_path
+        ).resolve()
 
-        if root not in target.parents:
+        if (
+            target != root
+            and root not in target.parents
+        ):
             LOGGER.warning(
                 "Chemin d'asset refusé : %s",
                 relative_path,
@@ -179,7 +207,10 @@ def load_rgba_asset(
 
         if not target.is_file():
             LOGGER.warning(
-                "Asset de profil introuvable : chemin reçu=%r, chemin final=%s",
+                (
+                    "Asset de profil introuvable : "
+                    "chemin reçu=%r, chemin final=%s"
+                ),
                 relative_path,
                 target,
             )
@@ -188,7 +219,10 @@ def load_rgba_asset(
         with Image.open(target) as image:
             return image.convert("RGBA")
 
-    except (OSError, ValueError):
+    except (
+        OSError,
+        ValueError,
+    ):
         LOGGER.warning(
             "Impossible de charger l'asset %s",
             relative_path,
@@ -202,8 +236,12 @@ def create_gradient(
 ) -> Image.Image:
     image = Image.new(
         "RGBA",
-        (PROFILE_WIDTH, PROFILE_HEIGHT),
+        (
+            PROFILE_WIDTH,
+            PROFILE_HEIGHT,
+        ),
     )
+
     pixels = image.load()
 
     secondary = (
@@ -213,24 +251,37 @@ def create_gradient(
     )
 
     for y in range(PROFILE_HEIGHT):
-        ratio = y / max(1, PROFILE_HEIGHT - 1)
+        ratio = (
+            y
+            / max(
+                1,
+                PROFILE_HEIGHT - 1,
+            )
+        )
 
         red = int(
             color[0] * (1 - ratio)
             + secondary[0] * ratio
         )
+
         green = int(
             color[1] * (1 - ratio)
             + secondary[1] * ratio
         )
+
         blue = int(
             color[2] * (1 - ratio)
             + secondary[2] * ratio
         )
 
         for x in range(PROFILE_WIDTH):
-            horizontal = x / PROFILE_WIDTH
-            modifier = int(20 * horizontal)
+            horizontal = (
+                x / PROFILE_WIDTH
+            )
+
+            modifier = int(
+                20 * horizontal
+            )
 
             pixels[x, y] = (
                 max(0, red - modifier),
@@ -251,18 +302,19 @@ def apply_snow_effect(
         "RGBA",
     )
 
-    # Positions stables selon l'identifiant Discord.
     seed = user_id
 
-    for index in range(90):
+    for _ in range(90):
         seed = (
-            seed * 1_103_515_245 + 12_345
+            seed * 1_103_515_245
+            + 12_345
         ) & 0x7FFFFFFF
 
         x = seed % PROFILE_WIDTH
 
         seed = (
-            seed * 1_103_515_245 + 12_345
+            seed * 1_103_515_245
+            + 12_345
         ) & 0x7FFFFFFF
 
         y = seed % PROFILE_HEIGHT
@@ -276,7 +328,12 @@ def apply_snow_effect(
                 x + radius,
                 y + radius,
             ),
-            fill=(255, 255, 255, alpha),
+            fill=(
+                255,
+                255,
+                255,
+                alpha,
+            ),
         )
 
 
@@ -325,7 +382,7 @@ class ProfileBioModal(discord.ui.Modal):
         interaction: discord.Interaction,
     ) -> None:
         normalized_color = normalize_color(
-            str(self.color)
+            str(self.color.value)
         )
 
         if normalized_color is None:
@@ -341,7 +398,9 @@ class ProfileBioModal(discord.ui.Modal):
             )
             return
 
-        bio = str(self.bio).strip()
+        bio = str(
+            self.bio.value
+        ).strip()
 
         await self.cog.update_profile(
             guild_id=interaction.guild_id,
@@ -359,8 +418,8 @@ class ProfileBioModal(discord.ui.Modal):
             embed=success_embed(
                 "Profil enregistré",
                 (
-                    "Ta biographie et ta couleur ont été "
-                    "mises à jour."
+                    "Ta biographie et ta couleur "
+                    "ont été mises à jour."
                 ),
             ),
             ephemeral=True,
@@ -384,12 +443,15 @@ class CosmeticSelect(discord.ui.Select):
         self.cog = cog
         self.owner_id = owner_id
 
-        options: list[discord.SelectOption] = []
+        options: list[
+            discord.SelectOption
+        ] = []
 
         for cosmetic in cosmetics[:25]:
             cosmetic_type = str(
                 cosmetic["cosmetic_type"]
             )
+
             identifier = str(
                 cosmetic["identifier"]
             )
@@ -401,18 +463,32 @@ class CosmeticSelect(discord.ui.Select):
 
             options.append(
                 discord.SelectOption(
-                    label=truncate(label, 100),
-                    value=f"{cosmetic_type}:{identifier}",
+                    label=truncate(
+                        label,
+                        100,
+                    ),
+                    value=(
+                        f"{cosmetic_type}:"
+                        f"{identifier}"
+                    ),
                     description=truncate(
-                        str(cosmetic["description"])
-                        or "Cosmétique de profil",
+                        (
+                            str(
+                                cosmetic[
+                                    "description"
+                                ]
+                            )
+                            or "Cosmétique de profil"
+                        ),
                         100,
                     ),
                 )
             )
 
         super().__init__(
-            placeholder="Choisis un cosmétique à équiper…",
+            placeholder=(
+                "Choisis un cosmétique à équiper…"
+            ),
             min_values=1,
             max_values=1,
             options=options,
@@ -422,11 +498,17 @@ class CosmeticSelect(discord.ui.Select):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        if interaction.user.id != self.owner_id:
+        if (
+            interaction.user.id
+            != self.owner_id
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Inventaire personnel",
-                    "Cet inventaire ne t'appartient pas.",
+                    (
+                        "Cet inventaire ne "
+                        "t'appartient pas."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -439,22 +521,30 @@ class CosmeticSelect(discord.ui.Select):
                     maxsplit=1,
                 )
             )
-        except (IndexError, ValueError):
+        except (
+            IndexError,
+            ValueError,
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Sélection invalide",
-                    "Impossible de lire le cosmétique.",
+                    (
+                        "Impossible de lire "
+                        "le cosmétique."
+                    ),
                 ),
                 ephemeral=True,
             )
             return
 
         try:
-            cosmetic = await self.cog.equip_cosmetic(
-                guild_id=interaction.guild_id,
-                user_id=interaction.user.id,
-                cosmetic_type=cosmetic_type,
-                identifier=identifier,
+            cosmetic = (
+                await self.cog.equip_cosmetic(
+                    guild_id=interaction.guild_id,
+                    user_id=interaction.user.id,
+                    cosmetic_type=cosmetic_type,
+                    identifier=identifier,
+                )
             )
         except ValueError as error:
             await interaction.response.send_message(
@@ -480,7 +570,9 @@ class CosmeticSelect(discord.ui.Select):
         )
 
 
-class CosmeticInventoryView(discord.ui.View):
+class CosmeticInventoryView(
+    discord.ui.View
+):
     def __init__(
         self,
         *,
@@ -507,16 +599,23 @@ class CosmeticInventoryView(discord.ui.View):
         self,
         interaction: discord.Interaction,
     ) -> bool:
-        if interaction.user.id == self.owner_id:
+        if (
+            interaction.user.id
+            == self.owner_id
+        ):
             return True
 
         await interaction.response.send_message(
             embed=error_embed(
                 "Inventaire personnel",
-                "Cet inventaire appartient à un autre membre.",
+                (
+                    "Cet inventaire appartient "
+                    "à un autre membre."
+                ),
             ),
             ephemeral=True,
         )
+
         return False
 
     @discord.ui.button(
@@ -565,19 +664,23 @@ class ProfileView(discord.ui.View):
         self,
         interaction: discord.Interaction,
     ) -> bool:
-        if interaction.user.id == self.owner.id:
+        if (
+            interaction.user.id
+            == self.owner.id
+        ):
             return True
 
         await interaction.response.send_message(
             embed=error_embed(
                 "Profil personnel",
                 (
-                    "Tu ne peux pas modifier le profil "
-                    "d'un autre membre."
+                    "Tu ne peux pas modifier "
+                    "le profil d'un autre membre."
                 ),
             ),
             ephemeral=True,
         )
+
         return False
 
     @discord.ui.button(
@@ -599,8 +702,12 @@ class ProfileView(discord.ui.View):
             ProfileBioModal(
                 cog=self.cog,
                 owner=self.owner,
-                current_bio=str(profile["bio"]),
-                current_color=str(profile["color_hex"]),
+                current_bio=str(
+                    profile["bio"]
+                ),
+                current_color=str(
+                    profile["color_hex"]
+                ),
             )
         )
 
@@ -614,9 +721,11 @@ class ProfileView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        cosmetics = await self.cog.get_owned_cosmetics(
-            guild_id=interaction.guild_id,
-            user_id=interaction.user.id,
+        cosmetics = (
+            await self.cog.get_owned_cosmetics(
+                guild_id=interaction.guild_id,
+                user_id=interaction.user.id,
+            )
         )
 
         if not cosmetics:
@@ -637,8 +746,8 @@ class ProfileView(discord.ui.View):
             embed=discord.Embed(
                 title="🎒 Inventaire du profil",
                 description=(
-                    "Choisis le cosmétique que tu souhaites "
-                    "équiper."
+                    "Choisis le cosmétique que "
+                    "tu souhaites équiper."
                 ),
                 color=PROFILE_COLOR,
             ),
@@ -672,7 +781,9 @@ class ProfileView(discord.ui.View):
         )
 
 
-class CreateCosmeticModal(discord.ui.Modal):
+class CreateCosmeticModal(
+    discord.ui.Modal
+):
     def __init__(
         self,
         *,
@@ -693,7 +804,9 @@ class CreateCosmeticModal(discord.ui.Modal):
 
         self.cosmetic_type = discord.ui.TextInput(
             label="Type",
-            placeholder="title, badge, background, frame ou effect",
+            placeholder=(
+                "title, badge, background, frame ou effect"
+            ),
             max_length=20,
         )
 
@@ -712,7 +825,9 @@ class CreateCosmeticModal(discord.ui.Modal):
 
         self.value = discord.ui.TextInput(
             label="Valeur facultative",
-            placeholder="Texte du titre ou identifiant d'effet",
+            placeholder=(
+                "Texte du titre ou identifiant d'effet"
+            ),
             required=False,
             max_length=250,
         )
@@ -728,26 +843,28 @@ class CreateCosmeticModal(discord.ui.Modal):
         interaction: discord.Interaction,
     ) -> None:
         identifier = str(
-            self.identifier
+            self.identifier.value
         ).strip().lower()
 
         cosmetic_type = str(
-            self.cosmetic_type
+            self.cosmetic_type.value
         ).strip().lower()
 
         display_name = str(
-            self.display_name
+            self.display_name.value
         ).strip()
 
         asset_path = str(
-            self.asset_path
+            self.asset_path.value
         ).strip()
 
         value = str(
-            self.value
+            self.value.value
         ).strip()
 
-        if not IDENTIFIER_PATTERN.fullmatch(identifier):
+        if not IDENTIFIER_PATTERN.fullmatch(
+            identifier
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Identifiant invalide",
@@ -808,7 +925,9 @@ class CreateCosmeticModal(discord.ui.Modal):
         )
 
 
-class AdminCosmeticSelect(discord.ui.Select):
+class AdminCosmeticSelect(
+    discord.ui.Select
+):
     def __init__(
         self,
         *,
@@ -819,10 +938,16 @@ class AdminCosmeticSelect(discord.ui.Select):
         options = [
             discord.SelectOption(
                 label=truncate(
-                    str(cosmetic["display_name"]),
+                    str(
+                        cosmetic[
+                            "display_name"
+                        ]
+                    ),
                     100,
                 ),
-                value=str(cosmetic["id"]),
+                value=str(
+                    cosmetic["id"]
+                ),
                 description=truncate(
                     (
                         f"{COSMETIC_LABELS.get(str(cosmetic['cosmetic_type']))}"
@@ -853,7 +978,9 @@ class AdminCosmeticSelect(discord.ui.Select):
         await interaction.response.defer()
 
 
-class AdminMemberSelect(discord.ui.UserSelect):
+class AdminMemberSelect(
+    discord.ui.UserSelect
+):
     def __init__(self) -> None:
         self.selected_user_id: int | None = None
 
@@ -868,12 +995,16 @@ class AdminMemberSelect(discord.ui.UserSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        self.selected_user_id = self.values[0].id
+        self.selected_user_id = (
+            self.values[0].id
+        )
 
         await interaction.response.defer()
 
 
-class GrantCosmeticView(discord.ui.View):
+class GrantCosmeticView(
+    discord.ui.View
+):
     def __init__(
         self,
         *,
@@ -888,13 +1019,23 @@ class GrantCosmeticView(discord.ui.View):
         self.cog = cog
         self.guild_id = guild_id
 
-        self.member_select = AdminMemberSelect()
-        self.cosmetic_select = AdminCosmeticSelect(
-            cosmetics=cosmetics,
+        self.member_select = (
+            AdminMemberSelect()
         )
 
-        self.add_item(self.member_select)
-        self.add_item(self.cosmetic_select)
+        self.cosmetic_select = (
+            AdminCosmeticSelect(
+                cosmetics=cosmetics,
+            )
+        )
+
+        self.add_item(
+            self.member_select
+        )
+
+        self.add_item(
+            self.cosmetic_select
+        )
 
     @discord.ui.button(
         label="Distribuer",
@@ -907,12 +1048,20 @@ class GrantCosmeticView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        user_id = self.member_select.selected_user_id
-        cosmetic_id = (
-            self.cosmetic_select.selected_cosmetic_id
+        user_id = (
+            self.member_select
+            .selected_user_id
         )
 
-        if user_id is None or cosmetic_id is None:
+        cosmetic_id = (
+            self.cosmetic_select
+            .selected_cosmetic_id
+        )
+
+        if (
+            user_id is None
+            or cosmetic_id is None
+        ):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Sélection incomplète",
@@ -925,11 +1074,13 @@ class GrantCosmeticView(discord.ui.View):
             )
             return
 
-        cosmetic = await self.cog.grant_cosmetic(
-            guild_id=self.guild_id,
-            user_id=user_id,
-            cosmetic_id=cosmetic_id,
-            source="admin",
+        cosmetic = (
+            await self.cog.grant_cosmetic(
+                guild_id=self.guild_id,
+                user_id=user_id,
+                cosmetic_id=cosmetic_id,
+                source="admin",
+            )
         )
 
         await interaction.response.send_message(
@@ -942,6 +1093,7 @@ class GrantCosmeticView(discord.ui.View):
             ),
             ephemeral=True,
         )
+
 
 class DeleteCosmeticModal(
     discord.ui.Modal,
@@ -967,15 +1119,22 @@ class DeleteCosmeticModal(
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
-                "❌ Cette action doit être utilisée sur un serveur.",
+                (
+                    "❌ Cette action doit être "
+                    "utilisée sur un serveur."
+                ),
                 ephemeral=True,
             )
             return
 
         try:
-            display_name = await self.cog.delete_cosmetic(
-                guild_id=interaction.guild_id,
-                identifier=str(self.identifier),
+            display_name = (
+                await self.cog.delete_cosmetic(
+                    guild_id=interaction.guild_id,
+                    identifier=str(
+                        self.identifier.value
+                    ),
+                )
             )
         except ValueError as error:
             await interaction.response.send_message(
@@ -988,13 +1147,19 @@ class DeleteCosmeticModal(
             return
         except Exception:
             LOGGER.exception(
-                "Impossible de supprimer le cosmétique"
+                (
+                    "Impossible de supprimer "
+                    "le cosmétique"
+                )
             )
 
             await interaction.response.send_message(
                 embed=error_embed(
                     "Suppression impossible",
-                    "Une erreur inattendue s'est produite.",
+                    (
+                        "Une erreur inattendue "
+                        "s'est produite."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -1013,10 +1178,9 @@ class DeleteCosmeticModal(
         )
 
 
-
-
-
-class ProfileAdminView(discord.ui.View):
+class ProfileAdminView(
+    discord.ui.View
+):
     def __init__(
         self,
         *,
@@ -1077,7 +1241,8 @@ class ProfileAdminView(discord.ui.View):
             embed=discord.Embed(
                 title="🎁 Distribuer un cosmétique",
                 description=(
-                    "Sélectionne le membre puis le cosmétique."
+                    "Sélectionne le membre "
+                    "puis le cosmétique."
                 ),
                 color=PROFILE_COLOR,
             ),
@@ -1100,7 +1265,9 @@ class ProfileAdminView(discord.ui.View):
         button: discord.ui.Button,
     ) -> None:
         await interaction.response.send_modal(
-            DeleteCosmeticModal(self.cog)
+            DeleteCosmeticModal(
+                self.cog
+            )
         )
 
 
@@ -1129,16 +1296,22 @@ class ProfileCog(commands.Cog):
             "effects",
         ):
             (
-                self.assets_root / directory
+                self.assets_root
+                / directory
             ).mkdir(
                 parents=True,
                 exist_ok=True,
             )
 
     def get_pool(self):
-        return self.bot.database.require_pool()
+        return (
+            self.bot.database
+            .require_pool()
+        )
 
-    async def initialize_database(self) -> None:
+    async def initialize_database(
+        self,
+    ) -> None:
         pool = self.get_pool()
 
         await pool.execute(
@@ -1146,16 +1319,29 @@ class ProfileCog(commands.Cog):
             CREATE TABLE IF NOT EXISTS member_profiles (
                 guild_id BIGINT NOT NULL,
                 user_id BIGINT NOT NULL,
-                bio VARCHAR(250) NOT NULL DEFAULT '',
-                color_hex VARCHAR(7) NOT NULL DEFAULT '#E268A1',
+
+                bio VARCHAR(250)
+                    NOT NULL DEFAULT '',
+
+                color_hex VARCHAR(7)
+                    NOT NULL DEFAULT '#E268A1',
+
                 equipped_title VARCHAR(50),
                 equipped_badge VARCHAR(50),
                 equipped_background VARCHAR(50),
                 equipped_frame VARCHAR(50),
                 equipped_effect VARCHAR(50),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                PRIMARY KEY (guild_id, user_id)
+
+                created_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW(),
+
+                updated_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW(),
+
+                PRIMARY KEY (
+                    guild_id,
+                    user_id
+                )
             )
             """
         )
@@ -1164,8 +1350,10 @@ class ProfileCog(commands.Cog):
             """
             CREATE TABLE IF NOT EXISTS profile_cosmetics (
                 id BIGSERIAL PRIMARY KEY,
+
                 guild_id BIGINT NOT NULL,
                 identifier VARCHAR(50) NOT NULL,
+
                 cosmetic_type VARCHAR(20) NOT NULL
                     CHECK (
                         cosmetic_type IN (
@@ -1176,13 +1364,24 @@ class ProfileCog(commands.Cog):
                             'effect'
                         )
                     ),
+
                 display_name VARCHAR(100) NOT NULL,
-                description VARCHAR(250) NOT NULL DEFAULT '',
+
+                description VARCHAR(250)
+                    NOT NULL DEFAULT '',
+
                 asset_path VARCHAR(250),
                 value VARCHAR(250),
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+                enabled BOOLEAN
+                    NOT NULL DEFAULT TRUE,
+
+                created_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW(),
+
+                updated_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW(),
+
                 UNIQUE (
                     guild_id,
                     identifier
@@ -1196,11 +1395,17 @@ class ProfileCog(commands.Cog):
             CREATE TABLE IF NOT EXISTS profile_inventory (
                 guild_id BIGINT NOT NULL,
                 user_id BIGINT NOT NULL,
+
                 cosmetic_id BIGINT NOT NULL
                     REFERENCES profile_cosmetics(id)
                     ON DELETE CASCADE,
-                source VARCHAR(50) NOT NULL DEFAULT 'unknown',
-                acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+                source VARCHAR(50)
+                    NOT NULL DEFAULT 'unknown',
+
+                acquired_at TIMESTAMPTZ
+                    NOT NULL DEFAULT NOW(),
+
                 PRIMARY KEY (
                     guild_id,
                     user_id,
@@ -1233,7 +1438,10 @@ class ProfileCog(commands.Cog):
     ):
         if guild_id is None:
             raise ValueError(
-                "Le profil doit être utilisé dans un serveur."
+                (
+                    "Le profil doit être utilisé "
+                    "dans un serveur."
+                )
             )
 
         pool = self.get_pool()
@@ -1275,6 +1483,76 @@ class ProfileCog(commands.Cog):
             user_id,
         )
 
+    async def get_current_daily_streak(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> int:
+        """
+        Retourne la série quotidienne réellement active.
+
+        La valeur stockée dans daily_members est considérée
+        comme expirée si la dernière récompense remonte à
+        plus d'un jour dans le fuseau Europe/Paris.
+        """
+        record = await self.get_pool().fetchrow(
+            """
+            SELECT
+                current_streak,
+                last_claim_at
+            FROM daily_members
+            WHERE guild_id = $1
+              AND user_id = $2
+            """,
+            guild_id,
+            user_id,
+        )
+
+        if record is None:
+            return 0
+
+        current_streak = max(
+            0,
+            int(
+                record["current_streak"]
+                or 0
+            ),
+        )
+
+        last_claim_at = record[
+            "last_claim_at"
+        ]
+
+        if (
+            current_streak <= 0
+            or last_claim_at is None
+        ):
+            return 0
+
+        current_date = datetime.now(
+            PARIS_TIMEZONE
+        ).date()
+
+        last_claim_date = (
+            last_claim_at.astimezone(
+                PARIS_TIMEZONE
+            ).date()
+        )
+
+        difference = (
+            current_date
+            - last_claim_date
+        ).days
+
+        if difference in {
+            0,
+            1,
+        }:
+            return current_streak
+
+        return 0
+
     async def update_profile(
         self,
         *,
@@ -1291,9 +1569,7 @@ class ProfileCog(commands.Cog):
             user_id=user_id,
         )
 
-        pool = self.get_pool()
-
-        await pool.execute(
+        await self.get_pool().execute(
             """
             UPDATE member_profiles
             SET
@@ -1424,11 +1700,21 @@ class ProfileCog(commands.Cog):
                 identifier
             )
             DO UPDATE SET
-                cosmetic_type = EXCLUDED.cosmetic_type,
-                display_name = EXCLUDED.display_name,
-                description = EXCLUDED.description,
-                asset_path = EXCLUDED.asset_path,
-                value = EXCLUDED.value,
+                cosmetic_type =
+                    EXCLUDED.cosmetic_type,
+
+                display_name =
+                    EXCLUDED.display_name,
+
+                description =
+                    EXCLUDED.description,
+
+                asset_path =
+                    EXCLUDED.asset_path,
+
+                value =
+                    EXCLUDED.value,
+
                 enabled = TRUE,
                 updated_at = NOW()
             RETURNING
@@ -1446,131 +1732,155 @@ class ProfileCog(commands.Cog):
             value,
         )
 
-
     async def delete_cosmetic(
         self,
         *,
         guild_id: int,
         identifier: str,
     ) -> str:
-        """
-        Supprime définitivement un cosmétique.
-    
-        Cela supprime également :
-        - les équipements utilisant ce cosmétique ;
-        - les inventaires associés ;
-        - les articles correspondants dans la boutique de Noël ;
-        - les achats correspondants dans la boutique.
-        """
-        normalized_identifier = identifier.strip().lower()
-    
+        normalized_identifier = (
+            identifier
+            .strip()
+            .lower()
+        )
+
         if not normalized_identifier:
             raise ValueError(
-                "L'identifiant du cosmétique est obligatoire."
+                (
+                    "L'identifiant du cosmétique "
+                    "est obligatoire."
+                )
             )
-    
+
         pool = self.get_pool()
-    
+
         async with pool.acquire() as connection:
             async with connection.transaction():
-                cosmetic = await connection.fetchrow(
-                    """
-                    SELECT
-                        id,
-                        identifier,
-                        display_name,
-                        cosmetic_type
-                    FROM profile_cosmetics
-                    WHERE guild_id = $1
-                      AND identifier = $2
-                    FOR UPDATE
-                    """,
-                    guild_id,
-                    normalized_identifier,
+                cosmetic = (
+                    await connection.fetchrow(
+                        """
+                        SELECT
+                            id,
+                            identifier,
+                            display_name,
+                            cosmetic_type
+                        FROM profile_cosmetics
+                        WHERE guild_id = $1
+                          AND identifier = $2
+                        FOR UPDATE
+                        """,
+                        guild_id,
+                        normalized_identifier,
+                    )
                 )
-    
+
                 if cosmetic is None:
                     raise ValueError(
-                        "Aucun cosmétique ne possède cet identifiant."
+                        (
+                            "Aucun cosmétique ne possède "
+                            "cet identifiant."
+                        )
                     )
-    
-                cosmetic_id = int(cosmetic["id"])
-                display_name = str(cosmetic["display_name"])
-    
-                # Vérifie si la boutique possède bien la colonne
-                # cosmetic_id avant d'effectuer le nettoyage.
-                shop_cosmetics_enabled = await connection.fetchval(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM information_schema.columns
-                        WHERE table_schema = 'public'
-                          AND table_name = 'advent_shop_items_v2'
-                          AND column_name = 'cosmetic_id'
-                    )
-                    """
+
+                cosmetic_id = int(
+                    cosmetic["id"]
                 )
-    
-                if shop_cosmetics_enabled:
-                    shop_item_records = await connection.fetch(
+
+                display_name = str(
+                    cosmetic["display_name"]
+                )
+
+                shop_cosmetics_enabled = (
+                    await connection.fetchval(
                         """
-                        SELECT id
-                        FROM advent_shop_items_v2
-                        WHERE cosmetic_id = $1
-                        """,
-                        cosmetic_id,
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name =
+                                  'advent_shop_items_v2'
+                              AND column_name =
+                                  'cosmetic_id'
+                        )
+                        """
                     )
-    
+                )
+
+                if shop_cosmetics_enabled:
+                    shop_item_records = (
+                        await connection.fetch(
+                            """
+                            SELECT id
+                            FROM advent_shop_items_v2
+                            WHERE cosmetic_id = $1
+                            """,
+                            cosmetic_id,
+                        )
+                    )
+
                     shop_item_ids = [
                         int(record["id"])
-                        for record in shop_item_records
+                        for record
+                        in shop_item_records
                     ]
-    
+
                     if shop_item_ids:
-                        # Les achats doivent être supprimés avant les
-                        # articles à cause de la clé étrangère item_id.
                         await connection.execute(
                             """
-                            DELETE FROM advent_shop_purchases_v2
-                            WHERE item_id = ANY($1::BIGINT[])
+                            DELETE FROM
+                                advent_shop_purchases_v2
+                            WHERE item_id =
+                                ANY($1::BIGINT[])
                             """,
                             shop_item_ids,
                         )
-    
+
                         await connection.execute(
                             """
-                            DELETE FROM advent_shop_items_v2
-                            WHERE id = ANY($1::BIGINT[])
+                            DELETE FROM
+                                advent_shop_items_v2
+                            WHERE id =
+                                ANY($1::BIGINT[])
                             """,
                             shop_item_ids,
                         )
-    
-                # Déséquipe le cosmétique de tous les profils.
+
                 await connection.execute(
                     """
                     UPDATE member_profiles
                     SET
                         equipped_title = CASE
-                            WHEN equipped_title = $2 THEN NULL
+                            WHEN equipped_title = $2
+                                THEN NULL
                             ELSE equipped_title
                         END,
+
                         equipped_badge = CASE
-                            WHEN equipped_badge = $2 THEN NULL
+                            WHEN equipped_badge = $2
+                                THEN NULL
                             ELSE equipped_badge
                         END,
+
                         equipped_background = CASE
-                            WHEN equipped_background = $2 THEN NULL
+                            WHEN equipped_background = $2
+                                THEN NULL
                             ELSE equipped_background
                         END,
+
                         equipped_frame = CASE
-                            WHEN equipped_frame = $2 THEN NULL
+                            WHEN equipped_frame = $2
+                                THEN NULL
                             ELSE equipped_frame
                         END,
+
                         equipped_effect = CASE
-                            WHEN equipped_effect = $2 THEN NULL
+                            WHEN equipped_effect = $2
+                                THEN NULL
                             ELSE equipped_effect
                         END,
+
                         updated_at = NOW()
+
                     WHERE guild_id = $1
                       AND (
                           equipped_title = $2
@@ -1583,8 +1893,7 @@ class ProfileCog(commands.Cog):
                     guild_id,
                     normalized_identifier,
                 )
-    
-                # Supprime le cosmétique des inventaires.
+
                 await connection.execute(
                     """
                     DELETE FROM profile_inventory
@@ -1592,8 +1901,7 @@ class ProfileCog(commands.Cog):
                     """,
                     cosmetic_id,
                 )
-    
-                # Supprime finalement le cosmétique lui-même.
+
                 await connection.execute(
                     """
                     DELETE FROM profile_cosmetics
@@ -1601,13 +1909,9 @@ class ProfileCog(commands.Cog):
                     """,
                     cosmetic_id,
                 )
-    
+
         return display_name
 
-
-
-
-    
     async def grant_cosmetic(
         self,
         *,
@@ -1711,8 +2015,9 @@ class ProfileCog(commands.Cog):
             user_id=user_id,
         )
 
-        # Le nom de colonne vient exclusivement de la liste blanche.
-        column = EQUIPPED_COLUMNS[cosmetic_type]
+        column = EQUIPPED_COLUMNS[
+            cosmetic_type
+        ]
 
         await self.get_pool().execute(
             f"""
@@ -1772,7 +2077,8 @@ class ProfileCog(commands.Cog):
                 cosmetic.value
             FROM member_profiles AS profile
             INNER JOIN profile_cosmetics AS cosmetic
-                ON cosmetic.guild_id = profile.guild_id
+                ON cosmetic.guild_id =
+                    profile.guild_id
                AND cosmetic.enabled = TRUE
                AND cosmetic.identifier IN (
                     profile.equipped_title,
@@ -1789,7 +2095,9 @@ class ProfileCog(commands.Cog):
         )
 
         return {
-            str(record["cosmetic_type"]): record
+            str(
+                record["cosmetic_type"]
+            ): record
             for record in records
         }
 
@@ -1802,14 +2110,18 @@ class ProfileCog(commands.Cog):
         record = await self.get_pool().fetchrow(
             """
             SELECT
-                COUNT(opening.id)::INTEGER AS openings,
+                COUNT(opening.id)::INTEGER
+                    AS openings,
+
                 COALESCE(
                     SUM(opening.points_awarded),
                     0
                 )::BIGINT AS points
+
             FROM advent_openings AS opening
             INNER JOIN advent_campaigns AS campaign
-                ON campaign.id = opening.campaign_id
+                ON campaign.id =
+                    opening.campaign_id
             WHERE opening.guild_id = $1
               AND opening.user_id = $2
               AND campaign.year = (
@@ -1826,8 +2138,14 @@ class ProfileCog(commands.Cog):
             return 0, 0
 
         return (
-            int(record["openings"] or 0),
-            int(record["points"] or 0),
+            int(
+                record["openings"]
+                or 0
+            ),
+            int(
+                record["points"]
+                or 0
+            ),
         )
 
     async def render_profile(
@@ -1841,16 +2159,26 @@ class ProfileCog(commands.Cog):
             user_id=member.id,
         )
 
-        equipped = await self.get_equipped_cosmetics(
-            guild_id=guild_id,
-            user_id=member.id,
+        equipped = (
+            await self.get_equipped_cosmetics(
+                guild_id=guild_id,
+                user_id=member.id,
+            )
         )
 
+        current_streak = (
+            await self.get_current_daily_streak(
+                guild_id=guild_id,
+                user_id=member.id,
+            )
+        )
 
-        avatar_bytes = await member.display_avatar.replace(
-            size=256,
-            format="png",
-        ).read()
+        avatar_bytes = (
+            await member.display_avatar.replace(
+                size=256,
+                format="png",
+            ).read()
+        )
 
         output = await asyncio.to_thread(
             self._render_profile_sync,
@@ -1859,11 +2187,14 @@ class ProfileCog(commands.Cog):
             avatar_bytes,
             dict(profile),
             equipped,
+            current_streak,
         )
 
         return discord.File(
             output,
-            filename=f"profile-{member.id}.png",
+            filename=(
+                f"profile-{member.id}.png"
+            ),
         )
 
     def _render_profile_sync(
@@ -1873,6 +2204,7 @@ class ProfileCog(commands.Cog):
         avatar_bytes: bytes,
         profile: dict[str, Any],
         equipped: dict[str, Any],
+        current_streak: int,
     ) -> io.BytesIO:
         selected_color = color_tuple(
             str(profile["color_hex"])
@@ -1882,23 +2214,33 @@ class ProfileCog(commands.Cog):
             selected_color
         )
 
-        background_cosmetic = equipped.get(
-            "background"
+        background_cosmetic = (
+            equipped.get("background")
         )
 
         if background_cosmetic is not None:
             asset = load_rgba_asset(
                 self.assets_root,
-                background_cosmetic["asset_path"],
+                background_cosmetic[
+                    "asset_path"
+                ],
             )
 
             if asset is not None:
                 fitted = ImageOps.fit(
                     asset,
-                    (PROFILE_WIDTH, PROFILE_HEIGHT),
-                    method=Image.Resampling.LANCZOS,
+                    (
+                        PROFILE_WIDTH,
+                        PROFILE_HEIGHT,
+                    ),
+                    method=(
+                        Image.Resampling.LANCZOS
+                    ),
                 )
-                background.alpha_composite(fitted)
+
+                background.alpha_composite(
+                    fitted
+                )
 
         overlay = Image.new(
             "RGBA",
@@ -1912,9 +2254,19 @@ class ProfileCog(commands.Cog):
         )
 
         overlay_draw.rounded_rectangle(
-            (35, 35, 1165, 465),
+            (
+                35,
+                35,
+                1165,
+                465,
+            ),
             radius=40,
-            fill=(10, 12, 20, 155),
+            fill=(
+                10,
+                12,
+                20,
+                155,
+            ),
             outline=(
                 selected_color[0],
                 selected_color[1],
@@ -1934,13 +2286,17 @@ class ProfileCog(commands.Cog):
 
         if effect is not None:
             effect_value = str(
-                effect["value"] or ""
+                effect["value"]
+                or ""
             ).lower()
 
             if (
                 effect_value == "snow"
                 or "neige" in effect_value
-                or "snow" in str(effect["identifier"])
+                or "snow"
+                in str(
+                    effect["identifier"]
+                ).lower()
             ):
                 apply_snow_effect(
                     background,
@@ -1956,14 +2312,19 @@ class ProfileCog(commands.Cog):
                 effect_asset = ImageOps.fit(
                     effect_asset,
                     background.size,
-                    method=Image.Resampling.LANCZOS,
+                    method=(
+                        Image.Resampling.LANCZOS
+                    ),
                 )
+
                 background.alpha_composite(
                     effect_asset
                 )
 
         with Image.open(
-            io.BytesIO(avatar_bytes)
+            io.BytesIO(
+                avatar_bytes
+            )
         ) as avatar_source:
             avatar = avatar_source.convert(
                 "RGBA"
@@ -1971,7 +2332,10 @@ class ProfileCog(commands.Cog):
 
         avatar = ImageOps.fit(
             avatar,
-            (270, 270),
+            (
+                270,
+                270,
+            ),
             method=Image.Resampling.LANCZOS,
         )
 
@@ -1981,19 +2345,36 @@ class ProfileCog(commands.Cog):
             0,
         )
 
-        mask_draw = ImageDraw.Draw(mask)
+        mask_draw = ImageDraw.Draw(
+            mask
+        )
 
         mask_draw.ellipse(
-            (0, 0, 269, 269),
+            (
+                0,
+                0,
+                269,
+                269,
+            ),
             fill=255,
         )
 
-        avatar.putalpha(mask)
+        avatar.putalpha(
+            mask
+        )
 
         avatar_border = Image.new(
             "RGBA",
-            (294, 294),
-            (0, 0, 0, 0),
+            (
+                294,
+                294,
+            ),
+            (
+                0,
+                0,
+                0,
+                0,
+            ),
         )
 
         border_draw = ImageDraw.Draw(
@@ -2001,7 +2382,12 @@ class ProfileCog(commands.Cog):
         )
 
         border_draw.ellipse(
-            (0, 0, 293, 293),
+            (
+                0,
+                0,
+                293,
+                293,
+            ),
             fill=(
                 selected_color[0],
                 selected_color[1],
@@ -2012,12 +2398,18 @@ class ProfileCog(commands.Cog):
 
         avatar_border.alpha_composite(
             avatar,
-            (12, 12),
+            (
+                12,
+                12,
+            ),
         )
 
         background.alpha_composite(
             avatar_border,
-            (75, 103),
+            (
+                75,
+                103,
+            ),
         )
 
         draw = ImageDraw.Draw(
@@ -2034,7 +2426,9 @@ class ProfileCog(commands.Cog):
         if title_cosmetic is not None:
             title = str(
                 title_cosmetic["value"]
-                or title_cosmetic["display_name"]
+                or title_cosmetic[
+                    "display_name"
+                ]
             )
 
         bio = str(
@@ -2048,16 +2442,39 @@ class ProfileCog(commands.Cog):
             )
 
         draw.text(
-            (410, 90),
-            truncate(display_name, 28),
-            font=font(52, bold=True),
-            fill=(255, 255, 255, 255),
+            (
+                410,
+                90,
+            ),
+            truncate(
+                display_name,
+                28,
+            ),
+            font=font(
+                52,
+                bold=True,
+            ),
+            fill=(
+                255,
+                255,
+                255,
+                255,
+            ),
         )
 
         draw.text(
-            (413, 155),
-            truncate(title, 45),
-            font=font(28, bold=True),
+            (
+                413,
+                155,
+            ),
+            truncate(
+                title,
+                45,
+            ),
+            font=font(
+                28,
+                bold=True,
+            ),
             fill=(
                 selected_color[0],
                 selected_color[1],
@@ -2072,11 +2489,136 @@ class ProfileCog(commands.Cog):
         )[:3]
 
         draw.multiline_text(
-            (413, 215),
-            "\n".join(wrapped_bio),
+            (
+                413,
+                215,
+            ),
+            "\n".join(
+                wrapped_bio
+            ),
             font=font(24),
-            fill=(235, 235, 240, 255),
+            fill=(
+                235,
+                235,
+                240,
+                255,
+            ),
             spacing=10,
+        )
+
+        # Série quotidienne actuelle en bas à droite.
+        streak_value = max(
+            0,
+            int(current_streak),
+        )
+
+        streak_label = (
+            "JOUR"
+            if streak_value == 1
+            else "JOURS"
+        )
+
+        streak_text = (
+            f"SÉRIE • {streak_value} "
+            f"{streak_label}"
+        )
+
+        streak_font = font(
+            21,
+            bold=True,
+        )
+
+        streak_text_box = draw.textbbox(
+            (
+                0,
+                0,
+            ),
+            streak_text,
+            font=streak_font,
+        )
+
+        streak_text_width = (
+            streak_text_box[2]
+            - streak_text_box[0]
+        )
+
+        streak_text_height = (
+            streak_text_box[3]
+            - streak_text_box[1]
+        )
+
+        streak_right = 1128
+        streak_bottom = 427
+        streak_horizontal_padding = 22
+        streak_vertical_padding = 13
+
+        streak_left = (
+            streak_right
+            - streak_text_width
+            - streak_horizontal_padding * 2
+        )
+
+        streak_top = (
+            streak_bottom
+            - streak_text_height
+            - streak_vertical_padding * 2
+        )
+
+        draw.rounded_rectangle(
+            (
+                streak_left,
+                streak_top,
+                streak_right,
+                streak_bottom,
+            ),
+            radius=18,
+            fill=(
+                14,
+                16,
+                26,
+                205,
+            ),
+            outline=(
+                selected_color[0],
+                selected_color[1],
+                selected_color[2],
+                225,
+            ),
+            width=2,
+        )
+
+        draw.ellipse(
+            (
+                streak_left + 14,
+                streak_top + 15,
+                streak_left + 24,
+                streak_top + 25,
+            ),
+            fill=(
+                selected_color[0],
+                selected_color[1],
+                selected_color[2],
+                255,
+            ),
+        )
+
+        draw.text(
+            (
+                streak_right
+                - streak_horizontal_padding,
+                streak_top
+                + streak_vertical_padding
+                - streak_text_box[1],
+            ),
+            streak_text,
+            font=streak_font,
+            fill=(
+                255,
+                255,
+                255,
+                255,
+            ),
+            anchor="ra",
         )
 
         badge_cosmetic = equipped.get(
@@ -2086,12 +2628,17 @@ class ProfileCog(commands.Cog):
         if badge_cosmetic is not None:
             badge_asset = load_rgba_asset(
                 self.assets_root,
-                badge_cosmetic["asset_path"],
+                badge_cosmetic[
+                    "asset_path"
+                ],
             )
 
             if badge_asset is not None:
                 badge_asset.thumbnail(
-                    (120, 120),
+                    (
+                        120,
+                        120,
+                    ),
                     Image.Resampling.LANCZOS,
                 )
 
@@ -2104,22 +2651,43 @@ class ProfileCog(commands.Cog):
                 )
             else:
                 draw.ellipse(
-                    (1020, 80, 1125, 185),
+                    (
+                        1020,
+                        80,
+                        1125,
+                        185,
+                    ),
                     fill=(
                         selected_color[0],
                         selected_color[1],
                         selected_color[2],
                         230,
                     ),
-                    outline=(255, 255, 255, 230),
+                    outline=(
+                        255,
+                        255,
+                        255,
+                        230,
+                    ),
                     width=4,
                 )
 
                 draw.text(
-                    (1050, 103),
+                    (
+                        1050,
+                        103,
+                    ),
                     "★",
-                    font=font(50, bold=True),
-                    fill=(255, 255, 255, 255),
+                    font=font(
+                        50,
+                        bold=True,
+                    ),
+                    fill=(
+                        255,
+                        255,
+                        255,
+                        255,
+                    ),
                 )
 
         frame_cosmetic = equipped.get(
@@ -2129,14 +2697,18 @@ class ProfileCog(commands.Cog):
         if frame_cosmetic is not None:
             frame_asset = load_rgba_asset(
                 self.assets_root,
-                frame_cosmetic["asset_path"],
+                frame_cosmetic[
+                    "asset_path"
+                ],
             )
 
             if frame_asset is not None:
                 frame_asset = ImageOps.fit(
                     frame_asset,
                     background.size,
-                    method=Image.Resampling.LANCZOS,
+                    method=(
+                        Image.Resampling.LANCZOS
+                    ),
                 )
 
                 background.alpha_composite(
@@ -2169,22 +2741,27 @@ class ProfileCog(commands.Cog):
                 embed=error_embed(
                     "Serveur requis",
                     (
-                        "Les profils sont disponibles uniquement "
-                        "dans un serveur."
+                        "Les profils sont disponibles "
+                        "uniquement dans un serveur."
                     ),
                 ),
                 ephemeral=True,
             )
             return
 
-        profile_file = await self.render_profile(
-            guild_id=interaction.guild_id,
-            member=member,
+        profile_file = (
+            await self.render_profile(
+                guild_id=interaction.guild_id,
+                member=member,
+            )
         )
 
-        view = None
+        view: ProfileView | None = None
 
-        if member.id == interaction.user.id:
+        if (
+            member.id
+            == interaction.user.id
+        ):
             view = ProfileView(
                 cog=self,
                 owner=member,
@@ -2198,10 +2775,15 @@ class ProfileCog(commands.Cog):
 
     @app_commands.command(
         name="profil",
-        description="Affiche ton profil ou celui d'un membre.",
+        description=(
+            "Affiche ton profil ou celui d'un membre."
+        ),
     )
     @app_commands.describe(
-        membre="Membre dont tu souhaites afficher le profil.",
+        membre=(
+            "Membre dont tu souhaites "
+            "afficher le profil."
+        ),
     )
     @app_commands.guild_only()
     @app_commands.checks.cooldown(
@@ -2235,7 +2817,9 @@ class ProfileCog(commands.Cog):
 
     @app_commands.command(
         name="profil-admin",
-        description="Ouvre le panneau administratif des profils.",
+        description=(
+            "Ouvre le panneau administratif des profils."
+        ),
     )
     @app_commands.default_permissions(
         manage_guild=True
@@ -2252,7 +2836,10 @@ class ProfileCog(commands.Cog):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Serveur requis",
-                    "Cette commande doit être utilisée sur un serveur.",
+                    (
+                        "Cette commande doit être "
+                        "utilisée sur un serveur."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -2311,7 +2898,10 @@ async def setup(
         ClanRenardBot,
     ):
         raise TypeError(
-            "L'extension Profile nécessite ClanRenardBot."
+            (
+                "L'extension Profile nécessite "
+                "ClanRenardBot."
+            )
         )
 
     cog = ProfileCog(bot)
