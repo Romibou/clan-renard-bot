@@ -6,7 +6,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import (
+    Image,
+    ImageDraw,
+    ImageFilter,
+    ImageFont,
+    ImageOps,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -18,7 +24,6 @@ BACKGROUND_OVERLAY = (12, 9, 24, 155)
 
 TEXT_COLOR = (250, 247, 255, 255)
 SECONDARY_TEXT_COLOR = (207, 198, 220, 255)
-MUTED_TEXT_COLOR = (166, 156, 180, 255)
 
 HEADER_BACKGROUND = (18, 13, 31, 205)
 ROW_BACKGROUND = (22, 16, 38, 188)
@@ -29,6 +34,7 @@ PERSONAL_BORDER = (245, 145, 194, 220)
 
 XP_ACCENT = (197, 120, 255, 255)
 MONEY_ACCENT = (255, 194, 91, 255)
+STREAK_ACCENT = (255, 126, 76, 255)
 
 GOLD_COLOR = (255, 206, 84, 255)
 SILVER_COLOR = (205, 213, 225, 255)
@@ -166,9 +172,6 @@ def _load_username_font(
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """
     Police utilisée pour les pseudos classiques.
-
-    Elle prend correctement en charge les accents,
-    notamment é, è, à, ç et ï.
     """
     project_root = _project_root()
 
@@ -202,20 +205,25 @@ def _load_username_font(
         ),
     ]
 
-    font = _load_first_available_font(
+    loaded_font = _load_first_available_font(
         candidates=candidates,
         size=size,
     )
 
-    if isinstance(font, ImageFont.FreeTypeFont):
-        return font
+    if isinstance(
+        loaded_font,
+        ImageFont.FreeTypeFont,
+    ):
+        return loaded_font
 
     LOGGER.warning(
-        "Aucune police Unicode classique n'a été trouvée "
-        "pour les pseudos."
+        (
+            "Aucune police Unicode classique "
+            "n'a été trouvée pour les pseudos."
+        )
     )
 
-    return font
+    return loaded_font
 
 
 @lru_cache(maxsize=16)
@@ -224,9 +232,6 @@ def _load_math_font(
 ) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """
     Police utilisée pour les lettres Unicode fantaisie.
-
-    Exemples :
-    𝓐 𝕭 𝖈 𝒅 𝐄
     """
     project_root = _project_root()
 
@@ -260,20 +265,27 @@ def _load_math_font(
         ),
     ]
 
-    font = _load_first_available_font(
+    loaded_font = _load_first_available_font(
         candidates=candidates,
         size=size,
     )
 
-    if isinstance(font, ImageFont.FreeTypeFont):
-        return font
+    if isinstance(
+        loaded_font,
+        ImageFont.FreeTypeFont,
+    ):
+        return loaded_font
 
     LOGGER.warning(
-        "Aucune police Unicode mathématique n'a été trouvée "
-        "pour les pseudos fantaisie."
+        (
+            "Aucune police Unicode mathématique "
+            "n'a été trouvée pour les pseudos fantaisie."
+        )
     )
 
-    return _load_username_font(size)
+    return _load_username_font(
+        size
+    )
 
 
 @lru_cache(maxsize=16)
@@ -353,20 +365,28 @@ def _load_cjk_font(
         ),
     ]
 
-    font = _load_first_available_font(
+    loaded_font = _load_first_available_font(
         candidates=candidates,
         size=size,
     )
 
-    if isinstance(font, ImageFont.FreeTypeFont):
-        return font
+    if isinstance(
+        loaded_font,
+        ImageFont.FreeTypeFont,
+    ):
+        return loaded_font
 
     LOGGER.warning(
-        "Aucune police CJK n'a été trouvée. "
-        "Ajoute NotoSansSC-Regular.ttf dans assets/fonts."
+        (
+            "Aucune police CJK n'a été trouvée. "
+            "Ajoute NotoSansSC-Regular.ttf "
+            "dans assets/fonts."
+        )
     )
 
-    return _load_username_font(size)
+    return _load_username_font(
+        size
+    )
 
 
 def _contains_cjk(
@@ -432,30 +452,63 @@ def _get_username_font(
     Sélectionne automatiquement la meilleure police
     selon le contenu du pseudo.
     """
-    normalized_text = str(text)
+    normalized_text = str(
+        text
+    )
 
-    if _contains_cjk(normalized_text):
-        return _load_cjk_font(size)
+    if _contains_cjk(
+        normalized_text
+    ):
+        return _load_cjk_font(
+            size
+        )
 
-    if _contains_styled_characters(normalized_text):
-        return _load_math_font(size)
+    if _contains_styled_characters(
+        normalized_text
+    ):
+        return _load_math_font(
+            size
+        )
 
-    return _load_username_font(size)
+    return _load_username_font(
+        size
+    )
 
 
 def _create_fallback_background() -> Image.Image:
     image = Image.new(
         "RGBA",
-        (CARD_WIDTH, CARD_HEIGHT),
-        (24, 14, 36, 255),
+        (
+            CARD_WIDTH,
+            CARD_HEIGHT,
+        ),
+        (
+            24,
+            14,
+            36,
+            255,
+        ),
     )
 
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(
+        image
+    )
 
-    top_color = (51, 27, 69)
-    bottom_color = (18, 12, 29)
+    top_color = (
+        51,
+        27,
+        69,
+    )
 
-    for y in range(CARD_HEIGHT):
+    bottom_color = (
+        18,
+        12,
+        29,
+    )
+
+    for y in range(
+        CARD_HEIGHT
+    ):
         ratio = y / max(
             1,
             CARD_HEIGHT - 1,
@@ -506,7 +559,12 @@ def _create_fallback_background() -> Image.Image:
     glow_layer = Image.new(
         "RGBA",
         image.size,
-        (0, 0, 0, 0),
+        (
+            0,
+            0,
+            0,
+            0,
+        ),
     )
 
     glow_draw = ImageDraw.Draw(
@@ -520,7 +578,12 @@ def _create_fallback_background() -> Image.Image:
             500,
             450,
         ),
-        fill=(196, 95, 164, 115),
+        fill=(
+            196,
+            95,
+            164,
+            115,
+        ),
     )
 
     glow_draw.ellipse(
@@ -530,11 +593,18 @@ def _create_fallback_background() -> Image.Image:
             CARD_WIDTH + 220,
             CARD_HEIGHT + 180,
         ),
-        fill=(115, 70, 206, 100),
+        fill=(
+            115,
+            70,
+            206,
+            100,
+        ),
     )
 
     glow_layer = glow_layer.filter(
-        ImageFilter.GaussianBlur(100)
+        ImageFilter.GaussianBlur(
+            100
+        )
     )
 
     return Image.alpha_composite(
@@ -551,7 +621,9 @@ def _load_background_cached(
     del modified_at
 
     try:
-        with Image.open(path) as source:
+        with Image.open(
+            path
+        ) as source:
             background = source.convert(
                 "RGBA"
             )
@@ -563,8 +635,12 @@ def _load_background_cached(
                 CARD_HEIGHT,
             ),
             method=Image.Resampling.LANCZOS,
-            centering=(0.5, 0.5),
+            centering=(
+                0.5,
+                0.5,
+            ),
         )
+
     except (
         OSError,
         ValueError,
@@ -578,18 +654,24 @@ def _load_background(
     if background_path is None:
         return _create_fallback_background()
 
-    path = Path(background_path)
+    path = Path(
+        background_path
+    )
 
     if not path.is_file():
         return _create_fallback_background()
 
     try:
-        modified_at = path.stat().st_mtime
+        modified_at = (
+            path.stat().st_mtime
+        )
     except OSError:
         return _create_fallback_background()
 
     return _load_background_cached(
-        str(path.resolve()),
+        str(
+            path.resolve()
+        ),
         modified_at,
     ).copy()
 
@@ -600,12 +682,18 @@ def _text_width(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
 ) -> int:
     box = draw.textbbox(
-        (0, 0),
-        text,
+        (
+            0,
+            0,
+        ),
+        str(text),
         font=font,
     )
 
-    return box[2] - box[0]
+    return (
+        box[2]
+        - box[0]
+    )
 
 
 def _truncate_text(
@@ -614,16 +702,21 @@ def _truncate_text(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     maximum_width: int,
 ) -> str:
-    text = str(text).strip()
+    text = str(
+        text
+    ).strip()
 
     if not text:
         return "Utilisateur inconnu"
 
-    if _text_width(
-        draw,
-        text,
-        font,
-    ) <= maximum_width:
+    if (
+        _text_width(
+            draw,
+            text,
+            font,
+        )
+        <= maximum_width
+    ):
         return text
 
     ellipsis = "…"
@@ -634,11 +727,14 @@ def _truncate_text(
             + ellipsis
         )
 
-        if _text_width(
-            draw,
-            candidate,
-            font,
-        ) <= maximum_width:
+        if (
+            _text_width(
+                draw,
+                candidate,
+                font,
+            )
+            <= maximum_width
+        ):
             return candidate
 
         text = text[:-1]
@@ -655,6 +751,40 @@ def _format_number(
     )
 
 
+def _format_value(
+    value: int,
+    ranking_type: str,
+) -> str:
+    normalized_value = max(
+        0,
+        int(value),
+    )
+
+    formatted_value = _format_number(
+        normalized_value
+    )
+
+    if ranking_type == "money":
+        return (
+            f"{formatted_value} pièces"
+        )
+
+    if ranking_type == "streak":
+        suffix = (
+            "jour"
+            if normalized_value == 1
+            else "jours"
+        )
+
+        return (
+            f"{formatted_value} {suffix}"
+        )
+
+    return (
+        f"{formatted_value} XP"
+    )
+
+
 def _draw_centered_text(
     draw: ImageDraw.ImageDraw,
     *,
@@ -666,7 +796,10 @@ def _draw_centered_text(
     left, top, right, bottom = box
 
     text_box = draw.textbbox(
-        (0, 0),
+        (
+            0,
+            0,
+        ),
         text,
         font=font,
     )
@@ -684,7 +817,10 @@ def _draw_centered_text(
     x = (
         left
         + (
-            (right - left)
+            (
+                right
+                - left
+            )
             - text_width
         )
         / 2
@@ -693,7 +829,10 @@ def _draw_centered_text(
     y = (
         top
         + (
-            (bottom - top)
+            (
+                bottom
+                - top
+            )
             - text_height
         )
         / 2
@@ -701,7 +840,10 @@ def _draw_centered_text(
     )
 
     draw.text(
-        (x, y),
+        (
+            x,
+            y,
+        ),
         text,
         font=font,
         fill=fill,
@@ -752,7 +894,10 @@ def _rank_color(
 def _rank_text(
     rank: int | None,
 ) -> str:
-    if rank is None or rank <= 0:
+    if (
+        rank is None
+        or rank <= 0
+    ):
         return "—"
 
     return f"#{rank}"
@@ -786,18 +931,18 @@ def render_leaderboard_card(
     """
     Génère une image de classement.
 
-    Chaque élément de rows doit contenir :
+    Types disponibles :
+    - xp ;
+    - money ;
+    - streak.
 
-    - rank : position dans le classement ;
-    - display_name : nom affiché du membre ;
-    - value : quantité d'XP ou d'argent.
-
-    personal_row utilise les mêmes clés.
-    Son rang peut être None lorsque le membre
-    ne possède encore aucune entrée en base.
+    Pour le classement streak, la valeur correspond
+    uniquement à la meilleure série quotidienne.
     """
     normalized_type = (
-        str(ranking_type)
+        str(
+            ranking_type
+        )
         .lower()
         .strip()
     )
@@ -805,6 +950,7 @@ def render_leaderboard_card(
     if normalized_type not in {
         "xp",
         "money",
+        "streak",
     }:
         normalized_type = "xp"
 
@@ -838,7 +984,9 @@ def render_leaderboard_card(
         overlay,
     )
 
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(
+        image
+    )
 
     title_font = _load_font(
         50,
@@ -877,12 +1025,16 @@ def render_leaderboard_card(
     if normalized_type == "money":
         title = "CLASSEMENT ARGENT"
         value_header = "ARGENT"
-        value_suffix = " pièces"
         accent_color = MONEY_ACCENT
+
+    elif normalized_type == "streak":
+        title = "CLASSEMENT SÉRIE"
+        value_header = "MEILLEURE SÉRIE"
+        accent_color = STREAK_ACCENT
+
     else:
         title = "CLASSEMENT XP"
         value_header = "XP"
-        value_suffix = " XP"
         accent_color = XP_ACCENT
 
     draw.rounded_rectangle(
@@ -893,8 +1045,18 @@ def render_leaderboard_card(
             138,
         ),
         radius=26,
-        fill=(16, 11, 28, 185),
-        outline=(255, 255, 255, 28),
+        fill=(
+            16,
+            11,
+            28,
+            185,
+        ),
+        outline=(
+            255,
+            255,
+            255,
+            28,
+        ),
         width=2,
     )
 
@@ -944,7 +1106,12 @@ def render_leaderboard_card(
         ),
         radius=16,
         fill=HEADER_BACKGROUND,
-        outline=(255, 255, 255, 30),
+        outline=(
+            255,
+            255,
+            255,
+            30,
+        ),
         width=2,
     )
 
@@ -996,7 +1163,9 @@ def render_leaderboard_card(
         rows[:10]
     )
 
-    for index in range(10):
+    for index in range(
+        10
+    ):
         y = (
             row_start_y
             + index
@@ -1044,9 +1213,11 @@ def render_leaderboard_card(
             )
         )
 
-        username_font = _get_username_font(
-            display_name,
-            25,
+        username_font = (
+            _get_username_font(
+                display_name,
+                25,
+            )
         )
 
         value = int(
@@ -1057,10 +1228,6 @@ def render_leaderboard_card(
             )
         )
 
-        rank_value = _rank_text(
-            rank
-        )
-
         _draw_centered_text(
             draw,
             box=(
@@ -1069,9 +1236,13 @@ def render_leaderboard_card(
                 205,
                 y + row_height,
             ),
-            text=rank_value,
+            text=_rank_text(
+                rank
+            ),
             font=row_font,
-            fill=_rank_color(rank),
+            fill=_rank_color(
+                rank
+            ),
         )
 
         fitted_name = _truncate_text(
@@ -1082,7 +1253,10 @@ def render_leaderboard_card(
         )
 
         name_box = draw.textbbox(
-            (0, 0),
+            (
+                0,
+                0,
+            ),
             fitted_name,
             font=username_font,
         )
@@ -1112,9 +1286,9 @@ def render_leaderboard_card(
             fill=TEXT_COLOR,
         )
 
-        formatted_value = (
-            _format_number(value)
-            + value_suffix
+        formatted_value = _format_value(
+            value,
+            normalized_type,
         )
 
         _draw_right_aligned_text(
@@ -1142,12 +1316,16 @@ def render_leaderboard_card(
         width=3,
     )
 
-    personal_rank_raw = personal_row.get(
-        "rank"
+    personal_rank_raw = (
+        personal_row.get(
+            "rank"
+        )
     )
 
     personal_rank = (
-        int(personal_rank_raw)
+        int(
+            personal_rank_raw
+        )
         if personal_rank_raw is not None
         else None
     )
@@ -1182,7 +1360,12 @@ def render_leaderboard_card(
         ),
         "TON CLASSEMENT",
         font=footer_label_font,
-        fill=(255, 201, 229, 255),
+        fill=(
+            255,
+            201,
+            229,
+            255,
+        ),
     )
 
     _draw_centered_text(
@@ -1200,15 +1383,20 @@ def render_leaderboard_card(
         fill=TEXT_COLOR,
     )
 
-    fitted_personal_name = _truncate_text(
-        draw,
-        personal_name,
-        personal_username_font,
-        545,
+    fitted_personal_name = (
+        _truncate_text(
+            draw,
+            personal_name,
+            personal_username_font,
+            545,
+        )
     )
 
     personal_name_box = draw.textbbox(
-        (0, 0),
+        (
+            0,
+            0,
+        ),
         fitted_personal_name,
         font=personal_username_font,
     )
@@ -1240,10 +1428,10 @@ def render_leaderboard_card(
     )
 
     formatted_personal_value = (
-        _format_number(
-            personal_value
+        _format_value(
+            personal_value,
+            normalized_type,
         )
-        + value_suffix
     )
 
     _draw_right_aligned_text(
@@ -1257,12 +1445,16 @@ def render_leaderboard_card(
 
     output = io.BytesIO()
 
-    image.convert("RGB").save(
+    image.convert(
+        "RGB"
+    ).save(
         output,
         format="PNG",
         optimize=True,
     )
 
-    output.seek(0)
+    output.seek(
+        0
+    )
 
     return output
