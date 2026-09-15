@@ -1575,11 +1575,10 @@ class DailyAdminView(
                 ),
                 ephemeral=True,
             )
+  
+         
 
-
-class DailyCog(
-    commands.Cog
-):
+class DailyCog(commands.Cog):
     def __init__(
         self,
         bot: commands.Bot,
@@ -1608,65 +1607,60 @@ class DailyCog(
 
         return database.require_pool()
 
+    async def reset_daily_member(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> dict[str, int]:
+        pool = self.get_pool()
 
-
-        async def reset_daily_member(
-            self,
-            *,
-            guild_id: int,
-            user_id: int,
-        ) -> dict[str, int]:
-            pool = self.get_pool()
-    
-            async with pool.acquire() as connection:
-                async with connection.transaction():
-                    await connection.execute(
-                        """
-                        SELECT pg_advisory_xact_lock(
-                            hashtextextended($1, 0)
-                        )
-                        """,
-                        f"daily:{guild_id}:{user_id}",
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended($1, 0)
                     )
-    
-                    claims_deleted = await connection.fetchval(
-                        """
-                        WITH deleted_claims AS (
-                            DELETE FROM daily_claims
-                            WHERE guild_id = $1
-                              AND user_id = $2
-                            RETURNING 1
-                        )
-                        SELECT COUNT(*)
-                        FROM deleted_claims
-                        """,
-                        guild_id,
-                        user_id,
-                    )
-    
-                    members_deleted = await connection.fetchval(
-                        """
-                        WITH deleted_member AS (
-                            DELETE FROM daily_members
-                            WHERE guild_id = $1
-                              AND user_id = $2
-                            RETURNING 1
-                        )
-                        SELECT COUNT(*)
-                        FROM deleted_member
-                        """,
-                        guild_id,
-                        user_id,
-                    )
-    
-            return {
-                "claims_deleted": int(claims_deleted or 0),
-                "members_deleted": int(members_deleted or 0),
-            }
+                    """,
+                    f"daily:{guild_id}:{user_id}",
+                )
 
-    
+                claims_deleted = await connection.fetchval(
+                    """
+                    WITH deleted_claims AS (
+                        DELETE FROM daily_claims
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*)
+                    FROM deleted_claims
+                    """,
+                    guild_id,
+                    user_id,
+                )
 
-    
+                members_deleted = await connection.fetchval(
+                    """
+                    WITH deleted_member AS (
+                        DELETE FROM daily_members
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*)
+                    FROM deleted_member
+                    """,
+                    guild_id,
+                    user_id,
+                )
+
+        return {
+            "claims_deleted": int(claims_deleted or 0),
+            "members_deleted": int(members_deleted or 0),
+        }
+
     def get_progression_cog(
         self,
     ) -> commands.Cog | None:
@@ -3011,8 +3005,9 @@ class DailyCog(
             )
 
             if next_claim_at is None:
-                remaining = DAILY_COOLDOWN
+                remaining = timedelta()
                 timestamp_text = ""
+                
             else:
                 current_time = datetime.now(
                     timezone.utc
