@@ -2587,21 +2587,6 @@ class ProfileCog(commands.Cog):
             width=2,
         )
 
-        draw.ellipse(
-            (
-                streak_left + 14,
-                streak_top + 15,
-                streak_left + 24,
-                streak_top + 25,
-            ),
-            fill=(
-                selected_color[0],
-                selected_color[1],
-                selected_color[2],
-                255,
-            ),
-        )
-
         draw.text(
             (
                 streak_right
