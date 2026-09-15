@@ -20,7 +20,11 @@ LOGGER = logging.getLogger(__name__)
 PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 STATISTICS_UPDATE_INTERVAL_SECONDS = 60
 
-ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
+ERROR_COLOR = discord.Color.from_rgb(
+    220,
+    75,
+    85,
+)
 
 
 def error_embed(
@@ -34,28 +38,42 @@ def error_embed(
     )
 
 
-def xp_for_level(level: int) -> int:
+def xp_for_level(
+    level: int,
+) -> int:
     """
     Retourne la quantité totale d'XP nécessaire
     pour atteindre un niveau.
     """
-    level = max(0, int(level))
+    level = max(
+        0,
+        int(level),
+    )
 
     if level == 0:
         return 0
 
     return (
-        5 * (level - 1) * level * (2 * level - 1) // 6
+        5
+        * (level - 1)
+        * level
+        * (2 * level - 1)
+        // 6
         + 25 * level * (level - 1)
         + 100 * level
     )
 
 
-def level_from_xp(total_xp: int) -> int:
+def level_from_xp(
+    total_xp: int,
+) -> int:
     """
     Retourne le niveau correspondant à une quantité totale d'XP.
     """
-    total_xp = max(0, int(total_xp))
+    total_xp = max(
+        0,
+        int(total_xp),
+    )
 
     low = 0
     high = 1
@@ -64,7 +82,9 @@ def level_from_xp(total_xp: int) -> int:
         high *= 2
 
     while low + 1 < high:
-        middle = (low + high) // 2
+        middle = (
+            low + high
+        ) // 2
 
         if xp_for_level(middle) <= total_xp:
             low = middle
@@ -78,14 +98,20 @@ def current_paris_date() -> date:
     """
     Retourne la date actuelle dans le fuseau Europe/Paris.
     """
-    return datetime.now(PARIS_TIMEZONE).date()
+    return datetime.now(
+        PARIS_TIMEZONE
+    ).date()
 
 
-def normalize_period(period: str) -> str:
+def normalize_period(
+    period: str,
+) -> str:
     """
     Vérifie et normalise la période demandée.
     """
-    normalized = str(period).strip().lower()
+    normalized = str(
+        period
+    ).strip().lower()
 
     if normalized not in {
         "today",
@@ -104,17 +130,26 @@ class StatisticsCog(commands.Cog):
         bot: commands.Bot,
     ) -> None:
         self.bot = bot
-        self._synchronization_lock = asyncio.Lock()
 
-    async def cog_load(self) -> None:
+        self._synchronization_lock = (
+            asyncio.Lock()
+        )
+
+    async def cog_load(
+        self,
+    ) -> None:
         if not self.statistics_update_loop.is_running():
             self.statistics_update_loop.start()
 
-    def cog_unload(self) -> None:
+    def cog_unload(
+        self,
+    ) -> None:
         if self.statistics_update_loop.is_running():
             self.statistics_update_loop.cancel()
 
-    def get_pool(self):
+    def get_pool(
+        self,
+    ):
         database = getattr(
             self.bot,
             "database",
@@ -128,7 +163,9 @@ class StatisticsCog(commands.Cog):
 
         return database.require_pool()
 
-    def get_background_path(self) -> Path:
+    def get_background_path(
+        self,
+    ) -> Path:
         return (
             Path(__file__).resolve().parents[2]
             / "assets"
@@ -136,7 +173,9 @@ class StatisticsCog(commands.Cog):
             / "statistics_background.png"
         )
 
-    async def initialize_database(self) -> None:
+    async def initialize_database(
+        self,
+    ) -> None:
         pool = self.get_pool()
 
         await pool.execute(
@@ -153,7 +192,10 @@ class StatisticsCog(commands.Cog):
 
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-                PRIMARY KEY (guild_id, user_id)
+                PRIMARY KEY (
+                    guild_id,
+                    user_id
+                )
             )
             """
         )
@@ -320,7 +362,10 @@ class StatisticsCog(commands.Cog):
     ) -> None:
         async with self._synchronization_lock:
             pool = self.get_pool()
-            statistic_date = current_paris_date()
+
+            statistic_date = (
+                current_paris_date()
+            )
 
             async with pool.acquire() as connection:
                 async with connection.transaction():
@@ -338,14 +383,18 @@ class StatisticsCog(commands.Cog):
                             members.wallet,
                             members.lifetime_coins,
                             members.rewarded_messages,
+
                             COALESCE(
                                 voice.rewarded_minutes,
                                 0
                             ) AS rewarded_minutes
+
                         FROM progression_members AS members
+
                         LEFT JOIN progression_voice_rewards AS voice
                             ON voice.guild_id = members.guild_id
                            AND voice.user_id = members.user_id
+
                         WHERE members.guild_id = $1
                         """,
                         guild_id,
@@ -405,53 +454,66 @@ class StatisticsCog(commands.Cog):
                         )
 
                         total_xp = int(
-                            record["total_xp"] or 0
+                            record["total_xp"]
+                            or 0
                         )
 
                         wallet = int(
-                            record["wallet"] or 0
+                            record["wallet"]
+                            or 0
                         )
 
                         lifetime_coins = int(
-                            record["lifetime_coins"] or 0
+                            record["lifetime_coins"]
+                            or 0
                         )
 
                         rewarded_messages = int(
-                            record["rewarded_messages"] or 0
+                            record["rewarded_messages"]
+                            or 0
                         )
 
                         rewarded_minutes = int(
-                            record["rewarded_minutes"] or 0
+                            record["rewarded_minutes"]
+                            or 0
                         )
 
-                        previous = previous_states.get(
-                            user_id
+                        previous = (
+                            previous_states.get(
+                                user_id
+                            )
                         )
 
                         if previous is not None:
                             previous_xp = int(
-                                previous["total_xp"] or 0
+                                previous["total_xp"]
+                                or 0
                             )
 
                             previous_wallet = int(
-                                previous["wallet"] or 0
+                                previous["wallet"]
+                                or 0
                             )
 
                             previous_lifetime = int(
-                                previous["lifetime_coins"] or 0
+                                previous["lifetime_coins"]
+                                or 0
                             )
 
                             previous_messages = int(
-                                previous["rewarded_messages"] or 0
+                                previous["rewarded_messages"]
+                                or 0
                             )
 
                             previous_minutes = int(
-                                previous["rewarded_minutes"] or 0
+                                previous["rewarded_minutes"]
+                                or 0
                             )
 
                             xp_gained = max(
                                 0,
-                                total_xp - previous_xp,
+                                total_xp
+                                - previous_xp,
                             )
 
                             coins_gained = max(
@@ -461,7 +523,8 @@ class StatisticsCog(commands.Cog):
                             )
 
                             wallet_difference = (
-                                wallet - previous_wallet
+                                wallet
+                                - previous_wallet
                             )
 
                             coins_spent = max(
@@ -600,14 +663,21 @@ class StatisticsCog(commands.Cog):
                                 user_id
                             )
                             DO UPDATE SET
-                                total_xp = EXCLUDED.total_xp,
-                                wallet = EXCLUDED.wallet,
+                                total_xp =
+                                    EXCLUDED.total_xp,
+
+                                wallet =
+                                    EXCLUDED.wallet,
+
                                 lifetime_coins =
                                     EXCLUDED.lifetime_coins,
+
                                 rewarded_messages =
                                     EXCLUDED.rewarded_messages,
+
                                 rewarded_minutes =
                                     EXCLUDED.rewarded_minutes,
+
                                 updated_at = NOW()
                             """,
                             state_updates,
@@ -646,18 +716,59 @@ class StatisticsCog(commands.Cog):
 
         return {
             "total_xp": int(
-                record["total_xp"] or 0
+                record["total_xp"]
+                or 0
             ),
             "wallet": int(
-                record["wallet"] or 0
+                record["wallet"]
+                or 0
             ),
             "lifetime_coins": int(
-                record["lifetime_coins"] or 0
+                record["lifetime_coins"]
+                or 0
             ),
             "rewarded_messages": int(
-                record["rewarded_messages"] or 0
+                record["rewarded_messages"]
+                or 0
             ),
         }
+
+    async def get_best_daily_streak(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> int:
+        """
+        Retourne la meilleure série quotidienne du membre.
+
+        Si le membre n'a jamais utilisé /quotidien,
+        la valeur retournée est zéro.
+        """
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
+            """
+            SELECT
+                best_streak
+            FROM daily_members
+            WHERE guild_id = $1
+              AND user_id = $2
+            """,
+            guild_id,
+            user_id,
+        )
+
+        if record is None:
+            return 0
+
+        return max(
+            0,
+            int(
+                record["best_streak"]
+                or 0
+            ),
+        )
 
     async def get_period_statistics(
         self,
@@ -717,19 +828,24 @@ class StatisticsCog(commands.Cog):
 
         return {
             "xp_gained": int(
-                record["xp_gained"] or 0
+                record["xp_gained"]
+                or 0
             ),
             "coins_gained": int(
-                record["coins_gained"] or 0
+                record["coins_gained"]
+                or 0
             ),
             "coins_spent": int(
-                record["coins_spent"] or 0
+                record["coins_spent"]
+                or 0
             ),
             "rewarded_messages": int(
-                record["rewarded_messages"] or 0
+                record["rewarded_messages"]
+                or 0
             ),
             "voice_minutes": int(
-                record["voice_minutes"] or 0
+                record["voice_minutes"]
+                or 0
             ),
         }
 
@@ -807,7 +923,8 @@ class StatisticsCog(commands.Cog):
             WHERE guild_id = $1
               AND user_id = $2
               AND snapshot_date >= $3
-            ORDER BY snapshot_date ASC
+            ORDER BY
+                snapshot_date ASC
             LIMIT 1
             """,
             guild_id,
@@ -833,7 +950,9 @@ class StatisticsCog(commands.Cog):
     @tasks.loop(
         seconds=STATISTICS_UPDATE_INTERVAL_SECONDS
     )
-    async def statistics_update_loop(self) -> None:
+    async def statistics_update_loop(
+        self,
+    ) -> None:
         for guild in self.bot.guilds:
             try:
                 await self.synchronize_guild(
@@ -933,7 +1052,10 @@ class StatisticsCog(commands.Cog):
             start_date = today - timedelta(
                 days=6
             )
-            period_label = "7 DERNIERS JOURS"
+
+            period_label = (
+                "7 DERNIERS JOURS"
+            )
         else:
             start_date = today
             period_label = "AUJOURD'HUI"
@@ -958,6 +1080,13 @@ class StatisticsCog(commands.Cog):
                 )
             )
 
+            best_streak = (
+                await self.get_best_daily_streak(
+                    guild_id=guild.id,
+                    user_id=selected_member.id,
+                )
+            )
+
             current_ranks = (
                 await self.get_current_ranks(
                     guild_id=guild.id,
@@ -973,21 +1102,21 @@ class StatisticsCog(commands.Cog):
                 )
             )
 
-            current_xp_rank = current_ranks[
-                "xp_rank"
-            ]
+            current_xp_rank = (
+                current_ranks["xp_rank"]
+            )
 
-            old_xp_rank = historical_ranks[
-                "xp_rank"
-            ]
+            old_xp_rank = (
+                historical_ranks["xp_rank"]
+            )
 
-            current_money_rank = current_ranks[
-                "money_rank"
-            ]
+            current_money_rank = (
+                current_ranks["money_rank"]
+            )
 
-            old_money_rank = historical_ranks[
-                "money_rank"
-            ]
+            old_money_rank = (
+                historical_ranks["money_rank"]
+            )
 
             xp_rank_change: int | None = None
             money_rank_change: int | None = None
@@ -1024,14 +1153,17 @@ class StatisticsCog(commands.Cog):
 
             xp_to_next_level = max(
                 0,
-                next_level_total_xp - total_xp,
+                next_level_total_xp
+                - total_xp,
             )
 
             avatar_bytes: bytes | None = None
 
             try:
                 avatar_bytes = await (
-                    selected_member.display_avatar.read()
+                    selected_member
+                    .display_avatar
+                    .read()
                 )
             except discord.HTTPException:
                 LOGGER.debug(
@@ -1062,9 +1194,16 @@ class StatisticsCog(commands.Cog):
                 coins_gained=int(
                     period_data["coins_gained"]
                 ),
+
+                # Conservé pour la compatibilité avec
+                # l'historique des statistiques.
                 coins_spent=int(
                     period_data["coins_spent"]
                 ),
+
+                # Affiché à la place des pièces dépensées.
+                best_streak=best_streak,
+
                 rewarded_messages=int(
                     period_data["rewarded_messages"]
                 ),
@@ -1143,10 +1282,14 @@ class StatisticsCog(commands.Cog):
 async def setup(
     bot: commands.Bot,
 ) -> None:
-    cog = StatisticsCog(bot)
+    cog = StatisticsCog(
+        bot
+    )
 
     await cog.initialize_database()
-    await bot.add_cog(cog)
+    await bot.add_cog(
+        cog
+    )
 
     LOGGER.info(
         "Système permanent de statistiques initialisé"
