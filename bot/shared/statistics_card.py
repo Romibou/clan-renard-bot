@@ -30,6 +30,7 @@ GOLD_ACCENT = (255, 195, 87, 255)
 GREEN_ACCENT = (104, 216, 151, 255)
 BLUE_ACCENT = (102, 179, 255, 255)
 RED_ACCENT = (255, 116, 125, 255)
+ORANGE_ACCENT = (255, 151, 84, 255)
 
 
 def _project_root() -> Path:
@@ -297,6 +298,22 @@ def _format_duration(
     )
 
 
+def _format_streak(
+    streak: int,
+) -> str:
+    streak = max(
+        0,
+        int(streak),
+    )
+
+    if streak == 1:
+        return "1 jour"
+
+    return (
+        f"{_format_number(streak)} jours"
+    )
+
+
 def _format_rank(
     rank: int | None,
 ) -> str:
@@ -308,15 +325,23 @@ def _format_rank(
 
 def _format_rank_change(
     change: int | None,
-) -> tuple[str, tuple[int, int, int, int]]:
+) -> tuple[
+    str,
+    tuple[int, int, int, int],
+]:
     if change is None:
-        return "Variation indisponible", MUTED_TEXT_COLOR
+        return (
+            "Variation indisponible",
+            MUTED_TEXT_COLOR,
+        )
 
     if change > 0:
         return (
-            f"▲ {change} place"
-            if change == 1
-            else f"▲ {change} places",
+            (
+                f"▲ {change} place"
+                if change == 1
+                else f"▲ {change} places"
+            ),
             GREEN_ACCENT,
         )
 
@@ -324,13 +349,18 @@ def _format_rank_change(
         lost = abs(change)
 
         return (
-            f"▼ {lost} place"
-            if lost == 1
-            else f"▼ {lost} places",
+            (
+                f"▼ {lost} place"
+                if lost == 1
+                else f"▼ {lost} places"
+            ),
             RED_ACCENT,
         )
 
-    return "— Aucune variation", MUTED_TEXT_COLOR
+    return (
+        "— Aucune variation",
+        MUTED_TEXT_COLOR,
+    )
 
 
 def _draw_avatar(
@@ -352,7 +382,9 @@ def _draw_avatar(
             with Image.open(
                 io.BytesIO(avatar_bytes)
             ) as source:
-                avatar = source.convert("RGBA")
+                avatar = source.convert(
+                    "RGBA"
+                )
 
             avatar = ImageOps.fit(
                 avatar,
@@ -372,10 +404,17 @@ def _draw_avatar(
         0,
     )
 
-    mask_draw = ImageDraw.Draw(mask)
+    mask_draw = ImageDraw.Draw(
+        mask
+    )
 
     mask_draw.ellipse(
-        (0, 0, size - 1, size - 1),
+        (
+            0,
+            0,
+            size - 1,
+            size - 1,
+        ),
         fill=255,
     )
 
@@ -430,6 +469,7 @@ def _draw_stat_card(
         18,
         bold=True,
     )
+
     value_font = _load_font(
         30,
         bold=True,
@@ -454,7 +494,6 @@ def _draw_stat_card(
         fill=accent,
     )
 
-    # Même ligne de base pour tous les libellés.
     draw.text(
         (
             left + 43,
@@ -466,7 +505,6 @@ def _draw_stat_card(
         anchor="ls",
     )
 
-    # Même ligne de base pour toutes les valeurs.
     draw.text(
         (
             left + 43,
@@ -477,8 +515,6 @@ def _draw_stat_card(
         fill=TEXT_COLOR,
         anchor="ls",
     )
-
-
 
 
 def _draw_rank_card(
@@ -585,8 +621,23 @@ def render_statistics_card(
     money_rank: int | None,
     xp_rank_change: int | None,
     money_rank_change: int | None,
+    best_streak: int = 0,
     background_path: str | Path | None = None,
 ) -> io.BytesIO:
+    """
+    Génère la carte de statistiques.
+
+    `coins_spent` est conservé dans la signature pour éviter
+    une incompatibilité pendant la mise à jour des fichiers,
+    mais il n'est plus affiché sur la carte.
+    """
+    del coins_spent
+
+    best_streak = max(
+        0,
+        int(best_streak),
+    )
+
     image = _load_background(
         background_path
     )
@@ -602,7 +653,9 @@ def render_statistics_card(
         overlay,
     )
 
-    draw = ImageDraw.Draw(image)
+    draw = ImageDraw.Draw(
+        image
+    )
 
     title_font = _load_font(
         42,
@@ -653,14 +706,20 @@ def render_statistics_card(
     )
 
     draw.text(
-        (205, 54),
+        (
+            205,
+            54,
+        ),
         fitted_name,
         font=username_font,
         fill=TEXT_COLOR,
     )
 
     draw.text(
-        (205, 101),
+        (
+            205,
+            101,
+        ),
         (
             f"Niveau {_format_number(level)}"
             f"  •  "
@@ -709,7 +768,10 @@ def render_statistics_card(
     )
 
     draw.text(
-        (48, 216),
+        (
+            48,
+            216,
+        ),
         "PROGRESSION SUR LA PÉRIODE",
         font=title_font,
         fill=TEXT_COLOR,
@@ -768,11 +830,11 @@ def render_statistics_card(
             third_column_right,
             first_row_bottom,
         ),
-        label="Pièces dépensées",
-        value=(
-            f"-{_format_number(coins_spent)}"
+        label="Meilleure série",
+        value=_format_streak(
+            best_streak
         ),
-        accent=RED_ACCENT,
+        accent=ORANGE_ACCENT,
     )
 
     _draw_stat_card(
@@ -814,13 +876,17 @@ def render_statistics_card(
             second_row_bottom,
         ),
         label="PROCHAIN NIVEAU",
-        value=f"{_format_number(xp_to_next_level)} XP",
+        value=(
+            f"{_format_number(xp_to_next_level)} XP"
+        ),
         accent=GREEN_ACCENT,
     )
 
-
     draw.text(
-        (48, 558),
+        (
+            48,
+            558,
+        ),
         "CLASSEMENTS ACTUELS",
         font=title_font,
         fill=TEXT_COLOR,
@@ -856,7 +922,9 @@ def render_statistics_card(
 
     output = io.BytesIO()
 
-    image.convert("RGB").save(
+    image.convert(
+        "RGB"
+    ).save(
         output,
         format="PNG",
         optimize=True,
