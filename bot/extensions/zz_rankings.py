@@ -48,9 +48,13 @@ def normalize_ranking_type(
     if normalized not in {
         "xp",
         "money",
+        "streak",
     }:
         raise ValueError(
-            "Le type de classement doit être `xp` ou `money`."
+            (
+                "Le type de classement doit être "
+                "`xp`, `money` ou `streak`."
+            )
         )
 
     return normalized
@@ -420,17 +424,33 @@ class RankingsCog(commands.Cog):
         self,
         *,
         guild_id: int,
+        ranking_type: str,
     ) -> int:
+        ranking_type = normalize_ranking_type(
+            ranking_type
+        )
+
         pool = self.get_pool()
 
-        result = await pool.fetchval(
-            """
-            SELECT COUNT(*)
-            FROM progression_members
-            WHERE guild_id = $1
-            """,
-            guild_id,
-        )
+        if ranking_type == "streak":
+            result = await pool.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM daily_members
+                WHERE guild_id = $1
+                  AND best_streak > 0
+                """,
+                guild_id,
+            )
+        else:
+            result = await pool.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM progression_members
+                WHERE guild_id = $1
+                """,
+                guild_id,
+            )
 
         return int(
             result or 0
@@ -440,10 +460,12 @@ class RankingsCog(commands.Cog):
         self,
         *,
         guild_id: int,
+        ranking_type: str,
     ) -> int:
         total_members = (
             await self.get_leaderboard_total_members(
                 guild_id=guild_id,
+                ranking_type=ranking_type,
             )
         )
 
@@ -485,7 +507,29 @@ class RankingsCog(commands.Cog):
 
         pool = self.get_pool()
 
-        if ranking_type == "money":
+        if ranking_type == "streak":
+            records = await pool.fetch(
+                """
+                SELECT
+                    user_id,
+                    best_streak,
+                    total_claims
+                FROM daily_members
+                WHERE guild_id = $1
+                  AND best_streak > 0
+                ORDER BY
+                    best_streak DESC,
+                    total_claims DESC,
+                    user_id ASC
+                LIMIT $2
+                OFFSET $3
+                """,
+                guild_id,
+                LEADERBOARD_PAGE_SIZE,
+                offset,
+            )
+
+        elif ranking_type == "money":
             records = await pool.fetch(
                 """
                 SELECT
@@ -505,6 +549,7 @@ class RankingsCog(commands.Cog):
                 LEADERBOARD_PAGE_SIZE,
                 offset,
             )
+
         else:
             records = await pool.fetch(
                 """
@@ -543,6 +588,82 @@ class RankingsCog(commands.Cog):
 
         pool = self.get_pool()
 
+        if ranking_type == "streak":
+            personal_record = await pool.fetchrow(
+                """
+                SELECT
+                    best_streak,
+                    total_claims
+                FROM daily_members
+                WHERE guild_id = $1
+                  AND user_id = $2
+                """,
+                guild_id,
+                user_id,
+            )
+
+            if personal_record is None:
+                return {
+                    "rank": None,
+                    "total_xp": 0,
+                    "wallet": 0,
+                    "best_streak": 0,
+                }
+
+            best_streak = int(
+                personal_record["best_streak"]
+                or 0
+            )
+
+            total_claims = int(
+                personal_record["total_claims"]
+                or 0
+            )
+
+            if best_streak <= 0:
+                return {
+                    "rank": None,
+                    "total_xp": 0,
+                    "wallet": 0,
+                    "best_streak": 0,
+                }
+
+            rank = await pool.fetchval(
+                """
+                SELECT COUNT(*) + 1
+                FROM daily_members
+                WHERE guild_id = $1
+                  AND best_streak > 0
+                  AND (
+                        best_streak > $2
+                        OR (
+                            best_streak = $2
+                            AND total_claims > $3
+                        )
+                        OR (
+                            best_streak = $2
+                            AND total_claims = $3
+                            AND user_id < $4
+                        )
+                  )
+                """,
+                guild_id,
+                best_streak,
+                total_claims,
+                user_id,
+            )
+
+            return {
+                "rank": (
+                    int(rank)
+                    if rank is not None
+                    else None
+                ),
+                "total_xp": 0,
+                "wallet": 0,
+                "best_streak": best_streak,
+            }
+
         personal_record = await pool.fetchrow(
             """
             SELECT
@@ -561,14 +682,17 @@ class RankingsCog(commands.Cog):
                 "rank": None,
                 "total_xp": 0,
                 "wallet": 0,
+                "best_streak": 0,
             }
 
         total_xp = int(
-            personal_record["total_xp"] or 0
+            personal_record["total_xp"]
+            or 0
         )
 
         wallet = int(
-            personal_record["wallet"] or 0
+            personal_record["wallet"]
+            or 0
         )
 
         if ranking_type == "money":
@@ -628,6 +752,7 @@ class RankingsCog(commands.Cog):
             ),
             "total_xp": total_xp,
             "wallet": wallet,
+            "best_streak": 0,
         }
 
     def get_display_name(
@@ -703,19 +828,23 @@ class RankingsCog(commands.Cog):
                 record["user_id"]
             )
 
-            total_xp = int(
-                record["total_xp"] or 0
-            )
+            if ranking_type == "streak":
+                value = int(
+                    record["best_streak"]
+                    or 0
+                )
 
-            wallet = int(
-                record["wallet"] or 0
-            )
+            elif ranking_type == "money":
+                value = int(
+                    record["wallet"]
+                    or 0
+                )
 
-            value = (
-                wallet
-                if ranking_type == "money"
-                else total_xp
-            )
+            else:
+                value = int(
+                    record["total_xp"]
+                    or 0
+                )
 
             rows.append(
                 {
@@ -742,19 +871,23 @@ class RankingsCog(commands.Cog):
             user_id=requester_id,
         )
 
-        personal_total_xp = int(
-            personal_data["total_xp"] or 0
-        )
+        if ranking_type == "streak":
+            personal_value = int(
+                personal_data["best_streak"]
+                or 0
+            )
 
-        personal_wallet = int(
-            personal_data["wallet"] or 0
-        )
+        elif ranking_type == "money":
+            personal_value = int(
+                personal_data["wallet"]
+                or 0
+            )
 
-        personal_value = (
-            personal_wallet
-            if ranking_type == "money"
-            else personal_total_xp
-        )
+        else:
+            personal_value = int(
+                personal_data["total_xp"]
+                or 0
+            )
 
         personal_row: dict[str, Any] = {
             "rank": personal_data["rank"],
@@ -923,8 +1056,6 @@ class RankingsCog(commands.Cog):
             )
             return
 
-        # La carte est envoyée directement :
-        # aucun embed et aucun bouton.
         await interaction.followup.send(
             file=progression_file,
             ephemeral=True,
@@ -933,7 +1064,7 @@ class RankingsCog(commands.Cog):
     @app_commands.command(
         name="classement",
         description=(
-            "Affiche le classement XP ou argent du serveur."
+            "Affiche un classement du serveur."
         ),
     )
     @app_commands.rename(
@@ -953,6 +1084,10 @@ class RankingsCog(commands.Cog):
             app_commands.Choice(
                 name="Argent",
                 value="money",
+            ),
+            app_commands.Choice(
+                name="Meilleure série quotidienne",
+                value="streak",
             ),
         ]
     )
@@ -997,6 +1132,7 @@ class RankingsCog(commands.Cog):
             total_pages = (
                 await self.get_leaderboard_total_pages(
                     guild_id=guild.id,
+                    ranking_type=selected_type,
                 )
             )
 
@@ -1040,8 +1176,6 @@ class RankingsCog(commands.Cog):
             total_pages=total_pages,
         )
 
-        # Aucun embed : l'image est directement
-        # attachée au message public.
         message = await interaction.followup.send(
             file=leaderboard_file,
             view=view,
@@ -1054,10 +1188,6 @@ class RankingsCog(commands.Cog):
 async def setup(
     bot: commands.Bot,
 ) -> None:
-    # progression.py possède déjà une commande
-    # /progression. On retire uniquement son
-    # enregistrement dans l'arbre Discord avant
-    # d'ajouter la nouvelle version.
     existing_progression = bot.tree.get_command(
         "progression"
     )
@@ -1073,8 +1203,8 @@ async def setup(
 
     LOGGER.info(
         (
-            "Nouvelle commande /progression et "
-            "classement graphique chargés"
+            "Commande /progression et classements "
+            "XP, argent et série chargés"
         )
     )
 
