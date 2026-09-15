@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -235,29 +236,31 @@ def integer_from_value(
         )
 
     try:
-        integer_value = int(value)
+        decimal_value = Decimal(
+            str(value).strip()
+        )
     except (
-        TypeError,
+        InvalidOperation,
         ValueError,
+        AttributeError,
     ) as error:
         raise ValueError(
             f"`{field_name}` doit être un nombre entier."
         ) from error
 
-    if str(value).strip() != str(integer_value):
-        try:
-            decimal_value = Decimal(
-                str(value).strip()
-            )
-        except InvalidOperation as error:
-            raise ValueError(
-                f"`{field_name}` doit être un nombre entier."
-            ) from error
+    if not decimal_value.is_finite():
+        raise ValueError(
+            f"`{field_name}` doit être un nombre entier."
+        )
 
-        if decimal_value != Decimal(integer_value):
-            raise ValueError(
-                f"`{field_name}` doit être un nombre entier."
-            )
+    if decimal_value != decimal_value.to_integral_value():
+        raise ValueError(
+            f"`{field_name}` doit être un nombre entier."
+        )
+
+    integer_value = int(
+        decimal_value
+    )
 
     if not minimum <= integer_value <= maximum:
         raise ValueError(
@@ -317,7 +320,9 @@ def parse_database_json(
         ),
     ):
         try:
-            return json.loads(value)
+            return json.loads(
+                value
+            )
         except (
             json.JSONDecodeError,
             UnicodeDecodeError,
@@ -360,8 +365,8 @@ def validate_bonus_rules(
     ):
         raise ValueError(
             (
-                "Le JSON principal doit être une liste entourée "
-                "de crochets `[` et `]`."
+                "Le JSON principal doit être une liste "
+                "entourée de crochets `[` et `]`."
             )
         )
 
@@ -445,10 +450,7 @@ def validate_bonus_rules(
             )
 
             normalized_rule["day"] = day
-
-            default_name = (
-                f"Bonus du jour {day}"
-            )
+            default_name = f"Bonus du jour {day}"
         else:
             every = integer_from_value(
                 raw_rule["every"],
@@ -458,7 +460,6 @@ def validate_bonus_rules(
             )
 
             normalized_rule["every"] = every
-
             default_name = (
                 f"Bonus tous les {every} jours"
             )
@@ -679,8 +680,7 @@ def rule_selection_key(
             xp_multiplier,
             coins_multiplier,
         ),
-        xp_multiplier
-        + coins_multiplier,
+        xp_multiplier + coins_multiplier,
         fixed_bonus,
         -index,
     )
@@ -900,35 +900,32 @@ class DailyBaseConfigModal(
         self.cog = cog
         self.guild_id = guild_id
 
-        self.base_xp_input = (
-            discord.ui.TextInput(
-                label="XP quotidienne",
-                placeholder="Exemple : 100",
-                default=str(
-                    settings["base_xp"]
-                ),
-                required=True,
-                min_length=1,
-                max_length=10,
-            )
+        self.base_xp_input = discord.ui.TextInput(
+            label="XP quotidienne",
+            placeholder="Exemple : 100",
+            default=str(
+                settings["base_xp"]
+            ),
+            required=True,
+            min_length=1,
+            max_length=10,
         )
 
-        self.base_coins_input = (
-            discord.ui.TextInput(
-                label="Pièces quotidiennes",
-                placeholder="Exemple : 15",
-                default=str(
-                    settings["base_coins"]
-                ),
-                required=True,
-                min_length=1,
-                max_length=10,
-            )
+        self.base_coins_input = discord.ui.TextInput(
+            label="Pièces quotidiennes",
+            placeholder="Exemple : 15",
+            default=str(
+                settings["base_coins"]
+            ),
+            required=True,
+            min_length=1,
+            max_length=10,
         )
 
         self.add_item(
             self.base_xp_input
         )
+
         self.add_item(
             self.base_coins_input
         )
@@ -938,71 +935,55 @@ class DailyBaseConfigModal(
         interaction: discord.Interaction,
     ) -> None:
         try:
-            base_xp = int(
-                str(
-                    self.base_xp_input.value
-                ).strip()
+            base_xp = integer_from_value(
+                self.base_xp_input.value,
+                field_name="XP quotidienne",
+                minimum=0,
+                maximum=MAXIMUM_BASE_REWARD,
             )
 
-            base_coins = int(
-                str(
-                    self.base_coins_input.value
-                ).strip()
+            base_coins = integer_from_value(
+                self.base_coins_input.value,
+                field_name="Pièces quotidiennes",
+                minimum=0,
+                maximum=MAXIMUM_BASE_REWARD,
             )
-        except ValueError:
+        except ValueError as error:
             await interaction.response.send_message(
                 embed=error_embed(
                     "Valeur invalide",
-                    (
-                        "Les récompenses doivent être "
-                        "des nombres entiers."
-                    ),
+                    str(error),
                 ),
                 ephemeral=True,
             )
             return
 
-        if not (
-            0
-            <= base_xp
-            <= MAXIMUM_BASE_REWARD
-        ):
+        try:
+            await self.cog.update_base_rewards(
+                guild_id=self.guild_id,
+                base_xp=base_xp,
+                base_coins=base_coins,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de modifier les récompenses "
+                    "quotidiennes du serveur %s."
+                ),
+                self.guild_id,
+            )
+
             await interaction.response.send_message(
                 embed=error_embed(
-                    "XP invalide",
+                    "Erreur",
                     (
-                        "La récompense d'XP doit être "
-                        "comprise entre 0 et "
-                        f"{format_number(MAXIMUM_BASE_REWARD)}."
+                        "Les récompenses n'ont pas "
+                        "pu être enregistrées."
                     ),
                 ),
                 ephemeral=True,
             )
             return
-
-        if not (
-            0
-            <= base_coins
-            <= MAXIMUM_BASE_REWARD
-        ):
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Pièces invalides",
-                    (
-                        "La récompense en pièces doit être "
-                        "comprise entre 0 et "
-                        f"{format_number(MAXIMUM_BASE_REWARD)}."
-                    ),
-                ),
-                ephemeral=True,
-            )
-            return
-
-        await self.cog.update_base_rewards(
-            guild_id=self.guild_id,
-            base_xp=base_xp,
-            base_coins=base_coins,
-        )
 
         await interaction.response.send_message(
             embed=success_embed(
@@ -1012,7 +993,7 @@ class DailyBaseConfigModal(
                     f"✨ **{format_number(base_xp)} XP**\n"
                     f"💰 **{format_number(base_coins)} pièces**\n\n"
                     "Les bonus de série configurés dans le JSON "
-                    "peuvent modifier cette récompense à certains paliers."
+                    "peuvent modifier cette récompense."
                 ),
             ),
             ephemeral=True,
@@ -1046,19 +1027,17 @@ class DailyRulesModal(
         if len(serialized_rules) > 4000:
             serialized_rules = "[]"
 
-        self.rules_input = (
-            discord.ui.TextInput(
-                label="Règles JSON",
-                placeholder=(
-                    '[{"every":7,"coins_multiplier":2},'
-                    '{"day":30,"xp_multiplier":2}]'
-                ),
-                default=serialized_rules,
-                style=discord.TextStyle.paragraph,
-                required=True,
-                min_length=2,
-                max_length=4000,
-            )
+        self.rules_input = discord.ui.TextInput(
+            label="Règles JSON",
+            placeholder=(
+                '[{"every":7,"coins_multiplier":2},'
+                '{"day":30,"xp_multiplier":2}]'
+            ),
+            default=serialized_rules,
+            style=discord.TextStyle.paragraph,
+            required=True,
+            min_length=2,
+            max_length=4000,
         )
 
         self.add_item(
@@ -1070,11 +1049,9 @@ class DailyRulesModal(
         interaction: discord.Interaction,
     ) -> None:
         try:
-            normalized_rules = (
-                validate_bonus_rules(
-                    str(
-                        self.rules_input.value
-                    )
+            normalized_rules = validate_bonus_rules(
+                str(
+                    self.rules_input.value
                 )
             )
         except ValueError as error:
@@ -1087,10 +1064,31 @@ class DailyRulesModal(
             )
             return
 
-        await self.cog.update_bonus_rules(
-            guild_id=self.guild_id,
-            rules=normalized_rules,
-        )
+        try:
+            await self.cog.update_bonus_rules(
+                guild_id=self.guild_id,
+                rules=normalized_rules,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de modifier les bonus "
+                    "quotidiens du serveur %s."
+                ),
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "Les bonus n'ont pas "
+                        "pu être enregistrés."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
 
         if normalized_rules:
             description = (
@@ -1113,7 +1111,10 @@ class DailyRulesModal(
             ephemeral=True,
         )
 
-class DailyResetConfirmView(discord.ui.View):
+
+class DailyResetConfirmView(
+    discord.ui.View
+):
     def __init__(
         self,
         *,
@@ -1122,7 +1123,9 @@ class DailyResetConfirmView(discord.ui.View):
         guild_id: int,
         user_id: int,
     ) -> None:
-        super().__init__(timeout=60)
+        super().__init__(
+            timeout=60,
+        )
 
         self.cog = cog
         self.owner_id = owner_id
@@ -1146,17 +1149,25 @@ class DailyResetConfirmView(discord.ui.View):
             ),
             ephemeral=True,
         )
+
         return False
 
     def disable_buttons(self) -> None:
         for item in self.children:
-            if isinstance(item, discord.ui.Button):
+            if isinstance(
+                item,
+                discord.ui.Button,
+            ):
                 item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_buttons()
 
     @discord.ui.button(
         label="Confirmer la réinitialisation",
         emoji="🗑️",
         style=discord.ButtonStyle.danger,
+        row=0,
     )
     async def confirm_reset(
         self,
@@ -1193,10 +1204,6 @@ class DailyResetConfirmView(discord.ui.View):
         self.disable_buttons()
 
         await interaction.response.edit_message(
-            view=self,
-        )
-
-        await interaction.followup.send(
             embed=success_embed(
                 "Quotidien réinitialisé",
                 (
@@ -1205,13 +1212,15 @@ class DailyResetConfirmView(discord.ui.View):
                     f"Réclamations supprimées : "
                     f"**{result['claims_deleted']}**\n"
                     "Série actuelle : **0**\n"
-                    "Meilleure série : **0**\n\n"
+                    "Meilleure série : **0**\n"
+                    "Total de réclamations : **0**\n\n"
                     "Le membre peut immédiatement utiliser "
-                    "`/quotidien` à nouveau.\n"
-                    "Les récompenses déjà gagnées ne sont pas retirées."
+                    "`/quotidien` à nouveau.\n\n"
+                    "Les pièces et l'XP déjà gagnées "
+                    "n'ont pas été retirées."
                 ),
             ),
-            ephemeral=True,
+            view=self,
         )
 
         self.stop()
@@ -1220,6 +1229,7 @@ class DailyResetConfirmView(discord.ui.View):
         label="Annuler",
         emoji="✖️",
         style=discord.ButtonStyle.secondary,
+        row=0,
     )
     async def cancel_reset(
         self,
@@ -1229,13 +1239,22 @@ class DailyResetConfirmView(discord.ui.View):
         self.disable_buttons()
 
         await interaction.response.edit_message(
+            embed=warning_embed(
+                "Réinitialisation annulée",
+                (
+                    "Aucune donnée quotidienne "
+                    "n'a été supprimée."
+                ),
+            ),
             view=self,
         )
 
         self.stop()
 
 
-class DailyResetMemberSelect(discord.ui.UserSelect):
+class DailyResetMemberSelect(
+    discord.ui.UserSelect
+):
     def __init__(
         self,
         *,
@@ -1248,7 +1267,9 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
         self.guild_id = guild_id
 
         super().__init__(
-            placeholder="Sélectionne le membre à réinitialiser…",
+            placeholder=(
+                "Sélectionne le membre à réinitialiser…"
+            ),
             min_values=1,
             max_values=1,
             row=0,
@@ -1262,7 +1283,10 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Aucun membre",
-                    "Aucun membre n'a été sélectionné.",
+                    (
+                        "Aucun membre "
+                        "n'a été sélectionné."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -1274,7 +1298,10 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
             await interaction.response.send_message(
                 embed=error_embed(
                     "Membre invalide",
-                    "Le quotidien d'un bot ne peut pas être réinitialisé.",
+                    (
+                        "Le quotidien d'un bot "
+                        "ne peut pas être réinitialisé."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -1284,7 +1311,7 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
             embed=warning_embed(
                 "Confirmation obligatoire",
                 (
-                    f"Tu vas réinitialiser le quotidien de "
+                    "Tu vas réinitialiser le quotidien de "
                     f"{selected_user.mention}.\n\n"
                     "Les éléments suivants seront supprimés :\n"
                     "• sa série actuelle ;\n"
@@ -1292,7 +1319,8 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
                     "• son nombre total de réclamations ;\n"
                     "• la date de sa dernière réclamation ;\n"
                     "• son historique quotidien.\n\n"
-                    "Les pièces et l'XP déjà gagnées seront conservées."
+                    "Les pièces et l'XP déjà gagnées "
+                    "seront conservées."
                 ),
             ),
             view=DailyResetConfirmView(
@@ -1305,7 +1333,9 @@ class DailyResetMemberSelect(discord.ui.UserSelect):
         )
 
 
-class DailyResetMemberView(discord.ui.View):
+class DailyResetMemberView(
+    discord.ui.View
+):
     def __init__(
         self,
         *,
@@ -1313,7 +1343,9 @@ class DailyResetMemberView(discord.ui.View):
         owner_id: int,
         guild_id: int,
     ) -> None:
-        super().__init__(timeout=180)
+        super().__init__(
+            timeout=180,
+        )
 
         self.owner_id = owner_id
 
@@ -1342,10 +1374,8 @@ class DailyResetMemberView(discord.ui.View):
             ),
             ephemeral=True,
         )
+
         return False
-
-
-
 
 
 class DailyAdminView(
@@ -1370,10 +1400,7 @@ class DailyAdminView(
         self,
         interaction: discord.Interaction,
     ) -> bool:
-        if (
-            interaction.user.id
-            == self.owner_id
-        ):
+        if interaction.user.id == self.owner_id:
             return True
 
         await interaction.response.send_message(
@@ -1448,19 +1475,40 @@ class DailyAdminView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        settings = await self.cog.get_settings(
-            self.guild_id,
-            use_cache=False,
-        )
+        try:
+            settings = await self.cog.get_settings(
+                self.guild_id,
+                use_cache=False,
+            )
 
-        enabled = not bool(
-            settings["enabled"]
-        )
+            enabled = not bool(
+                settings["enabled"]
+            )
 
-        await self.cog.set_enabled(
-            guild_id=self.guild_id,
-            enabled=enabled,
-        )
+            await self.cog.set_enabled(
+                guild_id=self.guild_id,
+                enabled=enabled,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de modifier l'état du quotidien "
+                    "du serveur %s."
+                ),
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "L'état du système "
+                        "n'a pas pu être modifié."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
 
         await interaction.response.send_message(
             embed=success_embed(
@@ -1484,16 +1532,37 @@ class DailyAdminView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        embed = await self.cog.build_admin_embed(
-            self.guild_id
-        )
+        try:
+            embed = await self.cog.build_admin_embed(
+                self.guild_id
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible d'afficher la configuration "
+                    "du serveur %s."
+                ),
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "La configuration "
+                        "n'a pas pu être chargée."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
 
         await interaction.response.send_message(
             embed=embed,
             ephemeral=True,
         )
 
-        @discord.ui.button(
+    @discord.ui.button(
         label="Exemple JSON",
         emoji="🧩",
         style=discord.ButtonStyle.secondary,
@@ -1575,9 +1644,11 @@ class DailyAdminView(
             ),
             ephemeral=True,
         )
-        
 
-class DailyCog(commands.Cog):
+
+class DailyCog(
+    commands.Cog
+):
     def __init__(
         self,
         bot: commands.Bot,
@@ -1605,60 +1676,6 @@ class DailyCog(commands.Cog):
             )
 
         return database.require_pool()
-
-    async def reset_daily_member(
-        self,
-        *,
-        guild_id: int,
-        user_id: int,
-    ) -> dict[str, int]:
-        pool = self.get_pool()
-
-        async with pool.acquire() as connection:
-            async with connection.transaction():
-                await connection.execute(
-                    """
-                    SELECT pg_advisory_xact_lock(
-                        hashtextextended($1, 0)
-                    )
-                    """,
-                    f"daily:{guild_id}:{user_id}",
-                )
-
-                claims_deleted = await connection.fetchval(
-                    """
-                    WITH deleted_claims AS (
-                        DELETE FROM daily_claims
-                        WHERE guild_id = $1
-                          AND user_id = $2
-                        RETURNING 1
-                    )
-                    SELECT COUNT(*)
-                    FROM deleted_claims
-                    """,
-                    guild_id,
-                    user_id,
-                )
-
-                members_deleted = await connection.fetchval(
-                    """
-                    WITH deleted_member AS (
-                        DELETE FROM daily_members
-                        WHERE guild_id = $1
-                          AND user_id = $2
-                        RETURNING 1
-                    )
-                    SELECT COUNT(*)
-                    FROM deleted_member
-                    """,
-                    guild_id,
-                    user_id,
-                )
-
-        return {
-            "claims_deleted": int(claims_deleted or 0),
-            "members_deleted": int(members_deleted or 0),
-        }
 
     def get_progression_cog(
         self,
@@ -1773,7 +1790,8 @@ class DailyCog(commands.Cog):
                 coins_multiplier NUMERIC(10, 2)
                     NOT NULL DEFAULT 1.00,
 
-                applied_rules JSONB NOT NULL DEFAULT '[]'::JSONB,
+                applied_rules JSONB
+                    NOT NULL DEFAULT '[]'::JSONB,
 
                 claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -1853,11 +1871,7 @@ class DailyCog(commands.Cog):
         *,
         use_cache: bool = True,
     ) -> dict[str, Any]:
-        import time
-
-        current_time = (
-            time.monotonic()
-        )
+        current_time = time.monotonic()
 
         cached = self._settings_cache.get(
             guild_id
@@ -1902,10 +1916,8 @@ class DailyCog(commands.Cog):
         )
 
         try:
-            normalized_rules = (
-                validate_bonus_rules(
-                    raw_rules
-                )
+            normalized_rules = validate_bonus_rules(
+                raw_rules
             )
         except ValueError:
             LOGGER.exception(
@@ -1959,14 +1971,9 @@ class DailyCog(commands.Cog):
             SET
                 base_xp = $2,
                 base_coins = $3,
-
-                -- Ces anciennes colonnes sont conservées
-                -- pour la compatibilité avec la base,
-                -- mais elles ne sont plus utilisées.
                 streak_xp_bonus = 0,
                 streak_coins_bonus = 0,
                 maximum_bonus_days = 0,
-
                 updated_at = NOW()
             WHERE guild_id = $1
             """,
@@ -1986,10 +1993,8 @@ class DailyCog(commands.Cog):
         guild_id: int,
         rules: list[dict[str, Any]],
     ) -> None:
-        normalized_rules = (
-            validate_bonus_rules(
-                rules
-            )
+        normalized_rules = validate_bonus_rules(
+            rules
         )
 
         serialized_rules = json.dumps(
@@ -2049,52 +2054,61 @@ class DailyCog(commands.Cog):
             None,
         )
 
-    async def get_member_daily_data(
+    async def reset_daily_member(
         self,
         *,
         guild_id: int,
         user_id: int,
-    ) -> dict[str, Any]:
+    ) -> dict[str, int]:
         pool = self.get_pool()
 
-        record = await pool.fetchrow(
-            """
-            SELECT
-                current_streak,
-                best_streak,
-                total_claims,
-                last_claim_at
-            FROM daily_members
-            WHERE guild_id = $1
-              AND user_id = $2
-            """,
-            guild_id,
-            user_id,
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    SELECT pg_advisory_xact_lock(
+                        hashtextextended($1, 0)
+                    )
+                    """,
+                    f"daily:{guild_id}:{user_id}",
+                )
 
-        if record is None:
-            return {
-                "current_streak": 0,
-                "best_streak": 0,
-                "total_claims": 0,
-                "last_claim_at": None,
-            }
+                claims_deleted = await connection.fetchval(
+                    """
+                    WITH deleted_claims AS (
+                        DELETE FROM daily_claims
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*)
+                    FROM deleted_claims
+                    """,
+                    guild_id,
+                    user_id,
+                )
+
+                members_deleted = await connection.fetchval(
+                    """
+                    WITH deleted_member AS (
+                        DELETE FROM daily_members
+                        WHERE guild_id = $1
+                          AND user_id = $2
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*)
+                    FROM deleted_member
+                    """,
+                    guild_id,
+                    user_id,
+                )
 
         return {
-            "current_streak": int(
-                record["current_streak"]
-                or 0
+            "claims_deleted": int(
+                claims_deleted or 0
             ),
-            "best_streak": int(
-                record["best_streak"]
-                or 0
-            ),
-            "total_claims": int(
-                record["total_claims"]
-                or 0
-            ),
-            "last_claim_at": (
-                record["last_claim_at"]
+            "members_deleted": int(
+                members_deleted or 0
             ),
         }
 
@@ -2105,6 +2119,7 @@ class DailyCog(commands.Cog):
         user_id: int,
     ) -> DailyClaimResult:
         pool = self.get_pool()
+
         current_time = datetime.now(
             timezone.utc
         )
@@ -2132,19 +2147,17 @@ class DailyCog(commands.Cog):
                     guild_id,
                 )
 
-                settings_record = (
-                    await connection.fetchrow(
-                        """
-                        SELECT
-                            enabled,
-                            base_xp,
-                            base_coins,
-                            bonus_rules
-                        FROM daily_settings
-                        WHERE guild_id = $1
-                        """,
-                        guild_id,
-                    )
+                settings_record = await connection.fetchrow(
+                    """
+                    SELECT
+                        enabled,
+                        base_xp,
+                        base_coins,
+                        bonus_rules
+                    FROM daily_settings
+                    WHERE guild_id = $1
+                    """,
+                    guild_id,
                 )
 
                 if settings_record is None:
@@ -2176,10 +2189,8 @@ class DailyCog(commands.Cog):
                 )
 
                 try:
-                    bonus_rules = (
-                        validate_bonus_rules(
-                            raw_rules
-                        )
+                    bonus_rules = validate_bonus_rules(
+                        raw_rules
                     )
                 except ValueError:
                     LOGGER.exception(
@@ -2209,22 +2220,20 @@ class DailyCog(commands.Cog):
                     user_id,
                 )
 
-                daily_record = (
-                    await connection.fetchrow(
-                        """
-                        SELECT
-                            current_streak,
-                            best_streak,
-                            total_claims,
-                            last_claim_at
-                        FROM daily_members
-                        WHERE guild_id = $1
-                          AND user_id = $2
-                        FOR UPDATE
-                        """,
-                        guild_id,
-                        user_id,
-                    )
+                daily_record = await connection.fetchrow(
+                    """
+                    SELECT
+                        current_streak,
+                        best_streak,
+                        total_claims,
+                        last_claim_at
+                    FROM daily_members
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    FOR UPDATE
+                    """,
+                    guild_id,
+                    user_id,
                 )
 
                 if daily_record is None:
@@ -2252,20 +2261,18 @@ class DailyCog(commands.Cog):
                     user_id,
                 )
 
-                progression_record = (
-                    await connection.fetchrow(
-                        """
-                        SELECT
-                            total_xp,
-                            wallet
-                        FROM progression_members
-                        WHERE guild_id = $1
-                          AND user_id = $2
-                        FOR UPDATE
-                        """,
-                        guild_id,
-                        user_id,
-                    )
+                progression_record = await connection.fetchrow(
+                    """
+                    SELECT
+                        total_xp,
+                        wallet
+                    FROM progression_members
+                    WHERE guild_id = $1
+                      AND user_id = $2
+                    FOR UPDATE
+                    """,
+                    guild_id,
+                    user_id,
                 )
 
                 if progression_record is None:
@@ -2297,11 +2304,9 @@ class DailyCog(commands.Cog):
                     or 0
                 )
 
-                last_claim_at = (
-                    daily_record[
-                        "last_claim_at"
-                    ]
-                )
+                last_claim_at = daily_record[
+                    "last_claim_at"
+                ]
 
                 old_xp = int(
                     progression_record[
@@ -2343,24 +2348,22 @@ class DailyCog(commands.Cog):
                         next_claim_at=None,
                     )
 
-                current_paris_date = current_time.astimezone(
+                paris_date = current_time.astimezone(
                     PARIS_TIMEZONE
                 ).date()
-                
+
                 next_claim_at = get_next_daily_reset(
                     current_time
                 )
-                
+
                 if last_claim_at is not None:
-                    last_claim_paris_date = (
+                    last_claim_date = (
                         last_claim_at.astimezone(
                             PARIS_TIMEZONE
                         ).date()
                     )
-                
-                    # Le membre a déjà récupéré sa récompense
-                    # pendant la journée actuelle.
-                    if last_claim_paris_date >= current_paris_date:
+
+                    if last_claim_date >= paris_date:
                         return DailyClaimResult(
                             status="cooldown",
                             current_streak=current_streak,
@@ -2381,21 +2384,20 @@ class DailyCog(commands.Cog):
                             wallet=old_wallet,
                             next_claim_at=next_claim_at,
                         )
-                
+
                     days_since_last_claim = (
-                        current_paris_date
-                        - last_claim_paris_date
+                        paris_date
+                        - last_claim_date
                     ).days
-                
-                    # La série continue uniquement si la dernière
-                    # récompense a été récupérée hier.
+
                     if days_since_last_claim == 1:
-                        new_streak = current_streak + 1
+                        new_streak = (
+                            current_streak + 1
+                        )
                     else:
                         new_streak = 1
                 else:
                     new_streak = 1
-
 
                 new_best_streak = max(
                     best_streak,
@@ -2406,22 +2408,14 @@ class DailyCog(commands.Cog):
                     total_claims + 1
                 )
 
-                selected_rule = (
-                    select_bonus_rule(
-                        bonus_rules,
-                        new_streak,
-                    )
+                selected_rule = select_bonus_rule(
+                    bonus_rules,
+                    new_streak,
                 )
 
                 if selected_rule is None:
-                    xp_multiplier = (
-                        Decimal("1")
-                    )
-
-                    coins_multiplier = (
-                        Decimal("1")
-                    )
-
+                    xp_multiplier = Decimal("1")
+                    coins_multiplier = Decimal("1")
                     fixed_xp_bonus = 0
                     fixed_coins_bonus = 0
                     applied_rules: list[
@@ -2467,19 +2461,13 @@ class DailyCog(commands.Cog):
                 xp_reward = calculate_reward(
                     base_reward=base_xp,
                     multiplier=xp_multiplier,
-                    fixed_bonus=(
-                        fixed_xp_bonus
-                    ),
+                    fixed_bonus=fixed_xp_bonus,
                 )
 
                 coins_reward = calculate_reward(
                     base_reward=base_coins,
-                    multiplier=(
-                        coins_multiplier
-                    ),
-                    fixed_bonus=(
-                        fixed_coins_bonus
-                    ),
+                    multiplier=coins_multiplier,
+                    fixed_bonus=fixed_coins_bonus,
                 )
 
                 bonus_xp = max(
@@ -2489,8 +2477,7 @@ class DailyCog(commands.Cog):
 
                 bonus_coins = max(
                     0,
-                    coins_reward
-                    - base_coins,
+                    coins_reward - base_coins,
                 )
 
                 updated_progression = (
@@ -2498,15 +2485,10 @@ class DailyCog(commands.Cog):
                         """
                         UPDATE progression_members
                         SET
-                            total_xp =
-                                total_xp + $3,
-
-                            wallet =
-                                wallet + $4,
-
+                            total_xp = total_xp + $3,
+                            wallet = wallet + $4,
                             lifetime_coins =
                                 lifetime_coins + $4,
-
                             updated_at = NOW()
                         WHERE guild_id = $1
                           AND user_id = $2
@@ -2524,8 +2506,8 @@ class DailyCog(commands.Cog):
                 if updated_progression is None:
                     raise RuntimeError(
                         (
-                            "La récompense n'a pas pu "
-                            "être ajoutée."
+                            "La récompense n'a pas "
+                            "pu être ajoutée."
                         )
                     )
 
@@ -2549,11 +2531,9 @@ class DailyCog(commands.Cog):
                     current_time,
                 )
 
-                serialized_applied_rules = (
-                    json.dumps(
-                        applied_rules,
-                        ensure_ascii=False,
-                    )
+                serialized_applied_rules = json.dumps(
+                    applied_rules,
+                    ensure_ascii=False,
                 )
 
                 await connection.execute(
@@ -2615,7 +2595,7 @@ class DailyCog(commands.Cog):
                             + str(
                                 selected_rule.get(
                                     "name",
-                                    "bonus de série",
+                                    "Bonus de série",
                                 )
                             )
                         )
@@ -2665,37 +2645,23 @@ class DailyCog(commands.Cog):
 
                 return DailyClaimResult(
                     status="claimed",
-                    current_streak=(
-                        new_streak
-                    ),
-                    best_streak=(
-                        new_best_streak
-                    ),
-                    total_claims=(
-                        new_total_claims
-                    ),
+                    current_streak=new_streak,
+                    best_streak=new_best_streak,
+                    total_claims=new_total_claims,
                     xp_reward=xp_reward,
                     coins_reward=coins_reward,
                     base_xp=base_xp,
                     base_coins=base_coins,
                     bonus_xp=bonus_xp,
                     bonus_coins=bonus_coins,
-                    xp_multiplier=(
-                        xp_multiplier
-                    ),
-                    coins_multiplier=(
-                        coins_multiplier
-                    ),
-                    applied_rule=(
-                        selected_rule
-                    ),
+                    xp_multiplier=xp_multiplier,
+                    coins_multiplier=coins_multiplier,
+                    applied_rule=selected_rule,
                     old_level=old_level,
                     new_level=new_level,
                     total_xp=total_xp,
                     wallet=wallet,
-                    next_claim_at=get_next_daily_reset(
-                        current_time
-                    ),
+                    next_claim_at=next_claim_at,
                 )
 
     def find_next_bonus(
@@ -2724,11 +2690,9 @@ class DailyCog(commands.Cog):
             start_day,
             search_limit + 1,
         ):
-            selected_rule = (
-                select_bonus_rule(
-                    rules,
-                    streak_day,
-                )
+            selected_rule = select_bonus_rule(
+                rules,
+                streak_day,
             )
 
             if selected_rule is not None:
@@ -2843,11 +2807,13 @@ class DailyCog(commands.Cog):
         embed.add_field(
             name="Réinitialisation",
             value=(
-                "⏱️ Nouvelle récompense : **chaque jour à minuit**\n"
+                "⏱️ Nouvelle récompense : "
+                "**chaque jour à minuit**\n"
                 "🕰️ Fuseau horaire : **Europe/Paris**\n"
-                "🔥 La série continue en réclamant deux jours consécutifs."
+                "🔥 La série continue en réclamant "
+                "deux jours consécutifs."
             ),
-            inline=True,
+            inline=False,
         )
 
         if rules:
@@ -2879,17 +2845,19 @@ class DailyCog(commands.Cog):
                 name="🔥 Bonus configurés",
                 value=(
                     "Aucun bonus de série.\n"
-                    "La récompense restera identique tous les jours."
+                    "La récompense restera identique "
+                    "tous les jours."
                 ),
                 inline=False,
             )
 
         embed.add_field(
-            name="Fonctionnement des chevauchements",
+            name="Chevauchement des règles",
             value=(
                 "Une seule règle peut être appliquée par jour.\n"
-                "La priorité la plus élevée gagne. À priorité égale, "
-                "un jour précis est prioritaire sur une règle récurrente."
+                "La priorité la plus élevée gagne. "
+                "À priorité égale, un jour précis est prioritaire "
+                "sur une règle récurrente."
             ),
             inline=False,
         )
@@ -3000,14 +2968,11 @@ class DailyCog(commands.Cog):
             return
 
         if result.status == "cooldown":
-            next_claim_at = (
-                result.next_claim_at
-            )
+            next_claim_at = result.next_claim_at
 
             if next_claim_at is None:
                 remaining = timedelta()
                 timestamp_text = ""
-                
             else:
                 current_time = datetime.now(
                     timezone.utc
@@ -3015,8 +2980,7 @@ class DailyCog(commands.Cog):
 
                 remaining = max(
                     timedelta(),
-                    next_claim_at
-                    - current_time,
+                    next_claim_at - current_time,
                 )
 
                 unix_timestamp = int(
@@ -3032,7 +2996,7 @@ class DailyCog(commands.Cog):
                     "Récompense déjà récupérée",
                     (
                         "Tu as déjà récupéré ta récompense "
-                        "quotidienne.\n\n"
+                        "quotidienne aujourd'hui.\n\n"
                         f"⏱️ Temps restant : "
                         f"**{format_duration(remaining)}**"
                         f"{timestamp_text}\n"
@@ -3048,10 +3012,7 @@ class DailyCog(commands.Cog):
             discord.Role
         ] = []
 
-        if (
-            result.new_level
-            != result.old_level
-        ):
+        if result.new_level > result.old_level:
             granted_roles = (
                 await self.update_member_level_role(
                     guild=guild,
@@ -3081,18 +3042,18 @@ class DailyCog(commands.Cog):
                 )
             )
 
-            bonus_lines: list[str] = [
+            reward_lines.append(
                 (
                     f"\n🔥 Bonus appliqué : "
                     f"**{rule_name}**"
                 )
-            ]
+            )
 
             if (
                 result.xp_multiplier
                 > Decimal("1")
             ):
-                bonus_lines.append(
+                reward_lines.append(
                     (
                         "• Multiplicateur XP : "
                         f"**×{format_multiplier(result.xp_multiplier)}**"
@@ -3103,7 +3064,7 @@ class DailyCog(commands.Cog):
                 result.coins_multiplier
                 > Decimal("1")
             ):
-                bonus_lines.append(
+                reward_lines.append(
                     (
                         "• Multiplicateur pièces : "
                         f"**×{format_multiplier(result.coins_multiplier)}**"
@@ -3125,7 +3086,7 @@ class DailyCog(commands.Cog):
             )
 
             if fixed_xp_bonus > 0:
-                bonus_lines.append(
+                reward_lines.append(
                     (
                         "• Bonus fixe : "
                         f"**+{format_number(fixed_xp_bonus)} XP**"
@@ -3133,16 +3094,12 @@ class DailyCog(commands.Cog):
                 )
 
             if fixed_coins_bonus > 0:
-                bonus_lines.append(
+                reward_lines.append(
                     (
                         "• Bonus fixe : "
                         f"**+{format_number(fixed_coins_bonus)} pièces**"
                     )
                 )
-
-            reward_lines.extend(
-                bonus_lines
-            )
 
         information_lines = [
             (
@@ -3161,9 +3118,7 @@ class DailyCog(commands.Cog):
 
         next_bonus = self.find_next_bonus(
             rules=settings["bonus_rules"],
-            current_streak=(
-                result.current_streak
-            ),
+            current_streak=result.current_streak,
         )
 
         if next_bonus is not None:
@@ -3192,10 +3147,7 @@ class DailyCog(commands.Cog):
                 )
             )
 
-        if (
-            result.new_level
-            > result.old_level
-        ):
+        if result.new_level > result.old_level:
             information_lines.append(
                 (
                     f"\n🌟 Tu as atteint le "
@@ -3319,6 +3271,7 @@ async def setup(
     )
 
     await cog.initialize_database()
+
     await bot.add_cog(
         cog
     )
