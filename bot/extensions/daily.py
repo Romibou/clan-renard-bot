@@ -4,6 +4,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -19,14 +20,38 @@ SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
 
-DAILY_COOLDOWN = timedelta(hours=24)
-DAILY_STREAK_GRACE = timedelta(hours=48)
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 
 MAXIMUM_BASE_REWARD = 100_000_000
 MAXIMUM_RULE_BONUS = 100_000_000
 MAXIMUM_MULTIPLIER = Decimal("100")
 MAXIMUM_RULES = 30
 MAXIMUM_STREAK_DAY = 100_000
+
+
+def get_next_daily_reset(
+    current_time: datetime,
+) -> datetime:
+    """
+    Retourne le prochain minuit en France, converti en UTC.
+    """
+    paris_time = current_time.astimezone(
+        PARIS_TIMEZONE
+    )
+
+    next_midnight = (
+        paris_time.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        + timedelta(days=1)
+    )
+
+    return next_midnight.astimezone(
+        timezone.utc
+    )
 
 
 def base_embed(
@@ -2004,65 +2029,55 @@ class DailyCog(
                         next_claim_at=None,
                     )
 
+                current_paris_date = current_time.astimezone(
+                    PARIS_TIMEZONE
+                ).date()
+                
+                next_claim_at = get_next_daily_reset(
+                    current_time
+                )
+                
                 if last_claim_at is not None:
-                    next_claim_at = (
-                        last_claim_at
-                        + DAILY_COOLDOWN
+                    last_claim_paris_date = (
+                        last_claim_at.astimezone(
+                            PARIS_TIMEZONE
+                        ).date()
                     )
-
-                    if (
-                        current_time
-                        < next_claim_at
-                    ):
+                
+                    # Le membre a déjà récupéré sa récompense
+                    # pendant la journée actuelle.
+                    if last_claim_paris_date >= current_paris_date:
                         return DailyClaimResult(
                             status="cooldown",
-                            current_streak=(
-                                current_streak
-                            ),
-                            best_streak=(
-                                best_streak
-                            ),
-                            total_claims=(
-                                total_claims
-                            ),
-                            xp_reward=0,
                             coins_reward=0,
-                            base_xp=base_xp,
-                            base_coins=base_coins,
-                            bonus_xp=0,
-                            bonus_coins=0,
-                            xp_multiplier=(
-                                Decimal("1")
+                            xp_reward=0,
+                            streak=current_streak,
+                            previous_level=level_from_xp(
+                                current_total_xp
                             ),
-                            coins_multiplier=(
-                                Decimal("1")
+                            new_level=level_from_xp(
+                                current_total_xp
                             ),
-                            applied_rule=None,
-                            old_level=old_level,
-                            new_level=old_level,
-                            total_xp=old_xp,
-                            wallet=old_wallet,
-                            next_claim_at=(
-                                next_claim_at
-                            ),
+                            next_claim_at=next_claim_at,
+                            selected_reward=None,
+                            granted_roles=[],
+                            granted_cosmetics=[],
                         )
-
-                    streak_deadline = (
-                        last_claim_at
-                        + DAILY_STREAK_GRACE
-                    )
-
-                    if (
-                        current_time
-                        <= streak_deadline
-                    ):
-                        new_streak = (
-                            current_streak + 1
-                        )
+                
+                    days_since_last_claim = (
+                        current_paris_date
+                        - last_claim_paris_date
+                    ).days
+                
+                    # La série continue uniquement si la dernière
+                    # récompense a été récupérée hier.
+                    if days_since_last_claim == 1:
+                        new_streak = current_streak + 1
                     else:
                         new_streak = 1
                 else:
                     new_streak = 1
+
 
                 new_best_streak = max(
                     best_streak,
@@ -2360,9 +2375,8 @@ class DailyCog(
                     new_level=new_level,
                     total_xp=total_xp,
                     wallet=wallet,
-                    next_claim_at=(
+                    next_claim_at=get_next_daily_reset(
                         current_time
-                        + DAILY_COOLDOWN
                     ),
                 )
 
