@@ -1113,6 +1113,240 @@ class DailyRulesModal(
             ephemeral=True,
         )
 
+class DailyResetConfirmView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        cog: DailyCog,
+        owner_id: int,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        super().__init__(timeout=60)
+
+        self.cog = cog
+        self.owner_id = owner_id
+        self.guild_id = guild_id
+        self.user_id = user_id
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            embed=error_embed(
+                "Action interdite",
+                (
+                    "Seul l'administrateur ayant lancé "
+                    "cette action peut répondre."
+                ),
+            ),
+            ephemeral=True,
+        )
+        return False
+
+    def disable_buttons(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    @discord.ui.button(
+        label="Confirmer la réinitialisation",
+        emoji="🗑️",
+        style=discord.ButtonStyle.danger,
+    )
+    async def confirm_reset(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        try:
+            result = await self.cog.reset_daily_member(
+                guild_id=self.guild_id,
+                user_id=self.user_id,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de réinitialiser le quotidien "
+                    "de %s sur le serveur %s."
+                ),
+                self.user_id,
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "Le quotidien de ce membre "
+                        "n'a pas pu être réinitialisé."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        self.disable_buttons()
+
+        await interaction.response.edit_message(
+            view=self,
+        )
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "Quotidien réinitialisé",
+                (
+                    f"Le quotidien de <@{self.user_id}> "
+                    "a été entièrement réinitialisé.\n\n"
+                    f"Réclamations supprimées : "
+                    f"**{result['claims_deleted']}**\n"
+                    "Série actuelle : **0**\n"
+                    "Meilleure série : **0**\n\n"
+                    "Le membre peut immédiatement utiliser "
+                    "`/quotidien` à nouveau.\n"
+                    "Les récompenses déjà gagnées ne sont pas retirées."
+                ),
+            ),
+            ephemeral=True,
+        )
+
+        self.stop()
+
+    @discord.ui.button(
+        label="Annuler",
+        emoji="✖️",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def cancel_reset(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        self.disable_buttons()
+
+        await interaction.response.edit_message(
+            view=self,
+        )
+
+        self.stop()
+
+
+class DailyResetMemberSelect(discord.ui.UserSelect):
+    def __init__(
+        self,
+        *,
+        cog: DailyCog,
+        owner_id: int,
+        guild_id: int,
+    ) -> None:
+        self.cog = cog
+        self.owner_id = owner_id
+        self.guild_id = guild_id
+
+        super().__init__(
+            placeholder="Sélectionne le membre à réinitialiser…",
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        if not self.values:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Aucun membre",
+                    "Aucun membre n'a été sélectionné.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        selected_user = self.values[0]
+
+        if selected_user.bot:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Membre invalide",
+                    "Le quotidien d'un bot ne peut pas être réinitialisé.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=warning_embed(
+                "Confirmation obligatoire",
+                (
+                    f"Tu vas réinitialiser le quotidien de "
+                    f"{selected_user.mention}.\n\n"
+                    "Les éléments suivants seront supprimés :\n"
+                    "• sa série actuelle ;\n"
+                    "• sa meilleure série ;\n"
+                    "• son nombre total de réclamations ;\n"
+                    "• la date de sa dernière réclamation ;\n"
+                    "• son historique quotidien.\n\n"
+                    "Les pièces et l'XP déjà gagnées seront conservées."
+                ),
+            ),
+            view=DailyResetConfirmView(
+                cog=self.cog,
+                owner_id=self.owner_id,
+                guild_id=self.guild_id,
+                user_id=selected_user.id,
+            ),
+            ephemeral=True,
+        )
+
+
+class DailyResetMemberView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        cog: DailyCog,
+        owner_id: int,
+        guild_id: int,
+    ) -> None:
+        super().__init__(timeout=180)
+
+        self.owner_id = owner_id
+
+        self.add_item(
+            DailyResetMemberSelect(
+                cog=cog,
+                owner_id=owner_id,
+                guild_id=guild_id,
+            )
+        )
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            embed=error_embed(
+                "Panneau personnel",
+                (
+                    "Seul l'administrateur ayant ouvert "
+                    "ce menu peut l'utiliser."
+                ),
+            ),
+            ephemeral=True,
+        )
+        return False
+
+
+
+
 
 class DailyAdminView(
     discord.ui.View
@@ -1313,6 +1547,34 @@ class DailyAdminView(
             ),
             ephemeral=True,
         )
+    
+        @discord.ui.button(
+            label="Réinitialiser un membre",
+            emoji="🗑️",
+            style=discord.ButtonStyle.danger,
+            row=2,
+        )
+        async def reset_daily_member_button(
+            self,
+            interaction: discord.Interaction,
+            button: discord.ui.Button,
+        ) -> None:
+            await interaction.response.send_message(
+                embed=warning_embed(
+                    "Réinitialisation quotidienne",
+                    (
+                        "Sélectionne le membre dont tu souhaites "
+                        "réinitialiser le quotidien.\n\n"
+                        "Ses récompenses déjà gagnées seront conservées."
+                    ),
+                ),
+                view=DailyResetMemberView(
+                    cog=self.cog,
+                    owner_id=self.owner_id,
+                    guild_id=self.guild_id,
+                ),
+                ephemeral=True,
+            )
 
 
 class DailyCog(
@@ -1346,6 +1608,65 @@ class DailyCog(
 
         return database.require_pool()
 
+
+
+        async def reset_daily_member(
+            self,
+            *,
+            guild_id: int,
+            user_id: int,
+        ) -> dict[str, int]:
+            pool = self.get_pool()
+    
+            async with pool.acquire() as connection:
+                async with connection.transaction():
+                    await connection.execute(
+                        """
+                        SELECT pg_advisory_xact_lock(
+                            hashtextextended($1, 0)
+                        )
+                        """,
+                        f"daily:{guild_id}:{user_id}",
+                    )
+    
+                    claims_deleted = await connection.fetchval(
+                        """
+                        WITH deleted_claims AS (
+                            DELETE FROM daily_claims
+                            WHERE guild_id = $1
+                              AND user_id = $2
+                            RETURNING 1
+                        )
+                        SELECT COUNT(*)
+                        FROM deleted_claims
+                        """,
+                        guild_id,
+                        user_id,
+                    )
+    
+                    members_deleted = await connection.fetchval(
+                        """
+                        WITH deleted_member AS (
+                            DELETE FROM daily_members
+                            WHERE guild_id = $1
+                              AND user_id = $2
+                            RETURNING 1
+                        )
+                        SELECT COUNT(*)
+                        FROM deleted_member
+                        """,
+                        guild_id,
+                        user_id,
+                    )
+    
+            return {
+                "claims_deleted": int(claims_deleted or 0),
+                "members_deleted": int(members_deleted or 0),
+            }
+
+    
+
+    
     def get_progression_cog(
         self,
     ) -> commands.Cog | None:
