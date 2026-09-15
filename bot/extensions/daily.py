@@ -1493,7 +1493,7 @@ class DailyAdminView(
             ephemeral=True,
         )
 
-    @discord.ui.button(
+        @discord.ui.button(
         label="Exemple JSON",
         emoji="🧩",
         style=discord.ButtonStyle.secondary,
@@ -1547,36 +1547,35 @@ class DailyAdminView(
             ),
             ephemeral=True,
         )
-    
-        @discord.ui.button(
-            label="Réinitialiser un membre",
-            emoji="🗑️",
-            style=discord.ButtonStyle.danger,
-            row=2,
+
+    @discord.ui.button(
+        label="Réinitialiser un membre",
+        emoji="🗑️",
+        style=discord.ButtonStyle.danger,
+        row=2,
+    )
+    async def reset_daily_member_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message(
+            embed=warning_embed(
+                "Réinitialisation quotidienne",
+                (
+                    "Sélectionne le membre dont tu souhaites "
+                    "réinitialiser le quotidien.\n\n"
+                    "Ses récompenses déjà gagnées seront conservées."
+                ),
+            ),
+            view=DailyResetMemberView(
+                cog=self.cog,
+                owner_id=self.owner_id,
+                guild_id=self.guild_id,
+            ),
+            ephemeral=True,
         )
-        async def reset_daily_member_button(
-            self,
-            interaction: discord.Interaction,
-            button: discord.ui.Button,
-        ) -> None:
-            await interaction.response.send_message(
-                embed=warning_embed(
-                    "Réinitialisation quotidienne",
-                    (
-                        "Sélectionne le membre dont tu souhaites "
-                        "réinitialiser le quotidien.\n\n"
-                        "Ses récompenses déjà gagnées seront conservées."
-                    ),
-                ),
-                view=DailyResetMemberView(
-                    cog=self.cog,
-                    owner_id=self.owner_id,
-                    guild_id=self.guild_id,
-                ),
-                ephemeral=True,
-            )
-  
-         
+        
 
 class DailyCog(commands.Cog):
     def __init__(
