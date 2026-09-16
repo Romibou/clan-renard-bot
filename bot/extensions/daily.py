@@ -3309,6 +3309,13 @@ class DailyCog(
                     f"\nDisponible <t:{unix_timestamp}:R>."
                 )
 
+            reminder_view = DailyReminderToggleView(
+                cog=self,
+                owner_id=interaction.user.id,
+                guild_id=guild.id,
+                user_id=interaction.user.id,
+            )
+
             await interaction.followup.send(
                 embed=warning_embed(
                     "Récompense déjà récupérée",
@@ -3322,6 +3329,7 @@ class DailyCog(
                         f"**{result.current_streak} jour(s)**"
                     ),
                 ),
+                view=reminder_view,
                 ephemeral=True,
             )
             return
