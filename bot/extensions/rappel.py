@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,11 @@ COLOR = discord.Color.from_rgb(226, 104, 161)
 SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 
-REMINDER_CHECK_INTERVAL_SECONDS = 30
+# La précision vient maintenant du scheduling individuel
+# (asyncio.sleep par rappel) ; cette boucle n'est qu'un filet de
+# sécurité pour les cas où un rappel n'a pas pu être programmé
+# (redémarrage du bot entre l'insertion et l'appel, erreur, etc.).
+REMINDER_CHECK_INTERVAL_SECONDS = 60
 
 MINIMUM_DELAY = timedelta(seconds=10)
 MAXIMUM_DELAY = timedelta(days=90)
@@ -238,11 +243,15 @@ class ReminderCog(
         bot: commands.Bot,
     ) -> None:
         self.bot = bot
+        self._scheduled_tasks: set[asyncio.Task] = set()
 
         self.check_reminders.start()
 
     def cog_unload(self) -> None:
         self.check_reminders.cancel()
+
+        for task in list(self._scheduled_tasks):
+            task.cancel()
 
     def get_pool(self):
         database = getattr(
@@ -306,6 +315,109 @@ class ReminderCog(
         LOGGER.info(
             "Table des rappels vérifiée"
         )
+
+    # ------------------------------------------------------------
+    # SCHEDULING PRÉCIS (par rappel, en complément du polling)
+    # ------------------------------------------------------------
+
+    def schedule_reminder(
+        self,
+        reminder_id: int,
+        trigger_at: datetime,
+    ) -> None:
+        """
+        Programme l'envoi exact d'un rappel via asyncio.sleep, pour
+        ne pas dépendre uniquement du passage périodique de
+        check_reminders (qui ne garantit qu'une précision à
+        ~REMINDER_CHECK_INTERVAL_SECONDS près).
+        """
+        task = self.bot.loop.create_task(
+            self._wait_then_send(
+                reminder_id,
+                trigger_at,
+            )
+        )
+        self._scheduled_tasks.add(task)
+        task.add_done_callback(
+            self._scheduled_tasks.discard
+        )
+
+    async def reschedule_pending(self) -> None:
+        """
+        À appeler au démarrage : reprogramme précisément tous les
+        rappels en attente, pour ne pas perdre la précision après
+        un redémarrage du bot.
+        """
+        pool = self.get_pool()
+
+        records = await pool.fetch(
+            """
+            SELECT id, trigger_at
+            FROM reminders
+            WHERE sent = FALSE
+            """
+        )
+
+        for record in records:
+            self.schedule_reminder(
+                record["id"],
+                record["trigger_at"],
+            )
+
+    async def _wait_then_send(
+        self,
+        reminder_id: int,
+        trigger_at: datetime,
+    ) -> None:
+        delay = (
+            trigger_at - datetime.now(timezone.utc)
+        ).total_seconds()
+
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        await self.claim_and_send(reminder_id)
+
+    async def claim_and_send(
+        self,
+        reminder_id: int,
+    ) -> None:
+        """
+        Marque le rappel comme envoyé de façon atomique (UPDATE ...
+        WHERE sent = FALSE) puis l'envoie. L'atomicité empêche un
+        double envoi si le scheduling précis et la boucle de
+        sécurité se déclenchent pour le même rappel.
+        """
+        try:
+            pool = self.get_pool()
+        except RuntimeError:
+            return
+
+        record = await pool.fetchrow(
+            """
+            UPDATE reminders
+            SET sent = TRUE
+            WHERE id = $1
+              AND sent = FALSE
+            RETURNING
+                id,
+                guild_id,
+                channel_id,
+                user_id,
+                reason,
+                destination,
+                delay_seconds,
+                created_at
+            """,
+            reminder_id,
+        )
+
+        if record is None:
+            # Déjà envoyé par ailleurs (scheduling précis ou boucle
+            # de sécurité) : rien à faire.
+            return
+
+        await self.send_reminder(record)
 
     # ------------------------------------------------------------
     # COMMANDE
@@ -383,7 +495,7 @@ class ReminderCog(
         try:
             pool = self.get_pool()
 
-            await pool.execute(
+            reminder_id = await pool.fetchval(
                 """
                 INSERT INTO reminders (
                     guild_id,
@@ -395,6 +507,7 @@ class ReminderCog(
                     delay_seconds
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
                 """,
                 interaction.guild.id if interaction.guild else None,
                 interaction.channel_id,
@@ -418,6 +531,11 @@ class ReminderCog(
             )
             return
 
+        self.schedule_reminder(
+            reminder_id,
+            trigger_at,
+        )
+
         destination_text = (
             "Dans ce salon" if destination.value == "channel"
             else "En message privé"
@@ -440,8 +558,6 @@ class ReminderCog(
         self,
         record,
     ) -> None:
-        pool = self.get_pool()
-
         user = self.bot.get_user(
             record["user_id"]
         )
@@ -528,15 +644,6 @@ class ReminderCog(
                 except discord.HTTPException:
                     delivered = False
 
-        await pool.execute(
-            """
-            UPDATE reminders
-            SET sent = TRUE
-            WHERE id = $1
-            """,
-            record["id"],
-        )
-
         if not delivered:
             LOGGER.warning(
                 "Rappel %s non délivré à %s "
@@ -557,15 +664,7 @@ class ReminderCog(
         try:
             records = await pool.fetch(
                 """
-                SELECT
-                    id,
-                    guild_id,
-                    channel_id,
-                    user_id,
-                    reason,
-                    destination,
-                    delay_seconds,
-                    created_at
+                SELECT id
                 FROM reminders
                 WHERE sent = FALSE
                   AND trigger_at <= NOW()
@@ -580,8 +679,8 @@ class ReminderCog(
             return
 
         for record in records:
-            await self.send_reminder(
-                record
+            await self.claim_and_send(
+                record["id"]
             )
 
     @check_reminders.before_loop
