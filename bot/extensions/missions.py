@@ -472,11 +472,7 @@ class MissionsConfigModal(
 
         self.configuration = discord.ui.TextInput(
             label="Missions en JSON",
-            placeholder=(
-                '[{"id":"messages","period":"daily",'
-                '"name":"Bavard","metric":"messages",'
-                '"target":20,"reward_xp":100,"reward_coins":25}]'
-            ),
+            placeholder="Colle ici la configuration JSON des missions",
             default=serialized,
             style=discord.TextStyle.paragraph,
             required=True,
@@ -677,25 +673,21 @@ class MissionsAdminView(
             },
         ]
 
+        json_example = json.dumps(
+            example,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        
         await interaction.response.send_message(
-            embed=base_embed(
-                "📋 Exemple de configuration",
-                (
-                    "```json\n"
-                    f"{json.dumps(example, ensure_ascii=False, indent=2)}"
-                    "\n```\n\n"
-                    "**Métriques disponibles :**\n"
-                    "• `messages`\n"
-                    "• `voice_minutes`\n"
-                    "• `xp`\n"
-                    "• `coins`\n"
-                    "• `daily_claims`\n"
-                    "• `streak`\n\n"
-                    "**Périodes disponibles :** `daily`, `weekly`"
-                ),
+            content=(
+                "🧩 **Exemple de configuration JSON des missions**\n\n"
+                f"```json\n{json_example}\n```\n\n"
+                "Tu peux copier ce JSON puis le modifier."
             ),
             ephemeral=True,
         )
+
 
     @discord.ui.button(
         label="Voir les missions",
