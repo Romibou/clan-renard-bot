@@ -957,9 +957,38 @@ class MissionsView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await self.refresh_message(
-            interaction
-        )
+        try:
+            # On accuse réception du clic
+            await interaction.response.defer()
+    
+            await self.refresh_message(
+                interaction
+            )
+    
+        except discord.NotFound:
+            await interaction.followup.send(
+                "❌ Le message des missions n'existe plus. "
+                "Utilise à nouveau `/missions`.",
+                ephemeral=True,
+            )
+    
+        except Exception:
+            LOGGER.exception(
+                "Impossible d'actualiser les missions de %s.",
+                interaction.user.id,
+            )
+    
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "❌ Impossible d'actualiser les missions.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ Impossible d'actualiser les missions.",
+                    ephemeral=True,
+                )
+
 
     async def refresh_message(
         self,
@@ -981,10 +1010,11 @@ class MissionsView(
             missions=missions,
         )
 
-        await interaction.edit_original_response(
-            embed=embed,
-            view=new_view,
-        )
+        if interaction.message is not None:
+            await interaction.message.edit(
+                embed=embed,
+                view=new_view,
+            )
 
 
 class MissionsCog(
