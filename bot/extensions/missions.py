@@ -782,16 +782,23 @@ class MissionSelect(
                     f"{format_number(target)}"
                 )
 
+            mission_id = str(
+                mission["mission_id"]
+            )
+
             options.append(
                 discord.SelectOption(
                     label=str(
                         mission["name"]
                     )[:100],
-                    value=str(
-                        mission["mission_id"]
-                    ),
+                    value=mission_id,
                     description=status[:100],
                     emoji="✅" if claimed else "🎯",
+                    # Garde la mission choisie visible dans le menu,
+                    # y compris après une actualisation du panneau.
+                    default=(
+                        mission_id == view.selected_mission_id
+                    ),
                 )
             )
 
@@ -828,9 +835,14 @@ class MissionSelect(
 
         self.missions_view.selected_mission_id = selected_id
 
-        await interaction.response.send_message(
-            f"Mission sélectionnée : **{selected_id}**.",
-            ephemeral=True,
+        for option in self.options:
+            option.default = option.value == selected_id
+
+        # edit_message() plutôt qu'un message éphémère de
+        # confirmation : la sélection reste affichée dans le menu,
+        # et on ne spamme pas le membre à chaque clic.
+        await interaction.response.edit_message(
+            view=self.missions_view
         )
 
 
@@ -844,6 +856,7 @@ class MissionsView(
         owner_id: int,
         guild_id: int,
         missions: list[dict[str, Any]],
+        origin: discord.Interaction | None = None,
     ) -> None:
         super().__init__(
             timeout=600,
@@ -852,13 +865,62 @@ class MissionsView(
         self.cog = cog
         self.owner_id = owner_id
         self.guild_id = guild_id
+        self.missions = missions
         self.selected_mission_id: str | None = None
 
-        self.add_item(
-            MissionSelect(
-                view=self,
-                missions=missions,
+        # Interaction de la commande /missions. C'est le seul moyen
+        # de retoucher le message éphémère depuis on_timeout(),
+        # puisqu'aucune interaction n'est disponible à ce
+        # moment-là. Le token reste valable 15 minutes, le timeout
+        # de la View est à 10 minutes.
+        self.origin = origin
+
+        self.select: MissionSelect | None = None
+
+        self.rebuild_select(
+            missions
+        )
+
+    # ------------------------------------------------------------
+    # OUTILS
+    # ------------------------------------------------------------
+
+    def rebuild_select(
+        self,
+        missions: list[dict[str, Any]],
+    ) -> None:
+        """
+        Remplace le menu déroulant par une version à jour SANS
+        recréer la View.
+
+        Garder la même instance évite de perdre la mission
+        sélectionnée et de réinitialiser le timeout à chaque
+        actualisation.
+        """
+        self.missions = missions
+
+        available = {
+            str(mission["mission_id"])
+            for mission in missions
+        }
+
+        # La mission sélectionnée a pu disparaître de la config
+        # entre deux actualisations.
+        if self.selected_mission_id not in available:
+            self.selected_mission_id = None
+
+        if self.select is not None:
+            self.remove_item(
+                self.select
             )
+
+        self.select = MissionSelect(
+            view=self,
+            missions=missions,
+        )
+
+        self.add_item(
+            self.select
         )
 
     async def interaction_check(
@@ -877,6 +939,71 @@ class MissionsView(
         )
 
         return False
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            if isinstance(
+                item,
+                (discord.ui.Button, discord.ui.Select),
+            ):
+                item.disabled = True
+
+        if self.origin is None:
+            return
+
+        try:
+            await self.origin.edit_original_response(
+                view=self
+            )
+        except discord.HTTPException:
+            # Token expiré ou message déjà fermé : sans gravité.
+            pass
+
+    async def refresh_panel(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        """
+        Recharge les missions depuis la base et réécrit le panneau.
+
+        IMPORTANT — le panneau /missions est un message ÉPHÉMÈRE.
+        `interaction.message.edit()` utilise la route
+        `PATCH /channels/{channel_id}/messages/{message_id}`, à
+        laquelle Discord répond `404 Unknown Message` pour un
+        message éphémère : celui-ci n'existe pas dans le salon, il
+        n'est adressable que par le token de l'interaction.
+
+        Les deux seules routes valides sont donc
+        `response.edit_message()` (avant toute réponse) et
+        `edit_original_response()` (après un defer).
+        """
+        missions = await self.cog.get_member_missions(
+            guild_id=self.guild_id,
+            user_id=self.owner_id,
+        )
+
+        embed = self.cog.build_member_embed(
+            missions
+        )
+
+        self.rebuild_select(
+            missions
+        )
+
+        if interaction.response.is_done():
+            await interaction.edit_original_response(
+                embed=embed,
+                view=self,
+            )
+        else:
+            await interaction.response.edit_message(
+                embed=embed,
+                view=self,
+            )
+
+    # ------------------------------------------------------------
+    # BOUTONS
+    # ------------------------------------------------------------
 
     @discord.ui.button(
         label="Réclamer",
@@ -934,16 +1061,34 @@ class MissionsView(
             )
             return
 
-        await interaction.response.send_message(
+        # L'ordre compte : on acquitte le clic sans toucher au
+        # message (defer de type 6), on réécrit le panneau, PUIS on
+        # envoie la confirmation en message séparé. Répondre
+        # d'abord avec send_message() consommerait la réponse de
+        # l'interaction et edit_original_response() viserait alors
+        # le message de succès au lieu du panneau.
+        await interaction.response.defer()
+
+        try:
+            await self.refresh_panel(
+                interaction
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible d'actualiser le panneau des "
+                    "missions de %s sur le serveur %s."
+                ),
+                self.owner_id,
+                self.guild_id,
+            )
+
+        await interaction.followup.send(
             embed=success_embed(
                 "Mission terminée",
                 reward,
             ),
             ephemeral=True,
-        )
-
-        await self.refresh_message(
-            interaction
         )
 
     @discord.ui.button(
@@ -957,28 +1102,25 @@ class MissionsView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Action interdite",
-                    "Seule la personne ayant utilisé `/missions` peut actualiser ce panneau.",
-                ),
-                ephemeral=True,
-            )
-            return
-    
-        # Accuse réception du clic pendant le chargement de la base
+        # Pas de vérification du propriétaire ici :
+        # interaction_check() l'a déjà faite avant d'arriver dans
+        # le callback.
         await interaction.response.defer()
-    
+
         try:
-            await self.refresh_message(interaction)
+            await self.refresh_panel(
+                interaction
+            )
         except Exception:
             LOGGER.exception(
-                "Impossible d'actualiser les missions de %s sur le serveur %s.",
+                (
+                    "Impossible d'actualiser les missions de %s "
+                    "sur le serveur %s."
+                ),
                 self.owner_id,
                 self.guild_id,
             )
-    
+
             await interaction.followup.send(
                 embed=error_embed(
                     "Erreur",
@@ -986,42 +1128,6 @@ class MissionsView(
                 ),
                 ephemeral=True,
             )
-
-
-
-    async def refresh_message(
-        self,
-        interaction: discord.Interaction,
-    ) -> None:
-        missions = await self.cog.get_member_missions(
-            guild_id=self.guild_id,
-            user_id=self.owner_id,
-        )
-    
-        embed = self.cog.build_member_embed(
-            missions
-        )
-    
-        new_view = MissionsView(
-            cog=self.cog,
-            owner_id=self.owner_id,
-            guild_id=self.guild_id,
-            missions=missions,
-        )
-    
-        if interaction.message is None:
-            raise RuntimeError(
-                "Le message des missions est introuvable."
-            )
-    
-        # Modifie réellement le message original affiché par /missions
-        await interaction.message.edit(
-            embed=embed,
-            view=new_view,
-        )
-    
-        # Arrête l'ancienne View pour éviter les anciennes callbacks
-        self.stop()
 
 
 
@@ -1936,12 +2042,11 @@ class MissionsCog(
         )
 
         if interaction.guild_id is None:
-            await interaction.followup.send(
+            await interaction.edit_original_response(
                 embed=error_embed(
                     "Serveur requis",
                     "Cette commande doit être utilisée dans un serveur.",
                 ),
-                ephemeral=True,
             )
             return
 
@@ -1960,12 +2065,19 @@ class MissionsCog(
                 owner_id=interaction.user.id,
                 guild_id=interaction.guild_id,
                 missions=missions,
+                # Permet à on_timeout() de désactiver les boutons
+                # sur ce message éphémère.
+                origin=interaction,
             )
 
-            await interaction.followup.send(
+            # edit_original_response() plutôt que followup.send() :
+            # on transforme le message "réfléchit…" du defer en
+            # panneau, au lieu d'ajouter un second message. Ça
+            # garantit aussi que le panneau EST la réponse
+            # originale de l'interaction.
+            await interaction.edit_original_response(
                 embed=embed,
                 view=view,
-                ephemeral=True,
             )
         except Exception:
             LOGGER.exception(
@@ -1977,12 +2089,12 @@ class MissionsCog(
                 interaction.guild_id,
             )
 
-            await interaction.followup.send(
+            await interaction.edit_original_response(
                 embed=error_embed(
                     "Erreur",
                     "Les missions n'ont pas pu être chargées.",
                 ),
-                ephemeral=True,
+                view=None,
             )
 
     @app_commands.command(
