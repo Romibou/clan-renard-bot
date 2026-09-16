@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 
 LOGGER = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ MAXIMUM_RULE_BONUS = 100_000_000
 MAXIMUM_MULTIPLIER = Decimal("100")
 MAXIMUM_RULES = 30
 MAXIMUM_STREAK_DAY = 100_000
+
+REMINDER_CHECK_INTERVAL_SECONDS = 300
 
 
 def get_next_daily_reset(
@@ -1646,6 +1648,107 @@ class DailyAdminView(
         )
 
 
+class DailyReminderToggleView(
+    discord.ui.View
+):
+    def __init__(
+        self,
+        *,
+        cog: DailyCog,
+        owner_id: int,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        super().__init__(
+            timeout=300,
+        )
+
+        self.cog = cog
+        self.owner_id = owner_id
+        self.guild_id = guild_id
+        self.user_id = user_id
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            embed=error_embed(
+                "Action interdite",
+                (
+                    "Seule la personne ayant utilisé "
+                    "cette commande peut cliquer ici."
+                ),
+            ),
+            ephemeral=True,
+        )
+
+        return False
+
+    def disable_buttons(self) -> None:
+        for item in self.children:
+            if isinstance(
+                item,
+                discord.ui.Button,
+            ):
+                item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_buttons()
+
+    @discord.ui.button(
+        label="Activer / désactiver rappel",
+        emoji="🔔",
+        style=discord.ButtonStyle.secondary,
+        row=0,
+    )
+    async def toggle_reminder(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        try:
+            enabled = await self.cog.toggle_daily_reminder(
+                guild_id=self.guild_id,
+                user_id=self.user_id,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de modifier le rappel "
+                    "quotidien de %s sur le serveur %s."
+                ),
+                self.user_id,
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "Le rappel n'a pas pu être modifié. "
+                        "Réessaie plus tard."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if enabled:
+            await interaction.response.send_message(
+                content="🔔 Rappel activé.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                content="🔕 Rappel désactivé.",
+                ephemeral=True,
+            )
+
+
 class DailyCog(
     commands.Cog
 ):
@@ -1662,6 +1765,11 @@ class DailyCog(
                 dict[str, Any],
             ],
         ] = {}
+
+        self.check_daily_reminders.start()
+
+    def cog_unload(self) -> None:
+        self.check_daily_reminders.cancel()
 
     def get_pool(self):
         database = getattr(
@@ -1843,6 +1951,36 @@ class DailyCog(
             """
         )
 
+        await pool.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_reminders (
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+
+                last_reminded_at TIMESTAMPTZ,
+
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+                PRIMARY KEY (
+                    guild_id,
+                    user_id
+                )
+            )
+            """
+        )
+
+        await pool.execute(
+            """
+            CREATE INDEX IF NOT EXISTS daily_reminders_enabled_idx
+            ON daily_reminders (
+                enabled
+            )
+            """
+        )
+
         LOGGER.info(
             "Tables des récompenses quotidiennes vérifiées"
         )
@@ -1864,6 +2002,186 @@ class DailyCog(
             """,
             guild_id,
         )
+
+    async def toggle_daily_reminder(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> bool:
+        """
+        Active/désactive le rappel de récompense quotidienne pour
+        un membre. Retourne le nouvel état (True = activé).
+        """
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
+            """
+            INSERT INTO daily_reminders (
+                guild_id,
+                user_id,
+                enabled
+            )
+            VALUES ($1, $2, TRUE)
+            ON CONFLICT (guild_id, user_id)
+            DO UPDATE SET
+                enabled = NOT daily_reminders.enabled,
+                updated_at = NOW()
+            RETURNING enabled
+            """,
+            guild_id,
+            user_id,
+        )
+
+        return bool(
+            record["enabled"]
+        )
+
+    async def send_daily_reminder(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> None:
+        pool = self.get_pool()
+
+        user = self.bot.get_user(
+            user_id
+        )
+
+        if user is None:
+            try:
+                user = await self.bot.fetch_user(
+                    user_id
+                )
+            except discord.HTTPException:
+                user = None
+
+        guild = self.bot.get_guild(
+            guild_id
+        )
+
+        guild_name = (
+            guild.name if guild is not None else "ton serveur"
+        )
+
+        sent = False
+
+        if user is not None:
+            try:
+                await user.send(
+                    embed=base_embed(
+                        "🔔 Récompense quotidienne disponible",
+                        (
+                            "Ta récompense quotidienne est de "
+                            f"nouveau disponible sur **{guild_name}** "
+                            " !\nUtilise `/quotidien` pour la récupérer."
+                        ),
+                    ),
+                )
+                sent = True
+            except discord.HTTPException:
+                sent = False
+
+        try:
+            await pool.execute(
+                """
+                UPDATE daily_reminders
+                SET
+                    last_reminded_at = NOW(),
+                    updated_at = NOW()
+                WHERE guild_id = $1
+                  AND user_id = $2
+                """,
+                guild_id,
+                user_id,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de mettre à jour le rappel "
+                    "quotidien de %s sur le serveur %s."
+                ),
+                user_id,
+                guild_id,
+            )
+
+        if not sent:
+            LOGGER.info(
+                (
+                    "Rappel quotidien non envoyé à %s "
+                    "(DMs fermés ou utilisateur introuvable)."
+                ),
+                user_id,
+            )
+
+    @tasks.loop(
+        seconds=REMINDER_CHECK_INTERVAL_SECONDS,
+    )
+    async def check_daily_reminders(self) -> None:
+        try:
+            pool = self.get_pool()
+        except RuntimeError:
+            return
+
+        try:
+            records = await pool.fetch(
+                """
+                SELECT
+                    r.guild_id,
+                    r.user_id,
+                    m.last_claim_at,
+                    r.last_reminded_at
+                FROM daily_reminders r
+                JOIN daily_members m
+                    ON m.guild_id = r.guild_id
+                    AND m.user_id = r.user_id
+                JOIN daily_settings s
+                    ON s.guild_id = r.guild_id
+                WHERE r.enabled = TRUE
+                  AND s.enabled = TRUE
+                  AND m.last_claim_at IS NOT NULL
+                """
+            )
+        except Exception:
+            LOGGER.exception(
+                "Impossible de récupérer les rappels quotidiens à envoyer."
+            )
+            return
+
+        current_time = datetime.now(
+            timezone.utc
+        )
+
+        for record in records:
+            last_claim_at = record["last_claim_at"]
+
+            if last_claim_at is None:
+                continue
+
+            available_at = get_next_daily_reset(
+                last_claim_at
+            )
+
+            if current_time < available_at:
+                continue
+
+            last_reminded_at = record["last_reminded_at"]
+
+            if (
+                last_reminded_at is not None
+                and last_reminded_at >= available_at
+            ):
+                continue
+
+            await self.send_daily_reminder(
+                guild_id=record["guild_id"],
+                user_id=record["user_id"],
+            )
+
+    @check_daily_reminders.before_loop
+    async def before_check_daily_reminders(self) -> None:
+        await self.bot.wait_until_ready()
 
     async def get_settings(
         self,
@@ -3185,11 +3503,19 @@ class DailyCog(
             + "\n".join(information_lines)
         )
 
+        reminder_view = DailyReminderToggleView(
+            cog=self,
+            owner_id=interaction.user.id,
+            guild_id=guild.id,
+            user_id=interaction.user.id,
+        )
+
         await interaction.followup.send(
             embed=success_embed(
                 "Récompense récupérée",
                 description,
             ),
+            view=reminder_view,
             ephemeral=True,
         )
 
