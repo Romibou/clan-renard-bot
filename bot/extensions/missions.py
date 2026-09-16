@@ -957,37 +957,36 @@ class MissionsView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        try:
-            # On accuse réception du clic
-            await interaction.response.defer()
-    
-            await self.refresh_message(
-                interaction
-            )
-    
-        except discord.NotFound:
-            await interaction.followup.send(
-                "❌ Le message des missions n'existe plus. "
-                "Utilise à nouveau `/missions`.",
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Action interdite",
+                    "Seule la personne ayant utilisé `/missions` peut actualiser ce panneau.",
+                ),
                 ephemeral=True,
             )
+            return
     
+        # Accuse réception du clic pendant le chargement de la base
+        await interaction.response.defer()
+    
+        try:
+            await self.refresh_message(interaction)
         except Exception:
             LOGGER.exception(
-                "Impossible d'actualiser les missions de %s.",
-                interaction.user.id,
+                "Impossible d'actualiser les missions de %s sur le serveur %s.",
+                self.owner_id,
+                self.guild_id,
             )
     
-            if interaction.response.is_done():
-                await interaction.followup.send(
-                    "❌ Impossible d'actualiser les missions.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    "❌ Impossible d'actualiser les missions.",
-                    ephemeral=True,
-                )
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Erreur",
+                    "Les missions n'ont pas pu être actualisées.",
+                ),
+                ephemeral=True,
+            )
+
 
 
     async def refresh_message(
@@ -998,23 +997,32 @@ class MissionsView(
             guild_id=self.guild_id,
             user_id=self.owner_id,
         )
-
+    
         embed = self.cog.build_member_embed(
             missions
         )
-
+    
         new_view = MissionsView(
             cog=self.cog,
             owner_id=self.owner_id,
             guild_id=self.guild_id,
             missions=missions,
         )
-
-        if interaction.message is not None:
-            await interaction.message.edit(
-                embed=embed,
-                view=new_view,
+    
+        if interaction.message is None:
+            raise RuntimeError(
+                "Le message des missions est introuvable."
             )
+    
+        # Modifie réellement le message original affiché par /missions
+        await interaction.message.edit(
+            embed=embed,
+            view=new_view,
+        )
+    
+        # Arrête l'ancienne View pour éviter les anciennes callbacks
+        self.stop()
+
 
 
 class MissionsCog(
