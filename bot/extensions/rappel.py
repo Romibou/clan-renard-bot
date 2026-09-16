@@ -104,6 +104,127 @@ def base_embed(
     )
 
 
+def scheduled_embed(
+    *,
+    destination_text: str,
+    reason: str,
+    trigger_at: datetime,
+) -> discord.Embed:
+    """
+    Embed aéré affiché quand un rappel vient d'être programmé,
+    avec des champs séparés plutôt qu'une description dense.
+    """
+    timestamp = int(trigger_at.timestamp())
+
+    embed = discord.Embed(
+        title="✅ Rappel programmé",
+        description="Ton rappel a bien été enregistré.",
+        color=SUCCESS_COLOR,
+    )
+
+    embed.add_field(
+        name="⏰ Quand",
+        value=f"<t:{timestamp}:R>\n<t:{timestamp}:f>",
+        inline=True,
+    )
+    embed.add_field(
+        name="📍 Où",
+        value=destination_text,
+        inline=True,
+    )
+    embed.add_field(
+        name="📝 Raison",
+        value=reason,
+        inline=False,
+    )
+
+    return embed
+
+
+def reminder_embed(
+    *,
+    mention: str,
+    reason: str,
+    created_at: datetime,
+) -> discord.Embed:
+    """
+    Embed aéré envoyé au moment du rappel, façon DraftBot :
+    une phrase avec un timestamp relatif, puis le motif dans
+    son propre champ pour créer de l'espace visuel.
+    """
+    created_ts = int(created_at.timestamp())
+
+    embed = discord.Embed(
+        title="⏰ Rappel",
+        description=(
+            f"{mention}, tu m'as demandé de te rappeler ceci "
+            f"<t:{created_ts}:R>."
+        ),
+        color=COLOR,
+    )
+
+    embed.add_field(
+        name="\u200b",
+        value=f"📝 {reason}",
+        inline=False,
+    )
+
+    return embed
+
+
+class RelaunchButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"rappel:relaunch:(?P<id>[0-9]+)",
+):
+    """
+    Bouton persistant "Relancer le rappel" attaché à chaque rappel
+    envoyé. Le custom_id encode l'id du rappel d'origine, ce qui
+    permet au bouton de continuer à fonctionner même après un
+    redémarrage du bot (nécessite discord.py >= 2.4).
+    """
+
+    def __init__(self, reminder_id: int) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Relancer le rappel",
+                emoji="🔄",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"rappel:relaunch:{reminder_id}",
+            )
+        )
+        self.reminder_id = reminder_id
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+    ) -> "RelaunchButton":
+        return cls(int(match["id"]))
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        cog = interaction.client.get_cog("ReminderCog")
+
+        if cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    "Le système de rappels est indisponible.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await cog.relaunch_reminder(
+            interaction,
+            self.reminder_id,
+        )
+
+
 class ReminderCog(
     commands.Cog
 ):
@@ -169,6 +290,16 @@ class ReminderCog(
                 trigger_at
             )
             WHERE sent = FALSE
+            """
+        )
+
+        # Migration douce pour les bases déjà existantes : on stocke
+        # le délai d'origine afin de pouvoir relancer un rappel à
+        # l'identique depuis le bouton "Relancer le rappel".
+        await pool.execute(
+            """
+            ALTER TABLE reminders
+            ADD COLUMN IF NOT EXISTS delay_seconds INTEGER
             """
         )
 
@@ -260,9 +391,10 @@ class ReminderCog(
                     user_id,
                     reason,
                     destination,
-                    trigger_at
+                    trigger_at,
+                    delay_seconds
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 """,
                 interaction.guild.id if interaction.guild else None,
                 interaction.channel_id,
@@ -270,6 +402,7 @@ class ReminderCog(
                 raison,
                 destination.value,
                 trigger_at,
+                int(delay.total_seconds()),
             )
         except Exception:
             LOGGER.exception(
@@ -285,23 +418,16 @@ class ReminderCog(
             )
             return
 
-        timestamp = int(
-            trigger_at.timestamp()
-        )
-
         destination_text = (
-            "dans ce salon" if destination.value == "channel"
-            else "en message privé"
+            "Dans ce salon" if destination.value == "channel"
+            else "En message privé"
         )
 
         await interaction.response.send_message(
-            embed=success_embed(
-                "Rappel programmé",
-                (
-                    f"Je te préviendrai **{destination_text}** "
-                    f"<t:{timestamp}:R> (<t:{timestamp}:f>).\n\n"
-                    f"📝 {raison}"
-                ),
+            embed=scheduled_embed(
+                destination_text=destination_text,
+                reason=raison,
+                trigger_at=trigger_at,
             ),
             ephemeral=True,
         )
@@ -328,9 +454,17 @@ class ReminderCog(
             except discord.HTTPException:
                 user = None
 
-        embed = base_embed(
-            "⏰ Rappel",
-            record["reason"],
+        mention = user.mention if user is not None else f"<@{record['user_id']}>"
+
+        embed = reminder_embed(
+            mention=mention,
+            reason=record["reason"],
+            created_at=record["created_at"],
+        )
+
+        view = discord.ui.View(timeout=None)
+        view.add_item(
+            RelaunchButton(record["id"])
         )
 
         delivered = False
@@ -341,6 +475,7 @@ class ReminderCog(
                     await user.send(
                         content="⏰ Petit rappel !",
                         embed=embed,
+                        view=view,
                     )
                     delivered = True
                 except discord.HTTPException:
@@ -359,6 +494,7 @@ class ReminderCog(
                         await channel.send(
                             content=f"<@{record['user_id']}>",
                             embed=embed,
+                            view=view,
                         )
                         delivered = True
                     except discord.HTTPException:
@@ -376,6 +512,7 @@ class ReminderCog(
                     await channel.send(
                         content=f"<@{record['user_id']}>",
                         embed=embed,
+                        view=view,
                     )
                     delivered = True
                 except discord.HTTPException:
@@ -384,7 +521,8 @@ class ReminderCog(
             if not delivered and user is not None:
                 try:
                     await user.send(
-                        embed=embed
+                        embed=embed,
+                        view=view,
                     )
                     delivered = True
                 except discord.HTTPException:
@@ -425,7 +563,9 @@ class ReminderCog(
                     channel_id,
                     user_id,
                     reason,
-                    destination
+                    destination,
+                    delay_seconds,
+                    created_at
                 FROM reminders
                 WHERE sent = FALSE
                   AND trigger_at <= NOW()
@@ -448,10 +588,120 @@ class ReminderCog(
     async def before_check_reminders(self) -> None:
         await self.bot.wait_until_ready()
 
+    # ------------------------------------------------------------
+    # RELANCE (bouton "Relancer le rappel")
+    # ------------------------------------------------------------
+
+    async def relaunch_reminder(
+        self,
+        interaction: discord.Interaction,
+        reminder_id: int,
+    ) -> None:
+        pool = self.get_pool()
+
+        record = await pool.fetchrow(
+            """
+            SELECT
+                guild_id,
+                channel_id,
+                user_id,
+                reason,
+                destination,
+                delay_seconds
+            FROM reminders
+            WHERE id = $1
+            """,
+            reminder_id,
+        )
+
+        if record is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Rappel introuvable",
+                    "Ce rappel n'existe plus, je ne peux pas le relancer.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if record["user_id"] != interaction.user.id:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Action impossible",
+                    "Seule la personne à l'origine du rappel peut le relancer.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        delay_seconds = record["delay_seconds"] or int(
+            MINIMUM_DELAY.total_seconds()
+        )
+        trigger_at = datetime.now(timezone.utc) + timedelta(
+            seconds=delay_seconds
+        )
+
+        try:
+            await pool.execute(
+                """
+                INSERT INTO reminders (
+                    guild_id,
+                    channel_id,
+                    user_id,
+                    reason,
+                    destination,
+                    trigger_at,
+                    delay_seconds
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                record["guild_id"],
+                record["channel_id"],
+                record["user_id"],
+                record["reason"],
+                record["destination"],
+                trigger_at,
+                delay_seconds,
+            )
+        except Exception:
+            LOGGER.exception(
+                "Impossible de relancer le rappel %s.",
+                reminder_id,
+            )
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    "Le rappel n'a pas pu être relancé. Réessaie plus tard.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        destination_text = (
+            "Dans ce salon" if record["destination"] == "channel"
+            else "En message privé"
+        )
+
+        await interaction.response.send_message(
+            embed=scheduled_embed(
+                destination_text=destination_text,
+                reason=record["reason"],
+                trigger_at=trigger_at,
+            ),
+            ephemeral=True,
+        )
+
 
 async def setup(
     bot: commands.Bot,
 ) -> None:
+    # Enregistre le "template" du bouton "Relancer le rappel" pour
+    # qu'il reste cliquable même après un redémarrage du bot.
+    # Nécessite discord.py >= 2.4.
+    bot.add_dynamic_items(
+        RelaunchButton
+    )
+
     cog = ReminderCog(
         bot
     )
