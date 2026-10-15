@@ -388,9 +388,11 @@ class AdventCommands(commands.Cog):
 
     @app_commands.command(
         name="avent",
-        description=("Affiche ton calendrier de l'Avent personnel."),
-        default_member_permissions=discord.Permissions(administrator=True), # SUPPRIMER CETTE LUGNE POUR REDONNER ACCES AUX MEMBRES A LA COMMANDE AVENT
+        description=(
+            "Affiche ton calendrier de l'Avent personnel."
+        ),
     )
+    @app_commands.default_permissions(administrator=True) # SUPPRIMER CETTE LUGNE POUR REDONNER ACCES AUX MEMBRES A LA COMMANDE AVENT
     @app_commands.guild_only()
     @app_commands.checks.cooldown(
         1,
