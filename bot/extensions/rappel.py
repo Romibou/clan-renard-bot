@@ -49,7 +49,7 @@ DURATION_PATTERN = re.compile(
     r"(?:(?P<weeks>\d+)\s*(?:sem(?:aines?)?|w))?"
     r"(?:(?P<days>\d+)\s*(?:j(?:ours?)?|d))?"
     r"(?:(?P<hours>\d+)\s*(?:h(?:eures?)?))?"
-    r"(?:(?P<minutes>\d+)\s*(?:m(?:in(?:utes?)?)?))?"
+    r"(?:(?P<minutes>\d+)\s*(?:m(?:in(?:utes?)?|n)?))?"
     r"(?:(?P<seconds>\d+)\s*(?:s(?:ec(?:ondes?)?)?))?"
     r"$",
     re.IGNORECASE,
@@ -73,6 +73,13 @@ def parse_duration(
         return timedelta(
             minutes=int(cleaned)
         )
+
+    # "1h30" ou "2heures15" : le nombre final est en minutes.
+    cleaned = re.sub(
+        r"(h(?:eures?)?)(\d+)$",
+        r"\g<1>\g<2>m",
+        cleaned,
+    )
 
     match = DURATION_PATTERN.match(
         cleaned
@@ -501,7 +508,7 @@ class ReminderCog(
     )
     @app_commands.describe(
         raison="Le motif du rappel.",
-        temps="Dans combien de temps (ex: 10s, 10m, 2h, 1j12h, 3sem).",
+        temps="Dans combien de temps (ex: 10s, 10m, 1h30, 1j12h, 3sem).",
         destination="Où recevoir le rappel.",
     )
     @app_commands.choices(
@@ -533,7 +540,7 @@ class ReminderCog(
                     "Durée incomprise",
                     (
                         "Je n'ai pas compris ce format de durée. "
-                        "Exemples valides : `10s`, `10m`, `2h`, "
+                        "Exemples valides : `10s`, `10m`, `1h30`, "
                         "`1j12h`, `3sem`, ou juste un nombre de "
                         "minutes comme `45`."
                     ),
@@ -676,7 +683,7 @@ class ReminderCog(
 
                 if isinstance(
                     channel,
-                    (discord.TextChannel, discord.Thread),
+                    discord.abc.Messageable,
                 ):
                     try:
                         await channel.send(
@@ -693,9 +700,9 @@ class ReminderCog(
             )
 
             if isinstance(
-                channel,
-                (discord.TextChannel, discord.Thread),
-            ):
+                    channel,
+                    discord.abc.Messageable,
+                ):
                 try:
                     await channel.send(
                         content=f"<@{record['user_id']}>",

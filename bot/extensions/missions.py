@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -32,6 +33,34 @@ ALLOWED_METRICS = {
     "coins",
     "daily_claims",
     "streak",
+}
+
+# Métriques dont la progression se calcule depuis le début réel de
+# la période grâce aux statistiques quotidiennes :
+# métrique -> (colonne de statistics_daily,
+#              table du compteur actuel,
+#              colonne du compteur actuel et de statistics_member_state).
+STATISTICS_METRICS = {
+    "messages": (
+        "rewarded_messages",
+        "progression_members",
+        "rewarded_messages",
+    ),
+    "xp": (
+        "xp_gained",
+        "progression_members",
+        "total_xp",
+    ),
+    "coins": (
+        "coins_gained",
+        "progression_members",
+        "lifetime_coins",
+    ),
+    "voice_minutes": (
+        "voice_minutes",
+        "progression_voice_rewards",
+        "rewarded_minutes",
+    ),
 }
 
 MAXIMUM_MISSIONS = 25
@@ -104,6 +133,14 @@ def get_period_key(
     )
 
     return monday.isoformat()
+
+
+def get_period_start(
+    period: str,
+) -> date:
+    return date.fromisoformat(
+        get_period_key(period)
+    )
 
 
 def format_number(
@@ -1544,6 +1581,101 @@ class MissionsCog(
             value or 0
         )
 
+    async def get_period_progress(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        metric: str,
+        period: str,
+    ) -> int | None:
+        """
+        Progression réalisée depuis le début de la période (minuit ou
+        lundi, heure de Paris), même si le membre n'avait pas encore
+        ouvert /missions.
+
+        Retourne None lorsque la métrique ne peut pas être calculée
+        ainsi : on retombe alors sur la valeur de départ enregistrée
+        à la première ouverture du panneau.
+        """
+        pool = self.get_pool()
+        period_start = get_period_start(period)
+
+        if metric == "daily_claims":
+            period_start_time = datetime.combine(
+                period_start,
+                datetime.min.time(),
+                tzinfo=PARIS_TIMEZONE,
+            )
+
+            value = await pool.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM daily_claims
+                WHERE guild_id = $1
+                  AND user_id = $2
+                  AND claimed_at >= $3
+                """,
+                guild_id,
+                user_id,
+                period_start_time,
+            )
+
+            return int(value or 0)
+
+        columns = STATISTICS_METRICS.get(metric)
+
+        if columns is None:
+            return None
+
+        daily_column, counter_table, counter_column = columns
+
+        # Les noms de tables et de colonnes viennent uniquement de
+        # STATISTICS_METRICS, jamais d'une saisie utilisateur.
+        #
+        # Total = jours déjà enregistrés dans les statistiques
+        #       + activité pas encore synchronisée (dernière minute).
+        try:
+            value = await pool.fetchval(
+                f"""
+                SELECT
+                    COALESCE(
+                        (
+                            SELECT SUM({daily_column})
+                            FROM statistics_daily
+                            WHERE guild_id = $1
+                              AND user_id = $2
+                              AND statistic_date >= $3
+                        ),
+                        0
+                    )
+                    + COALESCE(
+                        (
+                            SELECT GREATEST(
+                                counter.{counter_column}
+                                - state.{counter_column},
+                                0
+                            )
+                            FROM {counter_table} AS counter
+                            JOIN statistics_member_state AS state
+                                ON state.guild_id = counter.guild_id
+                               AND state.user_id = counter.user_id
+                            WHERE counter.guild_id = $1
+                              AND counter.user_id = $2
+                        ),
+                        0
+                    )
+                """,
+                guild_id,
+                user_id,
+                period_start,
+            )
+        except asyncpg.UndefinedTableError:
+            # Module de statistiques absent.
+            return None
+
+        return int(value or 0)
+
     async def get_member_missions(
         self,
         *,
@@ -1639,6 +1771,18 @@ class MissionsCog(
                 current_value - baseline_value,
             )
 
+            period_progress = await self.get_period_progress(
+                guild_id=guild_id,
+                user_id=user_id,
+                metric=str(
+                    mission["metric"]
+                ),
+                period=period,
+            )
+
+            if period_progress is not None:
+                progress = period_progress
+
             result.append(
                 {
                     **mission,
@@ -1701,6 +1845,17 @@ class MissionsCog(
             user_id=user_id,
             metric=str(
                 mission["metric"]
+            ),
+        )
+
+        period_progress = await self.get_period_progress(
+            guild_id=guild_id,
+            user_id=user_id,
+            metric=str(
+                mission["metric"]
+            ),
+            period=str(
+                mission["period"]
             ),
         )
 
@@ -1769,6 +1924,9 @@ class MissionsCog(
                     0,
                     current_value - baseline_value,
                 )
+
+                if period_progress is not None:
+                    progress = period_progress
 
                 target = int(
                     mission["target"]

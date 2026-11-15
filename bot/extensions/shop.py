@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from typing import Any, Literal
 
@@ -753,6 +752,7 @@ class ShopCosmeticSelect(discord.ui.Select):
         *,
         cog: PermanentShop,
         cosmetics: list[Any],
+        placeholder: str = "Choisis le cosmétique à vendre…",
     ) -> None:
         self.cog = cog
         self.cosmetics = cosmetics
@@ -790,7 +790,7 @@ class ShopCosmeticSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="Choisis le cosmétique à vendre…",
+            placeholder=placeholder,
             min_values=1,
             max_values=1,
             options=options,
@@ -860,12 +860,30 @@ class ShopCosmeticSelectView(discord.ui.View):
         super().__init__(timeout=300)
         self.owner_id = owner_id
 
-        self.add_item(
-            ShopCosmeticSelect(
-                cog=cog,
-                cosmetics=cosmetics,
+        # Un menu Discord contient 25 choix au maximum : au-delà,
+        # les cosmétiques sont répartis sur plusieurs menus.
+        pages = [
+            cosmetics[start:start + 25]
+            for start in range(0, len(cosmetics), 25)
+        ][:5]
+
+        for index, page in enumerate(pages):
+            placeholder = "Choisis le cosmétique à vendre…"
+
+            if len(pages) > 1:
+                first = index * 25 + 1
+                last = index * 25 + len(page)
+                placeholder = (
+                    f"Cosmétiques {first} à {last}…"
+                )
+
+            self.add_item(
+                ShopCosmeticSelect(
+                    cog=cog,
+                    cosmetics=page,
+                    placeholder=placeholder,
+                )
             )
-        )
 
     async def interaction_check(
         self,
@@ -1269,7 +1287,7 @@ class PermanentShop(commands.Cog):
             ORDER BY
                 cosmetic_type,
                 display_name
-            LIMIT 25
+            LIMIT 125
             """,
             guild_id,
         )

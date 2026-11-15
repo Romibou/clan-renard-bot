@@ -1119,9 +1119,11 @@ class AdminActionSelect(discord.ui.Select):
                         "à la boutique."
                     ),
                 ),
-                view=AdminRoleSelectionView(
+                view=PickerView(
                     owner_id=interaction.user.id,
-                    action="shop_role",
+                    picker=AdminRoleSelect(
+                        action="shop_role",
+                    ),
                 ),
                 ephemeral=True,
             )

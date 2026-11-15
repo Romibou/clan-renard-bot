@@ -1,0 +1,32 @@
+name: Vérifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verifications:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-dev.txt
+
+      # Erreurs réelles uniquement (noms inconnus, imports inutilisés,
+      # erreurs de syntaxe), pas le style.
+      - name: Ruff
+        run: ruff check bot scripts tests --select F,E9
+
+      - name: Vérifier que tous les modules s'importent
+        run: python -m compileall -q bot scripts
+
+      - name: Tests
+        run: pytest -q

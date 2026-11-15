@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from bot.shared.members import present_member_ids
 from bot.shared.progression_card import render_progression_card
 
 
@@ -24,6 +25,12 @@ ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
 
 VOICE_REWARD_INTERVAL_SECONDS = 60
+
+# Durée de vie du cache des multiplicateurs d'XP par rôle.
+MULTIPLIER_CACHE_TTL_SECONDS = 60.0
+
+# Au-delà de cette taille, les cooldowns expirés sont purgés.
+MESSAGE_COOLDOWN_CACHE_LIMIT = 5000
 
 
 def base_embed(
@@ -1363,6 +1370,22 @@ class ProgressionCog(commands.Cog):
             tuple[float, dict[str, Any]],
         ] = {}
 
+        # Multiplicateurs d'XP par rôle, par serveur :
+        # guild_id -> (expiration, {role_id: multiplicateur}).
+        self._multiplier_cache: dict[
+            int,
+            tuple[float, dict[int, Decimal]],
+        ] = {}
+
+        # Dernière récompense de message connue, en temps monotone :
+        # (guild_id, user_id) -> instant. Évite d'interroger
+        # PostgreSQL pour chaque message envoyé pendant le cooldown.
+        # La base reste la seule source de vérité.
+        self._message_cooldowns: dict[
+            tuple[int, int],
+            float,
+        ] = {}
+
     async def cog_load(self) -> None:
         if not self.voice_xp_loop.is_running():
             self.voice_xp_loop.start()
@@ -1820,6 +1843,10 @@ class ProgressionCog(commands.Cog):
             FROM progression_members
             WHERE guild_id = $1
               AND (
+                    $4::BIGINT[] IS NULL
+                    OR user_id = ANY($4::BIGINT[])
+              )
+              AND (
                     total_xp > $2
                     OR (
                         total_xp = $2
@@ -1830,6 +1857,10 @@ class ProgressionCog(commands.Cog):
             guild_id,
             total_xp,
             user_id,
+            present_member_ids(
+                self.bot,
+                guild_id,
+            ),
         )
 
         return int(rank) if rank is not None else None
@@ -1838,36 +1869,107 @@ class ProgressionCog(commands.Cog):
         self,
         member: discord.Member,
     ) -> Decimal:
-        role_ids = [
-            role.id
-            for role in member.roles
-        ]
-
-        if not role_ids:
-            return Decimal("1.00")
-
-        pool = self.get_pool()
-
-        value = await pool.fetchval(
-            """
-            SELECT MAX(multiplier)
-            FROM progression_role_multipliers
-            WHERE guild_id = $1
-              AND role_id = ANY($2::BIGINT[])
-            """,
-            member.guild.id,
-            role_ids,
+        guild_multipliers = await self.get_guild_multipliers(
+            member.guild.id
         )
 
-        if value is None:
+        if not guild_multipliers:
             return Decimal("1.00")
 
-        multiplier = Decimal(str(value))
+        multiplier = max(
+            (
+                guild_multipliers[role.id]
+                for role in member.roles
+                if role.id in guild_multipliers
+            ),
+            default=Decimal("1.00"),
+        )
 
         if multiplier < Decimal("1.00"):
             return Decimal("1.00")
 
         return multiplier
+
+    async def get_guild_multipliers(
+        self,
+        guild_id: int,
+    ) -> dict[int, Decimal]:
+        cached = self._multiplier_cache.get(guild_id)
+
+        if (
+            cached is not None
+            and cached[0] > time.monotonic()
+        ):
+            return cached[1]
+
+        records = await self.get_pool().fetch(
+            """
+            SELECT
+                role_id,
+                multiplier
+            FROM progression_role_multipliers
+            WHERE guild_id = $1
+            """,
+            guild_id,
+        )
+
+        guild_multipliers = {
+            int(record["role_id"]): Decimal(
+                str(record["multiplier"])
+            )
+            for record in records
+        }
+
+        self._multiplier_cache[guild_id] = (
+            time.monotonic() + MULTIPLIER_CACHE_TTL_SECONDS,
+            guild_multipliers,
+        )
+
+        return guild_multipliers
+
+    def is_in_message_cooldown(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        cooldown_seconds: float,
+    ) -> bool:
+        last_reward = self._message_cooldowns.get(
+            (guild_id, user_id)
+        )
+
+        if last_reward is None:
+            return False
+
+        return (
+            time.monotonic() - last_reward
+        ) < cooldown_seconds
+
+    def remember_message_reward(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        elapsed_seconds: float = 0.0,
+        cooldown_seconds: float = 0.0,
+    ) -> None:
+        current = time.monotonic()
+
+        if (
+            len(self._message_cooldowns)
+            >= MESSAGE_COOLDOWN_CACHE_LIMIT
+        ):
+            limit = current - max(cooldown_seconds, 3600.0)
+
+            self._message_cooldowns = {
+                key: value
+                for key, value in self._message_cooldowns.items()
+                if value > limit
+            }
+
+        self._message_cooldowns[(guild_id, user_id)] = (
+            current - max(elapsed_seconds, 0.0)
+        )
 
     async def set_role_xp_multiplier(
         self,
@@ -1877,6 +1979,8 @@ class ProgressionCog(commands.Cog):
         multiplier: Decimal,
     ) -> bool:
         pool = self.get_pool()
+
+        self._multiplier_cache.pop(guild_id, None)
 
         if multiplier == Decimal("0"):
             await pool.execute(
@@ -2268,6 +2372,14 @@ class ProgressionCog(commands.Cog):
                     ).total_seconds()
 
                     if elapsed < settings["cooldown_seconds"]:
+                        self.remember_message_reward(
+                            guild_id=guild_id,
+                            user_id=user_id,
+                            elapsed_seconds=elapsed,
+                            cooldown_seconds=float(
+                                settings["cooldown_seconds"]
+                            ),
+                        )
                         return None
 
                 base_xp_gain = random.randint(
@@ -3147,6 +3259,15 @@ class ProgressionCog(commands.Cog):
             if not isinstance(message.author, discord.Member):
                 return
 
+            if self.is_in_message_cooldown(
+                guild_id=guild.id,
+                user_id=message.author.id,
+                cooldown_seconds=float(
+                    settings["cooldown_seconds"]
+                ),
+            ):
+                return
+
             xp_multiplier = await self.get_member_xp_multiplier(
                 message.author
             )
@@ -3160,6 +3281,14 @@ class ProgressionCog(commands.Cog):
 
             if result is None:
                 return
+
+            self.remember_message_reward(
+                guild_id=guild.id,
+                user_id=message.author.id,
+                cooldown_seconds=float(
+                    settings["cooldown_seconds"]
+                ),
+            )
 
             granted_roles = await self.grant_earned_level_roles(
                 message.author,

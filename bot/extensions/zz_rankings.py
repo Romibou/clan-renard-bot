@@ -14,6 +14,9 @@ from discord.ext import commands
 from bot.shared.leaderboard_card import render_leaderboard_card
 
 
+from bot.shared.members import present_member_ids
+
+
 LOGGER = logging.getLogger(__name__)
 
 LEADERBOARD_PAGE_SIZE = 10
@@ -420,6 +423,24 @@ class RankingsCog(commands.Cog):
             / "leaderboard_background.png"
         )
 
+    def get_present_member_ids(
+        self,
+        guild_id: int,
+    ) -> list[int] | None:
+        """
+        Identifiants des membres actuellement sur le serveur.
+
+        Les classements ignorent les membres partis : leurs données
+        sont conservées et ils retrouvent leur place s'ils reviennent.
+
+        Retourne None (aucun filtre) tant que la liste des membres
+        n'est pas entièrement chargée, pour ne masquer personne à tort.
+        """
+        return present_member_ids(
+            self.bot,
+            guild_id,
+        )
+
     async def get_leaderboard_total_members(
         self,
         *,
@@ -430,6 +451,10 @@ class RankingsCog(commands.Cog):
             ranking_type
         )
 
+        present_ids = self.get_present_member_ids(
+            guild_id
+        )
+
         pool = self.get_pool()
 
         if ranking_type == "streak":
@@ -438,9 +463,14 @@ class RankingsCog(commands.Cog):
                 SELECT COUNT(*)
                 FROM daily_members
                 WHERE guild_id = $1
+                  AND (
+                        $2::BIGINT[] IS NULL
+                        OR user_id = ANY($2::BIGINT[])
+                  )
                   AND best_streak > 0
                 """,
                 guild_id,
+                present_ids,
             )
         else:
             result = await pool.fetchval(
@@ -448,8 +478,13 @@ class RankingsCog(commands.Cog):
                 SELECT COUNT(*)
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $2::BIGINT[] IS NULL
+                        OR user_id = ANY($2::BIGINT[])
+                  )
                 """,
                 guild_id,
+                present_ids,
             )
 
         return int(
@@ -505,6 +540,10 @@ class RankingsCog(commands.Cog):
             page - 1
         ) * LEADERBOARD_PAGE_SIZE
 
+        present_ids = self.get_present_member_ids(
+            guild_id
+        )
+
         pool = self.get_pool()
 
         if ranking_type == "streak":
@@ -516,6 +555,10 @@ class RankingsCog(commands.Cog):
                     total_claims
                 FROM daily_members
                 WHERE guild_id = $1
+                  AND (
+                        $4::BIGINT[] IS NULL
+                        OR user_id = ANY($4::BIGINT[])
+                  )
                   AND best_streak > 0
                 ORDER BY
                     best_streak DESC,
@@ -527,6 +570,7 @@ class RankingsCog(commands.Cog):
                 guild_id,
                 LEADERBOARD_PAGE_SIZE,
                 offset,
+                present_ids,
             )
 
         elif ranking_type == "money":
@@ -538,6 +582,10 @@ class RankingsCog(commands.Cog):
                     wallet
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $4::BIGINT[] IS NULL
+                        OR user_id = ANY($4::BIGINT[])
+                  )
                 ORDER BY
                     wallet DESC,
                     total_xp DESC,
@@ -548,6 +596,7 @@ class RankingsCog(commands.Cog):
                 guild_id,
                 LEADERBOARD_PAGE_SIZE,
                 offset,
+                present_ids,
             )
 
         else:
@@ -559,6 +608,10 @@ class RankingsCog(commands.Cog):
                     wallet
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $4::BIGINT[] IS NULL
+                        OR user_id = ANY($4::BIGINT[])
+                  )
                 ORDER BY
                     total_xp DESC,
                     wallet DESC,
@@ -569,6 +622,7 @@ class RankingsCog(commands.Cog):
                 guild_id,
                 LEADERBOARD_PAGE_SIZE,
                 offset,
+                present_ids,
             )
 
         return list(
@@ -584,6 +638,10 @@ class RankingsCog(commands.Cog):
     ) -> dict[str, int | None]:
         ranking_type = normalize_ranking_type(
             ranking_type
+        )
+
+        present_ids = self.get_present_member_ids(
+            guild_id
         )
 
         pool = self.get_pool()
@@ -633,6 +691,10 @@ class RankingsCog(commands.Cog):
                 SELECT COUNT(*) + 1
                 FROM daily_members
                 WHERE guild_id = $1
+                  AND (
+                        $5::BIGINT[] IS NULL
+                        OR user_id = ANY($5::BIGINT[])
+                  )
                   AND best_streak > 0
                   AND (
                         best_streak > $2
@@ -651,6 +713,7 @@ class RankingsCog(commands.Cog):
                 best_streak,
                 total_claims,
                 user_id,
+                present_ids,
             )
 
             return {
@@ -702,6 +765,10 @@ class RankingsCog(commands.Cog):
                 FROM progression_members
                 WHERE guild_id = $1
                   AND (
+                        $5::BIGINT[] IS NULL
+                        OR user_id = ANY($5::BIGINT[])
+                  )
+                  AND (
                         wallet > $2
                         OR (
                             wallet = $2
@@ -718,6 +785,7 @@ class RankingsCog(commands.Cog):
                 wallet,
                 total_xp,
                 user_id,
+                present_ids,
             )
         else:
             rank = await pool.fetchval(
@@ -725,6 +793,10 @@ class RankingsCog(commands.Cog):
                 SELECT COUNT(*) + 1
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $5::BIGINT[] IS NULL
+                        OR user_id = ANY($5::BIGINT[])
+                  )
                   AND (
                         total_xp > $2
                         OR (
@@ -742,6 +814,7 @@ class RankingsCog(commands.Cog):
                 total_xp,
                 wallet,
                 user_id,
+                present_ids,
             )
 
         return {

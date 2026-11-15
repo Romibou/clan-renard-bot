@@ -439,6 +439,8 @@ class CosmeticSelect(discord.ui.Select):
         cog: ProfileCog,
         owner_id: int,
         cosmetics: list[Any],
+        placeholder: str = "Choisis un cosmétique à équiper…",
+        row: int | None = None,
     ) -> None:
         self.cog = cog
         self.owner_id = owner_id
@@ -486,12 +488,11 @@ class CosmeticSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder=(
-                "Choisis un cosmétique à équiper…"
-            ),
+            placeholder=placeholder,
             min_values=1,
             max_values=1,
             options=options,
+            row=row,
         )
 
     async def callback(
@@ -587,13 +588,39 @@ class CosmeticInventoryView(
         self.cog = cog
         self.owner_id = owner_id
 
-        self.add_item(
-            CosmeticSelect(
-                cog=cog,
-                owner_id=owner_id,
-                cosmetics=cosmetics,
+        # Un menu Discord contient 25 choix au maximum : au-delà,
+        # l'inventaire est réparti sur plusieurs menus (4 lignes,
+        # la dernière étant réservée au bouton).
+        pages = [
+            cosmetics[start:start + 25]
+            for start in range(0, len(cosmetics), 25)
+        ][:4]
+
+        self.remove_item(self.reset_cosmetics)
+
+        for index, page in enumerate(pages):
+            placeholder = "Choisis un cosmétique à équiper…"
+
+            if len(pages) > 1:
+                first = index * 25 + 1
+                last = index * 25 + len(page)
+                placeholder = (
+                    f"Cosmétiques {first} à {last}…"
+                )
+
+            self.add_item(
+                CosmeticSelect(
+                    cog=cog,
+                    owner_id=owner_id,
+                    cosmetics=page,
+                    placeholder=placeholder,
+                    row=index,
+                )
             )
-        )
+
+        # Le bouton est replacé sous le dernier menu.
+        self.reset_cosmetics.row = len(pages)
+        self.add_item(self.reset_cosmetics)
 
     async def interaction_check(
         self,
@@ -932,6 +959,8 @@ class AdminCosmeticSelect(
         self,
         *,
         cosmetics: list[Any],
+        placeholder: str = "Choisis le cosmétique…",
+        row: int = 1,
     ) -> None:
         self.selected_cosmetic_id: int | None = None
 
@@ -960,11 +989,11 @@ class AdminCosmeticSelect(
         ]
 
         super().__init__(
-            placeholder="Choisis le cosmétique…",
+            placeholder=placeholder,
             min_values=1,
             max_values=1,
             options=options,
-            row=1,
+            row=row,
         )
 
     async def callback(
@@ -974,6 +1003,13 @@ class AdminCosmeticSelect(
         self.selected_cosmetic_id = int(
             self.values[0]
         )
+
+        # Le dernier menu utilisé fait foi lorsque les cosmétiques
+        # sont répartis sur plusieurs menus.
+        if self.view is not None:
+            self.view.selected_cosmetic_id = (
+                self.selected_cosmetic_id
+            )
 
         await interaction.response.defer()
 
@@ -1023,25 +1059,43 @@ class GrantCosmeticView(
             AdminMemberSelect()
         )
 
-        self.cosmetic_select = (
-            AdminCosmeticSelect(
-                cosmetics=cosmetics,
-            )
-        )
+        self.selected_cosmetic_id: int | None = None
 
         self.add_item(
             self.member_select
         )
 
-        self.add_item(
-            self.cosmetic_select
-        )
+        # Un menu Discord contient 25 choix au maximum : au-delà,
+        # les cosmétiques sont répartis sur plusieurs menus
+        # (lignes 1 à 3, la ligne 4 étant celle du bouton).
+        pages = [
+            cosmetics[start:start + 25]
+            for start in range(0, len(cosmetics), 25)
+        ][:3]
+
+        for index, page in enumerate(pages):
+            placeholder = "Choisis le cosmétique…"
+
+            if len(pages) > 1:
+                first = index * 25 + 1
+                last = index * 25 + len(page)
+                placeholder = (
+                    f"Cosmétiques {first} à {last}…"
+                )
+
+            self.add_item(
+                AdminCosmeticSelect(
+                    cosmetics=page,
+                    placeholder=placeholder,
+                    row=index + 1,
+                )
+            )
 
     @discord.ui.button(
         label="Distribuer",
         emoji="🎁",
         style=discord.ButtonStyle.success,
-        row=2,
+        row=4,
     )
     async def grant(
         self,
@@ -1053,10 +1107,7 @@ class GrantCosmeticView(
             .selected_user_id
         )
 
-        cosmetic_id = (
-            self.cosmetic_select
-            .selected_cosmetic_id
-        )
+        cosmetic_id = self.selected_cosmetic_id
 
         if (
             user_id is None
@@ -1607,7 +1658,7 @@ class ProfileCog(commands.Cog):
             ORDER BY
                 cosmetic_type,
                 display_name
-            LIMIT 25
+            LIMIT 75
             """,
             guild_id,
         )
@@ -1642,7 +1693,7 @@ class ProfileCog(commands.Cog):
             ORDER BY
                 cosmetic.cosmetic_type,
                 cosmetic.display_name
-            LIMIT 25
+            LIMIT 100
             """,
             guild_id,
             user_id,

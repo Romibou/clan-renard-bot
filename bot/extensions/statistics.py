@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from bot.shared.members import present_member_ids
 from bot.shared.statistics_card import render_statistics_card
 
 
@@ -330,6 +331,10 @@ class StatisticsCog(commands.Cog):
 
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $3::BIGINT[] IS NULL
+                        OR user_id = ANY($3::BIGINT[])
+                  )
             )
             INSERT INTO statistics_rank_snapshots (
                 guild_id,
@@ -354,6 +359,10 @@ class StatisticsCog(commands.Cog):
             """,
             guild_id,
             snapshot_date,
+            present_member_ids(
+                self.bot,
+                guild_id,
+            ),
         )
 
     async def synchronize_guild(
@@ -879,6 +888,10 @@ class StatisticsCog(commands.Cog):
 
                 FROM progression_members
                 WHERE guild_id = $1
+                  AND (
+                        $3::BIGINT[] IS NULL
+                        OR user_id = ANY($3::BIGINT[])
+                  )
             )
             SELECT
                 xp_rank,
@@ -888,6 +901,10 @@ class StatisticsCog(commands.Cog):
             """,
             guild_id,
             user_id,
+            present_member_ids(
+                self.bot,
+                guild_id,
+            ),
         )
 
         if record is None:

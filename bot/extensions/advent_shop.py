@@ -819,8 +819,8 @@ class AdventShop(commands.Cog):
         embed = discord.Embed(
             title="🛍️ Boutique de l'Avent",
             description=(
-                f"Bienvenue dans la boutique du **Clan Renard**.\n"
-                f"Utilise le menu déroulant pour choisir une récompense."
+                "Bienvenue dans la boutique du **Clan Renard**.\n"
+                "Utilise le menu déroulant pour choisir une récompense."
             ),
             color=SHOP_COLOR,
         )

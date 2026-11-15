@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+backups/
+tests/
+docs/
+generated/
+*.md
+installer_nouveau_visuel.py
+requirements-dev.txt

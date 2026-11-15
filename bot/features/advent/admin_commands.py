@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-from datetime import date
 from typing import Literal
 
 import discord
@@ -12,13 +10,6 @@ from discord.ext import commands
 from bot.features.advent.constants import (
     CATCHUP_DISABLED,
     CATCHUP_ENABLED,
-    REWARD_MESSAGE,
-    REWARD_POINTS,
-    REWARD_RANDOM,
-    REWARD_ROLE,
-)
-from bot.features.advent.discord_calendar import (
-    build_calendar_response,
 )
 from bot.features.advent.exceptions import AdventError
 from bot.features.advent.full_repository import (
@@ -31,10 +22,6 @@ from bot.features.advent.reward_service import RewardService
 from bot.features.advent.service import AdventService
 from bot.features.advent.transaction_repository import (
     AdventTransactionRepository,
-)
-from bot.features.advent.views import (
-    AdventView,
-    ConfirmResetView,
 )
 from bot.shared.dates import validate_timezone
 from bot.shared.embeds import (

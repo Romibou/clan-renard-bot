@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -45,6 +46,33 @@ def base_embed(
         description=description,
         color=COLOR,
     )
+
+
+CUSTOM_EMOJI_PATTERN = re.compile(
+    r"<a?:[^:>]*:(\d+)>"
+)
+
+
+def emoji_match_key(
+    emoji: str,
+) -> str:
+    """
+    Clé de comparaison d'un émoji, stable dans le temps.
+
+    - Émoji personnalisé : uniquement son identifiant. Discord
+      n'indique pas toujours s'il est animé quand une réaction est
+      retirée, et son nom peut être modifié après coup.
+    - Émoji standard : sans le sélecteur de variante (U+FE0F), que
+      Discord ajoute ou retire selon le contexte (❤️ / ❤).
+    """
+    match = CUSTOM_EMOJI_PATTERN.fullmatch(
+        emoji.strip()
+    )
+
+    if match is not None:
+        return match.group(1)
+
+    return emoji.strip().replace("️", "")
 
 
 class ReactionRoleCog(
@@ -127,18 +155,25 @@ class ReactionRoleCog(
     ):
         pool = self.get_pool()
 
-        return await pool.fetchrow(
+        records = await pool.fetch(
             """
             SELECT
                 guild_id,
-                role_id
+                role_id,
+                emoji
             FROM reaction_roles
             WHERE message_id = $1
-              AND emoji = $2
             """,
             message_id,
-            emoji,
         )
+
+        wanted = emoji_match_key(emoji)
+
+        for record in records:
+            if emoji_match_key(record["emoji"]) == wanted:
+                return record
+
+        return None
 
     async def upsert_binding(
         self,
@@ -180,6 +215,14 @@ class ReactionRoleCog(
         message_id: int,
         emoji: str,
     ) -> bool:
+        record = await self.get_binding(
+            message_id=message_id,
+            emoji=emoji,
+        )
+
+        if record is None:
+            return False
+
         pool = self.get_pool()
 
         result = await pool.execute(
@@ -189,7 +232,7 @@ class ReactionRoleCog(
               AND emoji = $2
             """,
             message_id,
-            emoji,
+            record["emoji"],
         )
 
         return result != "DELETE 0"

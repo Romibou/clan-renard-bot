@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -13,6 +14,10 @@ from bot.core.health import HealthServer
 
 
 logger = logging.getLogger(__name__)
+
+# Discord laisse 3 secondes pour répondre à un clic. Passé ce délai
+# de grâce, si rien n'a répondu, le bot prévient lui-même le membre.
+UNANSWERED_COMPONENT_DELAY_SECONDS = 2.5
 
 
 class ClanRenardBot(commands.Bot):
@@ -43,6 +48,11 @@ class ClanRenardBot(commands.Bot):
             settings.project_root,
         )
         self.health_server = HealthServer(self, settings.port)
+
+        # discord.py n'appelle pas de lui-même une méthode nommée
+        # on_app_command_error : le gestionnaire d'erreurs des
+        # commandes slash doit être branché sur l'arbre.
+        self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self) -> None:
         await self.database.connect()
@@ -90,6 +100,45 @@ class ClanRenardBot(commands.Bot):
             activity=activity,
         )
 
+    async def on_interaction(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        """
+        Filet de sécurité pour les boutons, menus et formulaires.
+
+        Un panneau cesse de répondre lorsqu'il a expiré, lorsque le
+        bot a redémarré depuis son ouverture, ou lorsqu'une erreur
+        s'est produite. Sans ce filet, Discord affiche seulement
+        « Échec de l'interaction », sans aucune explication.
+        """
+        if interaction.type not in (
+            discord.InteractionType.component,
+            discord.InteractionType.modal_submit,
+        ):
+            return
+
+        await asyncio.sleep(
+            UNANSWERED_COMPONENT_DELAY_SECONDS
+        )
+
+        if interaction.response.is_done():
+            return
+
+        try:
+            await interaction.response.send_message(
+                (
+                    "⏳ Ce panneau ne répond plus : il a expiré ou "
+                    "une erreur est survenue. Relance la commande "
+                    "pour en ouvrir un nouveau."
+                ),
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            # Le panneau a répondu entre-temps, ou le délai de
+            # Discord est dépassé : rien de plus à faire.
+            pass
+
     async def close(self) -> None:
         await self.health_server.stop()
         await self.database.close()
@@ -100,11 +149,6 @@ class ClanRenardBot(commands.Bot):
         interaction: discord.Interaction,
         error: app_commands.AppCommandError,
     ) -> None:
-        logger.exception(
-            "Erreur de commande d'application",
-            exc_info=error,
-        )
-
         if isinstance(error, app_commands.MissingPermissions):
             message = (
                 "❌ Tu n'as pas les permissions nécessaires "
@@ -126,6 +170,18 @@ class ClanRenardBot(commands.Bot):
                 "❌ Tu ne peux pas utiliser cette commande ici."
             )
         else:
+            # Seules les vraies erreurs sont journalisées : un cooldown
+            # ou un refus de permission n'est pas un plantage.
+            logger.error(
+                "Erreur inattendue dans la commande /%s (membre %s)",
+                (
+                    interaction.command.qualified_name
+                    if interaction.command is not None
+                    else "inconnue"
+                ),
+                interaction.user.id,
+                exc_info=error,
+            )
             message = (
                 "❌ Une erreur inattendue est survenue. "
                 "L'erreur a été enregistrée dans les logs du bot."
