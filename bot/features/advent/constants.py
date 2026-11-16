@@ -19,12 +19,19 @@ REWARD_MESSAGE = "message"
 REWARD_POINTS = "points"
 REWARD_ROLE = "role"
 REWARD_RANDOM = "random"
+# Récompenses versées dans les systèmes permanents du bot.
+REWARD_COINS = "coins"
+REWARD_XP = "xp"
+REWARD_COSMETIC = "cosmetic"
 
 VALID_REWARD_TYPES = {
     REWARD_MESSAGE,
     REWARD_POINTS,
     REWARD_ROLE,
     REWARD_RANDOM,
+    REWARD_COINS,
+    REWARD_XP,
+    REWARD_COSMETIC,
 }
 
 # Ordre visuel volontairement mélangé.

@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS advent_rewards (
                 'message',
                 'points',
                 'role',
-                'random'
+                'random',
+                'coins',
+                'xp',
+                'cosmetic'
             )
         ),
     reward_data JSONB NOT NULL DEFAULT '{}'::JSONB,
@@ -77,6 +80,24 @@ CREATE TABLE IF NOT EXISTS advent_rewards (
 
 CREATE INDEX IF NOT EXISTS advent_rewards_campaign_index
     ON advent_rewards (campaign_id);
+
+-- Types ajoutés en 2026 : pièces, XP et cosmétique de profil.
+ALTER TABLE advent_rewards
+    DROP CONSTRAINT IF EXISTS advent_rewards_reward_type_check;
+
+ALTER TABLE advent_rewards
+    ADD CONSTRAINT advent_rewards_reward_type_check
+    CHECK (
+        reward_type IN (
+            'message',
+            'points',
+            'role',
+            'random',
+            'coins',
+            'xp',
+            'cosmetic'
+        )
+    );
 
 
 CREATE TABLE IF NOT EXISTS advent_openings (

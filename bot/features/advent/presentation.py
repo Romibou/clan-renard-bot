@@ -197,6 +197,22 @@ def reward_history_embed(
                 f"{points} point"
                 f"{'s' if points != 1 else ''}"
             )
+        elif reward_type in ("coins", "xp", "cosmetic"):
+            if reward_type == "coins":
+                description = f"{snapshot.get('coins', 0)} pièces"
+            elif reward_type == "xp":
+                description = f"{snapshot.get('xp', 0)} XP"
+            else:
+                description = (
+                    f"Cosmétique « {snapshot.get('name', '?')} »"
+                )
+
+            status = item.get("external_status")
+
+            if status == "failed":
+                description += " ⚠️ non créditée"
+            elif status == "pending":
+                description += " ⏳ en attente"
         elif reward_type == "role":
             role_id = snapshot.get("role_id")
             description = (

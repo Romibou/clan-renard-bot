@@ -163,6 +163,9 @@ class AdminModal(discord.ui.Modal):
             "reward_message": "Récompense message",
             "reward_points": "Récompense points",
             "reward_random": "Récompense aléatoire",
+            "reward_coins": "Récompense en pièces",
+            "reward_xp": "Récompense en XP",
+            "reward_cosmetic": "Récompense cosmétique",
             "reward_delete": "Supprimer une récompense",
             "shop_delete": "Supprimer un article",
         }
@@ -247,6 +250,57 @@ class AdminModal(discord.ui.Modal):
                 "points",
                 "Nombre de points",
                 placeholder="100",
+            )
+            self.add_input(
+                "message",
+                "Message facultatif",
+                required=False,
+                style=discord.TextStyle.paragraph,
+                max_length=1000,
+            )
+            self.add_input(
+                "year",
+                "Année facultative",
+                required=False,
+            )
+
+        elif action in ("reward_coins", "reward_xp"):
+            unit = "pièces" if action == "reward_coins" else "XP"
+
+            self.add_input(
+                "day",
+                "Jour",
+                placeholder="1 à 24",
+            )
+            self.add_input(
+                "amount",
+                f"Nombre de {unit}",
+                placeholder="200",
+            )
+            self.add_input(
+                "message",
+                "Message facultatif",
+                required=False,
+                style=discord.TextStyle.paragraph,
+                max_length=1000,
+            )
+            self.add_input(
+                "year",
+                "Année facultative",
+                required=False,
+            )
+
+        elif action == "reward_cosmetic":
+            self.add_input(
+                "day",
+                "Jour",
+                placeholder="1 à 24",
+            )
+            self.add_input(
+                "identifier",
+                "Identifiant du cosmétique (/profil-admin)",
+                placeholder="cadre-givre",
+                max_length=50,
             )
             self.add_input(
                 "message",
@@ -451,6 +505,68 @@ class AdminModal(discord.ui.Modal):
                         self.value("year")
                     ),
                 )
+
+            elif self.action in (
+                "reward_coins",
+                "reward_xp",
+                "reward_cosmetic",
+            ):
+                day = required_int(
+                    self.value("day"),
+                    minimum=1,
+                    maximum=24,
+                    field_name="Le jour",
+                )
+                year = optional_year(self.value("year"))
+                message = self.value("message").strip() or None
+
+                cog = get_cog(
+                    interaction,
+                    "AdventAdminRewardsCommands",
+                )
+
+                if cog is None:
+                    await send_error(
+                        interaction,
+                        "Le module des récompenses est indisponible.",
+                    )
+                    return
+
+                if self.action == "reward_cosmetic":
+                    await interaction.response.defer(
+                        ephemeral=True,
+                        thinking=True,
+                    )
+                    await cog.save_cosmetic_reward(
+                        interaction,
+                        day=day,
+                        identifier=self.value("identifier").strip(),
+                        message=message,
+                        year=year,
+                    )
+                else:
+                    amount = required_int(
+                        self.value("amount"),
+                        minimum=1,
+                        maximum=1_000_000,
+                        field_name="La quantité",
+                    )
+                    await interaction.response.defer(
+                        ephemeral=True,
+                        thinking=True,
+                    )
+                    await cog.save_amount_reward(
+                        interaction,
+                        day=day,
+                        reward_type=(
+                            "coins"
+                            if self.action == "reward_coins"
+                            else "xp"
+                        ),
+                        amount=amount,
+                        message=message,
+                        year=year,
+                    )
 
             elif self.action == "reward_delete":
                 day = required_int(
@@ -1277,6 +1393,62 @@ async def start_reset_all(
     )
 
 
+REWARD_TYPE_CHOICES = (
+    ("reward_message", "Message", "💬", "Un simple message surprise."),
+    ("reward_points", "Points de l'Avent", "⭐", "Points pour la boutique de l'Avent."),
+    ("reward_coins", "Pièces", "💰", "Pièces permanentes (boutique /boutique)."),
+    ("reward_xp", "XP", "✨", "XP permanente, peut faire monter de niveau."),
+    ("reward_cosmetic", "Cosmétique de profil", "🎨", "Ajouté à l'inventaire de /profil."),
+    ("reward_role", "Rôle Discord", "🎭", "Un rôle donné à l'ouverture."),
+    ("reward_random", "Aléatoire", "🎲", "Tirage entre plusieurs récompenses (JSON)."),
+)
+
+
+class RewardTypeSelect(discord.ui.Select):
+    def __init__(self) -> None:
+        super().__init__(
+            placeholder="Choisis le type de récompense…",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=label,
+                    value=value,
+                    emoji=emoji,
+                    description=description,
+                )
+                for value, label, emoji, description in REWARD_TYPE_CHOICES
+            ],
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        action = self.values[0]
+
+        if action == "reward_role":
+            await interaction.response.edit_message(
+                embed=base_embed(
+                    "🎭 Choisir un rôle",
+                    "Sélectionne le rôle à donner dans cette case.",
+                ),
+                view=PickerView(
+                    owner_id=interaction.user.id,
+                    picker=AdminRoleSelect(
+                        action="reward_role",
+                    ),
+                ),
+            )
+            return
+
+        await interaction.response.send_modal(
+            AdminModal(
+                action=action,
+            )
+        )
+
+
 class AdminActionSelect(discord.ui.Select):
     def __init__(self) -> None:
         options = [
@@ -1340,24 +1512,13 @@ class AdminActionSelect(discord.ui.Select):
                 emoji="🎁",
             ),
             discord.SelectOption(
-                label="Ajouter une récompense message",
-                value="reward_message",
-                emoji="💬",
-            ),
-            discord.SelectOption(
-                label="Ajouter une récompense points",
-                value="reward_points",
-                emoji="⭐",
-            ),
-            discord.SelectOption(
-                label="Ajouter une récompense rôle",
-                value="reward_role",
-                emoji="🎭",
-            ),
-            discord.SelectOption(
-                label="Ajouter une récompense aléatoire",
-                value="reward_random",
-                emoji="🎲",
+                label="Ajouter ou modifier une récompense",
+                value="reward_add",
+                emoji="🎁",
+                description=(
+                    "Message, points, pièces, XP, cosmétique, rôle "
+                    "ou aléatoire."
+                ),
             ),
             discord.SelectOption(
                 label="Supprimer une récompense",
@@ -1431,6 +1592,24 @@ class AdminActionSelect(discord.ui.Select):
 
         if action == "catchup_days":
             await open_catchup_days_modal(interaction)
+            return
+
+        if action == "reward_add":
+            await interaction.response.send_message(
+                embed=base_embed(
+                    "🎁 Type de récompense",
+                    (
+                        "Choisis ce que la case doit donner. "
+                        "Si la case a déjà une récompense, elle "
+                        "sera remplacée."
+                    ),
+                ),
+                view=PickerView(
+                    owner_id=interaction.user.id,
+                    picker=RewardTypeSelect(),
+                ),
+                ephemeral=True,
+            )
             return
 
         if action == "configuration":

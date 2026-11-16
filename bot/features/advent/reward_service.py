@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from bot.features.advent.constants import (
+    REWARD_COINS,
+    REWARD_COSMETIC,
+    REWARD_XP,
     REWARD_MESSAGE,
     REWARD_POINTS,
     REWARD_RANDOM,
@@ -149,6 +152,74 @@ class RewardService:
                 external_status="pending",
             )
 
+        if reward_type in (REWARD_COINS, REWARD_XP):
+            key = "coins" if reward_type == REWARD_COINS else "xp"
+            unit = "pièces" if reward_type == REWARD_COINS else "XP"
+
+            try:
+                amount = int(data.get(key, 0))
+            except (TypeError, ValueError) as error:
+                raise RewardConfigurationError(
+                    f"Le nombre de {unit} est invalide."
+                ) from error
+
+            if amount <= 0:
+                raise RewardConfigurationError(
+                    f"Le nombre de {unit} doit être positif."
+                )
+
+            formatted = f"{amount:,}".replace(",", " ")
+            message = str(
+                data.get(
+                    "message",
+                    f"Tu remportes **{formatted} {unit}** !",
+                )
+            ).strip()
+
+            return ResolvedReward(
+                reward_type=reward_type,
+                snapshot={
+                    key: amount,
+                    "message": message,
+                },
+                message=(
+                    f"{'💰' if reward_type == REWARD_COINS else '✨'} "
+                    f"{message}"
+                ),
+                points=0,
+                role_id=None,
+                external_status="pending",
+            )
+
+        if reward_type == REWARD_COSMETIC:
+            try:
+                cosmetic_id = int(data["cosmetic_id"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise RewardConfigurationError(
+                    "Le cosmétique de la récompense est invalide."
+                ) from error
+
+            name = str(data.get("name") or "un cosmétique de profil")
+            message = str(
+                data.get(
+                    "message",
+                    f"Tu remportes **{name}** pour ton profil !",
+                )
+            ).strip()
+
+            return ResolvedReward(
+                reward_type=REWARD_COSMETIC,
+                snapshot={
+                    "cosmetic_id": cosmetic_id,
+                    "name": name,
+                    "message": message,
+                },
+                message=f"🎨 {message}\nÉquipe-le depuis `/profil`.",
+                points=0,
+                role_id=None,
+                external_status="pending",
+            )
+
         raise RewardConfigurationError(
             f"Type non pris en charge : {reward_type}"
         )
@@ -248,6 +319,18 @@ class RewardService:
         if reward_type == REWARD_ROLE:
             role_id = reward_data.get("role_id", "?")
             return f"Rôle Discord <@&{role_id}>"
+
+        if reward_type == REWARD_COINS:
+            return f"{int(reward_data.get('coins', 0))} pièces"
+
+        if reward_type == REWARD_XP:
+            return f"{int(reward_data.get('xp', 0))} XP"
+
+        if reward_type == REWARD_COSMETIC:
+            return (
+                "Cosmétique "
+                f"« {reward_data.get('name', reward_data.get('cosmetic_id'))} »"
+            )
 
         if reward_type == REWARD_RANDOM:
             choices = reward_data.get("choices", [])

@@ -1341,6 +1341,37 @@ class ProgressionAdminView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
+        await self._open_voice_xp_modal(interaction)
+
+    @discord.ui.button(
+        label="Bonus d'XP",
+        emoji="🚀",
+        style=discord.ButtonStyle.success,
+        row=4,
+    )
+    async def configure_xp_boost(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        boost_cog = interaction.client.get_cog("XPBoostCog")
+
+        if boost_cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Module indisponible",
+                    "Le module des bonus d'XP n'est pas chargé.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await boost_cog.open_admin_modal(interaction)
+
+    async def _open_voice_xp_modal(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         settings = await self.cog.get_settings(
             self.guild_id,
             use_cache=False,
@@ -1866,6 +1897,25 @@ class ProgressionCog(commands.Cog):
         return int(rank) if rank is not None else None
 
     async def get_member_xp_multiplier(
+        self,
+        member: discord.Member,
+    ) -> Decimal:
+        """
+        Multiplicateur de rôle le plus élevé, multiplié par le bonus
+        d'XP temporaire du serveur s'il y en a un en cours.
+        """
+        role_multiplier = await self.get_role_xp_multiplier(member)
+
+        boost_cog = self.bot.get_cog("XPBoostCog")
+
+        if boost_cog is None:
+            return role_multiplier
+
+        boost = await boost_cog.get_active_multiplier(member.guild.id)
+
+        return (role_multiplier * boost).quantize(Decimal("0.01"))
+
+    async def get_role_xp_multiplier(
         self,
         member: discord.Member,
     ) -> Decimal:
@@ -2713,7 +2763,7 @@ class ProgressionCog(commands.Cog):
 
         if multiplier > Decimal("1.00"):
             multiplier_text = (
-                "\n✨ Multiplicateur de rôle : "
+                "\n✨ Multiplicateur d'XP : "
                 f"**x{multiplier.normalize()}**"
             )
 
@@ -3320,7 +3370,7 @@ class ProgressionCog(commands.Cog):
 
             if multiplier > Decimal("1.00"):
                 multiplier_text = (
-                    "\n✨ Multiplicateur de rôle : "
+                    "\n✨ Multiplicateur d'XP : "
                     f"**x{multiplier.normalize()}**"
                 )
 

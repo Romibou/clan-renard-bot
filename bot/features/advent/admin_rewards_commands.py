@@ -12,6 +12,8 @@ from bot.features.advent.admin_repository import (
     AdminAdventRepository,
 )
 from bot.features.advent.constants import (
+    REWARD_COINS,
+    REWARD_COSMETIC,
     REWARD_MESSAGE,
     REWARD_POINTS,
     REWARD_RANDOM,
@@ -167,6 +169,85 @@ class AdventAdminRewardsCommands(commands.Cog):
                 "Impossible d'enregistrer l'action d'audit %s",
                 action,
             )
+
+    async def save_amount_reward(
+        self,
+        interaction: discord.Interaction,
+        *,
+        day: int,
+        reward_type: str,
+        amount: int,
+        message: str | None,
+        year: int | None,
+    ) -> None:
+        """Récompense en pièces ou en XP permanentes."""
+        key = "coins" if reward_type == REWARD_COINS else "xp"
+        reward_data: dict[str, Any] = {key: amount}
+
+        if message:
+            reward_data["message"] = message
+
+        await self._save_reward(
+            interaction,
+            day=day,
+            reward_type=reward_type,
+            reward_data=reward_data,
+            year=year,
+        )
+
+    async def save_cosmetic_reward(
+        self,
+        interaction: discord.Interaction,
+        *,
+        day: int,
+        identifier: str,
+        message: str | None,
+        year: int | None,
+    ) -> None:
+        """Récompense en cosmétique de profil, désigné par identifiant."""
+        cosmetic = await self.repository.database.fetchrow(
+            """
+            SELECT
+                id,
+                identifier,
+                display_name
+            FROM profile_cosmetics
+            WHERE guild_id = $1
+              AND LOWER(identifier) = LOWER($2)
+              AND enabled = TRUE
+            """,
+            interaction.guild_id,
+            identifier,
+        )
+
+        if cosmetic is None:
+            await self._send_error(
+                interaction,
+                "Cosmétique introuvable",
+                (
+                    f"Aucun cosmétique actif n'a l'identifiant "
+                    f"`{identifier}`. Crée-le d'abord dans "
+                    "`/profil-admin`, puis réessaie."
+                ),
+            )
+            return
+
+        reward_data: dict[str, Any] = {
+            "cosmetic_id": int(cosmetic["id"]),
+            "identifier": str(cosmetic["identifier"]),
+            "name": str(cosmetic["display_name"]),
+        }
+
+        if message:
+            reward_data["message"] = message
+
+        await self._save_reward(
+            interaction,
+            day=day,
+            reward_type=REWARD_COSMETIC,
+            reward_data=reward_data,
+            year=year,
+        )
 
     async def _save_reward(
         self,

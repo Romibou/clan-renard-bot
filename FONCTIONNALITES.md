@@ -76,6 +76,10 @@ Clan Renard Bot possède actuellement les systèmes suivants :
 | `/stats` | Membres | Statistiques d’un membre |
 | `/rappel` | Membres | Programme un rappel |
 | `/aide` | Membres | Liste les commandes |
+| `/bilan` | Membres | Bilan de l’année (du 31 décembre au 31 janvier) |
+| `/giveaway lancer` | Administration | Lance un giveaway |
+| `/giveaway terminer` | Administration | Termine un giveaway et tire les gagnants |
+| `/giveaway retirer` | Administration | Tire de nouveaux gagnants |
 | `/reaction-role` | Administration | Lie une réaction à un rôle |
 | `/reaction-role-retirer` | Administration | Supprime une réaction-rôle |
 | `/reaction-role-liste` | Administration | Liste les réactions-rôles |
@@ -156,15 +160,21 @@ La limite se règle dans `/avent-admin` avec **Limiter le rattrapage (jours)**, 
 
 ## Types de récompenses
 
-Le calendrier peut distribuer :
+Dans `/avent-admin`, **Ajouter ou modifier une récompense** propose de choisir le type, puis ouvre le formulaire correspondant. Une case peut donner :
 
-- un message ;
-- des points saisonniers ;
-- un rôle Discord ;
-- une récompense aléatoire ;
-- une récompense choisie parmi plusieurs possibilités avec pondération ;
-- un cosmétique de profil ;
-- une autre récompense gérée par la campagne.
+| Type | Ce que reçoit le membre |
+|---|---|
+| Message | Un message surprise |
+| Points de l’Avent | Des points pour la boutique de l’Avent |
+| Pièces | Des pièces permanentes, utilisables dans `/boutique` |
+| XP | De l’XP permanente (peut faire monter de niveau et donner un rôle de niveau) |
+| Cosmétique de profil | Un cosmétique ajouté à l’inventaire de `/profil`, désigné par son identifiant |
+| Rôle Discord | Un rôle attribué à l’ouverture |
+| Aléatoire | Un tirage pondéré entre plusieurs récompenses (format JSON) |
+
+Les pièces, l’XP et les cosmétiques sont versés au moment de l’ouverture. Si le versement échoue, l’ouverture reste enregistrée, le membre est prévenu et la récompense apparaît comme « non créditée » dans son historique et dans « Consulter un membre ».
+
+Dans une récompense aléatoire, les types `coins` (`{"coins": 200}`), `xp` (`{"xp": 500}`) et `cosmetic` (`{"cosmetic_id": 12}`) sont aussi utilisables.
 
 ## Points saisonniers
 
@@ -1212,6 +1222,46 @@ Formats de durée acceptés : `10s`, `10m`, `5mn`, `2h`, `1h30`, `1j12h`, `3sem`
 Ces commandes demandent la permission **Gérer les rôles**. Réagir donne le rôle, retirer sa réaction l’enlève.
 
 Les émojis personnalisés restent reconnus s’ils sont renommés ou animés.
+
+---
+
+# Bonus d’XP temporaire
+
+Dans `/progression-admin`, le bouton **Bonus d’XP** ouvre un formulaire :
+
+- **Multiplicateur** : par exemple `2` pour doubler l’XP, de 1,1 à 5. `1` arrête le bonus en cours.
+- **Début** et **Fin**, heure de Paris : par exemple `24/12 00:00` et `26/12 23:59`. Début vide = tout de suite. Sans heure, le début est à 00:00 et la fin à 23:59.
+- **Nom** : affiché dans les annonces (« Bonus de Noël »).
+- **Annonce** : `oui` publie un message au début et à la fin du bonus, dans le salon où le formulaire a été envoyé.
+
+Le bonus s’applique à l’XP des messages et du vocal, pour tout le serveur. Il se multiplie avec les multiplicateurs de rôle : un membre VIP ×1,5 pendant un bonus ×2 gagne ×3. Un seul bonus peut être programmé à la fois ; en enregistrer un nouveau remplace l’ancien.
+
+---
+
+# Giveaways
+
+```text
+/giveaway lancer lot:Nitro duree:2j gagnants:1 pieces:500 role:@Gagnant niveau_minimum:5 salon:#annonces
+```
+
+Seuls `lot` et `duree` sont obligatoires.
+
+- Les membres cliquent sur **Participer** ; un second clic les retire. Le message affiche le nombre de participants.
+- Le bouton fonctionne même après un redémarrage du bot.
+- À la fin, le bot tire au sort parmi les participants encore présents sur le serveur, annonce les gagnants et remet automatiquement les pièces et le rôle s’ils sont configurés. Le lot texte (par exemple un Nitro) est à remettre à la main.
+- `niveau_minimum` réserve la participation aux membres de ce niveau ou plus.
+- `/giveaway terminer numero:12` tire les gagnants tout de suite. `/giveaway retirer numero:12` tire de nouveaux gagnants (par exemple si un gagnant ne répond pas), en excluant les précédents. Le numéro est indiqué en bas du message du giveaway.
+
+---
+
+# Bilan de l’année
+
+`/bilan` affiche une carte avec l’année du membre : XP gagnée et classement de l’année, messages, temps en vocal, pièces gagnées, jour le plus actif, récompenses quotidiennes, meilleure série et cases de l’Avent ouvertes.
+
+- Les membres peuvent l’utiliser du **31 décembre au 31 janvier** (en janvier, il montre l’année écoulée). Avant, la commande annonce qu’il arrive bientôt.
+- Les administrateurs peuvent le consulter à tout moment, en privé, pour le vérifier.
+- `/bilan membre:@Membre` affiche le bilan d’un autre membre.
+- Les chiffres viennent des statistiques quotidiennes : si elles ont commencé en cours d’année, la carte l’indique (« Statistiques enregistrées depuis le … »).
 
 ---
 

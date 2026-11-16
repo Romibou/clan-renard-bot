@@ -17,6 +17,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "progression",
         "classement",
         "stats",
+        "bilan",
     ),
     "🎁 Récompenses": (
         "quotidien",

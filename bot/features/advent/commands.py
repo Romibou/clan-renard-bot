@@ -32,6 +32,10 @@ from bot.shared.embeds import (
     success_embed,
 )
 
+from bot.features.advent.permanent_rewards import (
+    PERMANENT_REWARD_TYPES,
+    deliver_permanent_reward,
+)
 from bot.features.advent.views import CatchupDayView
 from bot.shared.members import present_member_ids
 
@@ -320,11 +324,31 @@ class AdventCommands(commands.Cog):
                 if not role_success:
                     role_warning = role_error
 
+        delivery_warning: str | None = None
+
+        if result.opening.reward_type in PERMANENT_REWARD_TYPES:
+            delivered, delivery_warning = (
+                await deliver_permanent_reward(
+                    bot=self.bot,
+                    guild=guild,
+                    member=member,
+                    user_id=interaction.user.id,
+                    opening=result.opening,
+                    service=self.service,
+                )
+            )
+
         reward_description = (
             f"Tu as ouvert la case "
             f"**n°{result.opening.day}** !\n\n"
             f"{result.reward_message}"
         )
+
+        if delivery_warning is not None:
+            reward_description += (
+                "\n\n⚠️ **La récompense est sauvegardée**, mais "
+                f"{delivery_warning[0].lower()}{delivery_warning[1:]}"
+            )
 
         if role_warning is not None:
             reward_description += (

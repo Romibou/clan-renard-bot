@@ -20,7 +20,10 @@ class FakePool:
 
 
 def make_cog(pool: FakePool) -> ProgressionCog:
-    bot = SimpleNamespace(database=SimpleNamespace(pool=pool))
+    bot = SimpleNamespace(
+        database=SimpleNamespace(pool=pool),
+        get_cog=lambda name: None,
+    )
     cog = ProgressionCog(bot)  # type: ignore[arg-type]
     cog.get_pool = lambda: pool  # type: ignore[method-assign]
     return cog
