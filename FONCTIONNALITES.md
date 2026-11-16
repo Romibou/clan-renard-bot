@@ -557,8 +557,8 @@ Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’ann
 | ❔ **Aide** | Rappel de la mise en forme et des raccourcis |
 | 🚀 **Publier** | Demande confirmation (salon, mention), puis publie |
 | ⏰ **Programmer** | Publie automatiquement à la date choisie |
-| 📐 **Format** | Classique (cadre habituel) ou grand (nouveau format Discord, voir plus bas) |
-| 👁️ **Aperçu réel** | En format grand : montre l’annonce exactement comme elle sera publiée |
+| 📐 **Format** | Classique, grand ou pleine largeur (voir plus bas) |
+| 👁️ **Aperçu réel** | En format grand ou pleine largeur : montre l’annonce exactement comme elle sera publiée |
 | 🔄 **Recommencer** | Efface le brouillon (deux clics pour confirmer) |
 
 - **Brouillon enregistré** : chaque changement est sauvegardé. Le studio se ferme au bout de 14 minutes (limite de Discord), `/annonce creer` le rouvre exactement où tu en étais.
@@ -566,12 +566,14 @@ Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’ann
 - **Sections** : une ligne `## Titre` puis le contenu en dessous.
 - **Contrôles avant publication** : annonce vide, textes trop longs, salon manquant, permissions du bot (envoyer, intégrer des liens, joindre des fichiers, mentionner @everyone). Mentionner @everyone ou un rôle non mentionnable demande aussi que **toi** en aies le droit.
 
-### Format classique ou grand
+### Les trois formats
 
 - **Classique** (par défaut) : le cadre habituel des bots. Sa largeur maximale est fixée par Discord.
 - **Grand** : le nouveau type de message de Discord, où chaque cadre devient un bloc avec la barre de couleur. L’en-tête et le pied de page deviennent du petit texte gris, les sections s’empilent (pas de colonnes) et les boutons liens sont dans le dernier bloc. Discord y limite le texte total à 4 000 caractères.
-- L’aperçu du studio reste au format classique : 👁️ **Aperçu réel** montre le format grand tel quel.
-- Le format choisi est gardé pour l’annonce suivante. Il ne peut pas être changé sur une annonce déjà publiée (règle de Discord) : il faut en publier une nouvelle.
+- **Pleine largeur** : même nouveau type de message, mais **sans cadre ni barre de couleur** : le texte prend toute la largeur du salon, comme un message écrit par un membre. Les images et les boutons suivent en dessous, un séparateur marque chaque nouveau cadre.
+- Le bouton 📐 passe d’un format à l’autre : classique → grand → pleine largeur.
+- L’aperçu du studio reste au format classique : 👁️ **Aperçu réel** montre les autres formats tels quels.
+- Le format choisi est gardé pour l’annonce suivante. Une annonce publiée ne peut pas passer du classique à un nouveau format, ou l’inverse (règle de Discord) : il faut en publier une nouvelle.
 - Les :émojis: du serveur écrits sous la forme `:nom:` sont convertis automatiquement, dans les deux formats.
 
 ### Dates à l’heure de chaque membre

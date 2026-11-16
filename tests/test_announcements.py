@@ -464,3 +464,37 @@ async def test_edit_refuses_format_change() -> None:
 
     with pytest.raises(AnnouncementError, match="format"):
         await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5))
+
+
+def test_full_width_format_has_no_container() -> None:
+    from bot.features.announcements.layout import build_layout
+
+    draft = large_draft()
+    draft["format"] = "text"
+    draft["embeds"].append({"title": "Deuxième", "description": "suite", "fields": []})
+    payload = build_layout(draft, uploads={4: "4_affiche.png"}, now=NOW).to_components()
+    kinds = [item["type"] for item in payload]
+
+    assert 17 not in kinds  # aucun bloc : pleine largeur
+    assert kinds[0] == 10 and payload[0]["content"] == "@everyone"
+    assert 9 in kinds and 12 in kinds  # section avec miniature, image
+    assert kinds.count(14) >= 2  # séparateur avant le pied de page et entre les cadres
+    assert kinds[-2:] == [1, 1]  # boutons en bas
+    assert normalize_draft({"format": "text"})["format"] == "text"
+
+
+async def test_format_button_cycles_three_formats() -> None:
+    cog, origin = fake_studio_parts()
+    view = studio_module.StudioView(cog, origin, filled_draft())
+    seen = []
+
+    async def fake_refresh(interaction, notice=None):
+        seen.append((view.draft["format"], notice))
+
+    view.refresh = fake_refresh
+
+    for _ in range(3):
+        await view.on_format(None)
+
+    assert [fmt for fmt, _ in seen] == ["large", "text", "classic"]
+    assert "pleine largeur" in seen[1][1]

@@ -1,6 +1,11 @@
 """
-Format « grand » des annonces : le nouveau type de message Discord
-(« Components V2 ») où chaque cadre devient un bloc (Container).
+Formats « grand » et « pleine largeur » des annonces : le nouveau
+type de message Discord (« Components V2 »).
+
+- grand : chaque cadre devient un bloc (Container) avec la barre de
+  couleur, un peu plus large qu'un cadre classique ;
+- pleine largeur : pas de bloc du tout, le texte prend toute la
+  largeur du salon comme un message normal (pas de barre de couleur).
 
 Différences avec le format classique :
 - l'en-tête et le pied de page deviennent du petit texte gris ;
@@ -145,9 +150,10 @@ def layout_problems(draft: dict[str, Any]) -> list[str]:
 
 def count_components(draft: dict[str, Any]) -> int:
     total = 1 if message_content(draft) else 0
+    framed = draft.get("format") != "text"
 
     for block in layout_texts(draft, now=datetime.now()):
-        total += 1  # le bloc
+        total += 1 if framed else 1  # le bloc, ou le séparateur entre cadres
         total += 1 if block["header"] or block["fields"] else 0
         total += 1 if block["fields"] and block["header"] else 0
         total += 2 if block["thumbnail"].get("url") else 0  # section + miniature
@@ -168,6 +174,7 @@ def build_layout(
     placeholder: str | None = None,
 ) -> discord.ui.LayoutView:
     uploads = uploads or {}
+    framed = draft.get("format") != "text"
     view = discord.ui.LayoutView(timeout=None)
     top = message_content(draft)
 
@@ -180,7 +187,12 @@ def build_layout(
         layout_texts(draft, now=now, placeholder=placeholder),
         [e for e in draft.get("embeds", []) if placeholder or _has_body(e)],
     ):
-        container = discord.ui.Container(accent_colour=block["color"])
+        # Pleine largeur : les éléments vont directement dans le message,
+        # avec un séparateur entre deux cadres.
+        if not framed and len(view.children) > (1 if top else 0):
+            view.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
+
+        container = discord.ui.Container(accent_colour=block["color"]) if framed else view
         thumbnail = _image_url(embed, "thumbnail", uploads)
         header = block["header"]
 
@@ -204,6 +216,9 @@ def build_layout(
         if block["footer"]:
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(block["footer"]))
+
+        if not framed:
+            continue
 
         if not container.children:
             continue

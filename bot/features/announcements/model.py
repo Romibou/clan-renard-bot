@@ -50,6 +50,11 @@ DEFAULT_COLOR = 0xF28C28  # orange renard
 
 MENTIONS = ("none", "everyone", "here", "role")
 
+# classic = cadre habituel ; large = nouveau format dans un bloc ;
+# text = nouveau format sans bloc, en pleine largeur comme un message normal.
+FORMATS = ("classic", "large", "text")
+NEW_FORMATS = ("large", "text")
+
 COLOR_NAMES = {
     "renard": 0xF28C28,
     "orange": 0xF28C28,
@@ -142,7 +147,7 @@ def normalize_draft(data: Any) -> dict[str, Any]:
     if draft["mention"] == "role" and draft["role_id"] is None:
         draft["mention"] = "none"
 
-    draft["format"] = "large" if draft.get("format") == "large" else "classic"
+    draft["format"] = draft.get("format") if draft.get("format") in FORMATS else "classic"
 
     editing = draft.get("editing")
 
@@ -287,7 +292,7 @@ def problems(draft: dict[str, Any]) -> list[str]:
         if len((embed.get("author") or {}).get("name") or "") > MAX_AUTHOR:
             found.append(f"{name} : en-tête trop long ({MAX_AUTHOR} max).")
 
-    if draft.get("format") == "large":
+    if draft.get("format") in NEW_FORMATS:
         from bot.features.announcements.layout import layout_problems
 
         found += layout_problems(draft)

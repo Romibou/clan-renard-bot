@@ -22,6 +22,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from bot.features.announcements.model import (
+    NEW_FORMATS,
     AnnouncementError,
     attachment_name,
     default_draft,
@@ -36,6 +37,7 @@ from bot.features.announcements.model import (
 from bot.features.announcements.layout import build_layout
 from bot.features.announcements.repository import AnnouncementRepository
 from bot.features.announcements.studio import (
+    FORMAT_NAMES,
     INFO_COLOR,
     SUCCESS_COLOR,
     StudioView,
@@ -179,7 +181,7 @@ class AnnouncementCog(commands.Cog):
     async def payload(self, guild: discord.Guild, draft: dict[str, Any]) -> dict[str, Any]:
         names, files = await self.load_images(guild.id, draft)
 
-        if draft.get("format") == "large":
+        if draft.get("format") in NEW_FORMATS:
             # Nouveau format : tout est dans la vue (pas de texte ni de cadre classique).
             return {
                 "view": build_layout(draft, uploads=names, now=datetime.now(timezone.utc)),
@@ -234,8 +236,11 @@ class AnnouncementCog(commands.Cog):
             f"🖊️ Cadre {studio.index + 1}/{len(draft['embeds'])}"
         )
 
-        if draft.get("format") == "large":
-            lines.append("📐 Format **grand** : l'aperçu ci-dessous est approximatif, clique sur 👁️ **Aperçu réel**.")
+        if draft.get("format") in NEW_FORMATS:
+            name = FORMAT_NAMES[draft["format"]]
+            lines.append(
+                f"📐 Format **{name}** : l'aperçu ci-dessous est approximatif, clique sur 👁️ **Aperçu réel**."
+            )
 
         if len(draft.get("buttons", [])) > 5:
             lines.append(f"🔗 {len(draft['buttons'])} boutons (5 visibles dans l'aperçu)")
@@ -481,12 +486,13 @@ class AnnouncementCog(commands.Cog):
             raise AnnouncementError("\n".join(f"• {issue}" for issue in issues))
 
         message = await self.fetch_own_message(guild, editing["channel_id"], editing["message_id"])
-        large = draft.get("format") == "large"
+        large = draft.get("format") in NEW_FORMATS
 
         if bool(message.flags.components_v2) != large:
+            published = "grand ou pleine largeur" if message.flags.components_v2 else "classique"
             raise AnnouncementError(
-                "Discord ne permet pas de changer le format d'une annonce déjà publiée "
-                f"(elle est en format {'grand' if message.flags.components_v2 else 'classique'}). "
+                "Discord ne permet pas de passer du format classique aux nouveaux formats "
+                f"(ou l'inverse) sur une annonce déjà publiée (elle est en format {published}). "
                 "Remets ce format, ou publie une nouvelle annonce."
             )
 

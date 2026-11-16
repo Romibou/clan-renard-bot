@@ -115,6 +115,22 @@ def button_label(button: dict[str, Any]) -> str | None:
     return None if label in ("", "​") else label
 
 
+FORMAT_NAMES = {"classic": "classique", "large": "grand", "text": "pleine largeur"}
+FORMAT_NOTICES = {
+    "classic": "📐 Format **classique** : le cadre habituel des bots.",
+    "large": (
+        "📐 Format **grand** : un bloc avec la barre de couleur, un peu plus large. En-tête et pied "
+        "de page en petit texte, sections empilées, 4 000 caractères au total. "
+        "Clique sur 👁️ **Aperçu réel** pour le voir."
+    ),
+    "text": (
+        "📐 Format **pleine largeur** : sans cadre ni barre de couleur, le texte prend toute la "
+        "largeur du salon comme un message normal (images et boutons en dessous). "
+        "4 000 caractères au total. Clique sur 👁️ **Aperçu réel** pour le voir."
+    ),
+}
+
+
 # ============================================================
 # FENÊTRES DE SAISIE
 # ============================================================
@@ -960,17 +976,17 @@ class StudioView(discord.ui.View):
             self.button("Publier", "🚀", self.on_publish, row=3, style=discord.ButtonStyle.success)
             self.button("Programmer", "⏰", self.on_schedule, row=3, style=discord.ButtonStyle.primary)
 
-        large = self.draft.get("format") == "large"
+        current = self.draft.get("format", "classic")
         # Discord ne permet pas de changer le format d'un message publié.
         self.button(
-            "Format : grand" if large else "Format : classique",
+            f"Format : {FORMAT_NAMES.get(current, 'classique')}",
             "📐",
             self.on_format,
             row=3,
             disabled=self.editing,
         )
 
-        if large:
+        if current != "classic":
             self.button("Aperçu réel", "👁️", self.on_large_preview, row=3)
 
         self.button(
@@ -1131,18 +1147,10 @@ class StudioView(discord.ui.View):
         await interaction.response.send_modal(ScheduleModal(self))
 
     async def on_format(self, interaction: discord.Interaction) -> None:
-        large = self.draft.get("format") != "large"
-        self.draft["format"] = "large" if large else "classic"
-        await self.refresh(
-            interaction,
-            notice=(
-                "📐 Format **grand** : nouveau type de message Discord. En-tête et pied de page "
-                "en petit texte, sections empilées, boutons dans le cadre, 4 000 caractères au total. "
-                "Clique sur 👁️ **Aperçu réel** pour le voir."
-                if large
-                else "📐 Format **classique** : le cadre habituel."
-            ),
-        )
+        order = ("classic", "large", "text")
+        current = self.draft.get("format", "classic")
+        self.draft["format"] = order[(order.index(current) + 1) % len(order)] if current in order else "large"
+        await self.refresh(interaction, notice=FORMAT_NOTICES[self.draft["format"]])
 
     async def on_large_preview(self, interaction: discord.Interaction) -> None:
         await self.cog.large_preview(interaction, self.draft)
