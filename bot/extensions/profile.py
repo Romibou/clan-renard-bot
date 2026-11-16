@@ -154,6 +154,7 @@ def font(
                     "/usr/share/fonts/truetype/liberation2/"
                     "LiberationSans-Bold.ttf"
                 ),
+                "C:/Windows/Fonts/arialbd.ttf",
             ]
         )
     else:
@@ -167,6 +168,13 @@ def font(
                     "/usr/share/fonts/truetype/liberation2/"
                     "LiberationSans-Regular.ttf"
                 ),
+                str(
+                    Path(__file__).resolve().parents[2]
+                    / "assets"
+                    / "fonts"
+                    / "NotoSans-Regular.ttf"
+                ),
+                "C:/Windows/Fonts/arial.ttf",
             ]
         )
 
@@ -180,6 +188,56 @@ def font(
             continue
 
     return ImageFont.load_default()
+
+
+def fit_layer(
+    layer: Image.Image,
+    size: tuple[int, int],
+) -> Image.Image:
+    """
+    Adapte un calque transparent (cadre, effet) à la carte.
+
+    Contrairement au fond, il n'est pas recadré : un cadre en 1400x500
+    perdrait ses bords gauche et droit. Il est donc légèrement étiré
+    pour occuper exactement la carte.
+    """
+    if layer.size == size:
+        return layer
+
+    return layer.resize(
+        size,
+        Image.Resampling.LANCZOS,
+    )
+
+
+def readability_overlay(
+    size: tuple[int, int],
+) -> Image.Image:
+    """
+    Voile sombre en dégradé derrière le texte, pour qu'il reste
+    lisible sur un fond illustré sans masquer toute l'image.
+    """
+    width, height = size
+    overlay = Image.new("L", (width, 1), 0)
+    pixels = overlay.load()
+
+    def smooth(start: float, end: float, value: float) -> float:
+        ratio = min(1.0, max(0.0, (value - start) / (end - start)))
+        return ratio * ratio * (3 - 2 * ratio)
+
+    for x in range(width):
+        # Léger voile sur l'avatar, montée douce vers la zone du
+        # texte, puis redescente vers le bord droit (badge).
+        rise = smooth(180, 520, x)
+        fall = smooth(880, width, x)
+        alpha = 55 + 125 * rise - 70 * fall
+        pixels[x, 0] = int(alpha)
+
+    mask = overlay.resize((width, height))
+    shade = Image.new("RGBA", size, (8, 10, 18, 255))
+    shade.putalpha(mask)
+
+    return shade
 
 
 def load_rgba_asset(
@@ -2331,28 +2389,40 @@ class ProfileCog(commands.Cog):
             "RGBA",
         )
 
-        overlay_draw.rounded_rectangle(
-            (
-                35,
-                35,
-                1165,
-                465,
-            ),
-            radius=40,
-            fill=(
-                10,
-                12,
-                20,
-                155,
-            ),
-            outline=(
-                selected_color[0],
-                selected_color[1],
-                selected_color[2],
-                230,
-            ),
-            width=4,
+        has_illustration = (
+            background_cosmetic is not None
         )
+        has_frame = (
+            equipped.get("frame") is not None
+        )
+
+        if has_illustration:
+            # Fond illustré : on garde l'image visible et on assombrit
+            # seulement la zone du texte, en dégradé.
+            background.alpha_composite(
+                readability_overlay(background.size)
+            )
+        else:
+            overlay_draw.rounded_rectangle(
+                (35, 35, 1165, 465),
+                radius=40,
+                fill=(10, 12, 20, 155),
+            )
+
+        # La bordure de couleur n'est dessinée que sans cadre équipé :
+        # sinon elle se superposait au cadre.
+        if not has_frame:
+            overlay_draw.rounded_rectangle(
+                (35, 35, 1165, 465),
+                radius=40,
+                outline=(
+                    selected_color[0],
+                    selected_color[1],
+                    selected_color[2],
+                    230,
+                ),
+                width=4,
+            )
 
         background.alpha_composite(
             overlay
@@ -2387,12 +2457,9 @@ class ProfileCog(commands.Cog):
             )
 
             if effect_asset is not None:
-                effect_asset = ImageOps.fit(
+                effect_asset = fit_layer(
                     effect_asset,
                     background.size,
-                    method=(
-                        Image.Resampling.LANCZOS
-                    ),
                 )
 
                 background.alpha_composite(
@@ -2528,6 +2595,8 @@ class ProfileCog(commands.Cog):
                 display_name,
                 28,
             ),
+            stroke_width=3,
+            stroke_fill=(0, 0, 0, 140),
             font=font(
                 52,
                 bold=True,
@@ -2549,6 +2618,8 @@ class ProfileCog(commands.Cog):
                 title,
                 45,
             ),
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 140),
             font=font(
                 28,
                 bold=True,
@@ -2582,6 +2653,8 @@ class ProfileCog(commands.Cog):
                 255,
             ),
             spacing=10,
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 130),
         )
 
         # Série quotidienne actuelle en bas à droite.
@@ -2766,12 +2839,9 @@ class ProfileCog(commands.Cog):
             )
 
             if frame_asset is not None:
-                frame_asset = ImageOps.fit(
+                frame_asset = fit_layer(
                     frame_asset,
                     background.size,
-                    method=(
-                        Image.Resampling.LANCZOS
-                    ),
                 )
 
                 background.alpha_composite(
