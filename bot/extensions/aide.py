@@ -26,6 +26,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "🛍️ Boutique et profil": (
         "boutique",
         "profil",
+        "collections",
         "donner",
     ),
     "🎄 Calendrier de l'Avent": (

@@ -787,6 +787,33 @@ class ProfileView(discord.ui.View):
         )
 
     @discord.ui.button(
+        label="Collections",
+        emoji="📚",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def show_collections(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        collection_cog = interaction.client.get_cog("CollectionCog")
+
+        if collection_cog is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Indisponible",
+                    "Le module des collections n'est pas chargé.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await collection_cog.send_collections(
+            interaction,
+            self.owner,
+        )
+
+    @discord.ui.button(
         label="Actualiser",
         emoji="🔄",
         style=discord.ButtonStyle.secondary,

@@ -72,6 +72,7 @@ Clan Renard Bot possède actuellement les systèmes suivants :
 | `/missions` | Membres | Affiche et réclame les missions |
 | `/missions-admin` | Administration | Configure les missions |
 | `/donner` | Membres | Donne des pièces à un membre |
+| `/collections` | Membres | Tableau des collections de cosmétiques |
 | `/classement` | Membres | Classements XP, argent, série, semaine et mois |
 | `/stats` | Membres | Statistiques d’un membre |
 | `/rappel` | Membres | Programme un rappel |
@@ -1154,6 +1155,19 @@ La progression compte depuis le début réel de la période, même si le membre 
 ## Administration
 
 `/missions-admin` permet d’activer le système et de configurer jusqu’à 25 missions au format JSON (bouton **Exemple**). Chaque mission peut donner de l’XP, des pièces et un cosmétique de profil.
+
+---
+
+# Collections de cosmétiques
+
+`/collections` (ou le bouton **Collections** de `/profil`) affiche, pour chaque thème, les cosmétiques possédés et manquants, par exemple « 🌋 Volcan 2026 — 3/4 ». `/collections membre:@Membre` montre celles d’un autre membre.
+
+Les collections sont formées automatiquement à partir de l’identifiant des cosmétiques, écrit `type-collection` : `background-volcan-2026`, `frame-volcan-2026`, `badge-volcan-2026` et `effect-volcan-2026` forment la collection « Volcan 2026 ».
+
+- Le premier mot doit être le type : `background`, `frame`, `badge`, `effect` ou `title` (ou `fond`, `cadre`, `effet`, `titre`).
+- Une collection compte au moins 2 cosmétiques ; un cosmétique seul (comme `title-bot`) n’apparaît pas.
+- Les thèmes connus ont un nom et un émoji (hiver/snow, noël, volcan, océan, eau, nocturne, désert, forêt, temple, halloween). Un nouveau thème s’affiche avec son nom.
+- Si le serveur possède des émojis nommés `clanrenard_yes` et `clanrenard_no`, ils remplacent ✅ et ❌.
 
 ---
 
