@@ -34,6 +34,7 @@ from bot.features.announcements.model import (
     parse_datetime,
     summary_title,
     text_to_buttons,
+    text_to_reactions,
     text_to_fields,
     upload_ids,
 )
@@ -455,7 +456,7 @@ class SectionsModal(StudioModal):
 
 class ButtonsModal(StudioModal):
     def __init__(self, studio: StudioView) -> None:
-        super().__init__(studio, "🔗 Boutons liens")
+        super().__init__(studio, "🔗 Boutons et réactions")
 
         label, self.text_input = label_input(
             "Boutons sous l'annonce",
@@ -467,8 +468,18 @@ class ButtonsModal(StudioModal):
         )
         self.add_item(label)
 
+        label, self.reactions_input = label_input(
+            "Réactions ajoutées par le bot",
+            description="Émojis séparés par des espaces : 👍 🎉 :clanrenard_yes: (20 maximum).",
+            default=" ".join(studio.draft.get("reactions", [])),
+            placeholder="👍 🎉 ❤️",
+            max_length=1000,
+        )
+        self.add_item(label)
+
     async def apply(self, interaction: discord.Interaction) -> str | None:
         self.studio.draft["buttons"] = text_to_buttons(self.emojis(self.text_input.value))
+        self.studio.draft["reactions"] = text_to_reactions(self.emojis(self.reactions_input.value))
 
         return None
 
@@ -768,24 +779,27 @@ class ConfirmPublishView(discord.ui.View):
             view=None,
         )
 
+        warnings: list[str] = []
+
         try:
             message = await self.studio.cog.publish(
-                interaction.guild, self.studio.draft, interaction.user
+                interaction.guild, self.studio.draft, interaction.user, warnings=warnings
             )
         except AnnouncementError as error:
             await interaction.edit_original_response(embed=error_embed(str(error)))
             return
 
+        extra = "".join(f"\n{warning}" for warning in warnings)
         await interaction.edit_original_response(
             embed=discord.Embed(
-                description=f"✅ Annonce publiée : {message.jump_url}",
+                description=f"✅ Annonce publiée : {message.jump_url}{extra}",
                 color=SUCCESS_COLOR,
             )
         )
         self.studio.reset_after_send()
         await self.studio.refresh(
             None,
-            notice=f"✅ Publiée : {message.jump_url}\nLe studio repart sur un brouillon vide.",
+            notice=f"✅ Publiée : {message.jump_url}{extra}\nLe studio repart sur un brouillon vide.",
         )
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
@@ -924,7 +938,7 @@ class StudioView(discord.ui.View):
         self.button("Style", "🎨", self.on_style, row=0)
         self.button("Images", "🖼️", self.on_images, row=0)
         self.button("Sections", "📑", self.on_sections, row=0)
-        self.button("Boutons", "🔗", self.on_buttons, row=0)
+        self.button("Boutons et réactions", "🔗", self.on_buttons, row=0)
 
         options = [
             discord.SelectOption(
@@ -1100,16 +1114,21 @@ class StudioView(discord.ui.View):
         if self.editing:
             await interaction.response.defer()
 
+            warnings: list[str] = []
+
             try:
-                message = await self.cog.apply_edit(interaction.guild, self.draft, interaction.user)
+                message = await self.cog.apply_edit(
+                    interaction.guild, self.draft, interaction.user, warnings=warnings
+                )
             except AnnouncementError as error:
                 await send_error(interaction, str(error))
                 return
 
+            extra = "".join(f"\n{warning}" for warning in warnings)
             self.reset_after_send()
             await self.refresh(
                 None,
-                notice=f"💾 Annonce modifiée : {message.jump_url}\nLe studio repart sur un brouillon vide.",
+                notice=f"💾 Annonce modifiée : {message.jump_url}{extra}\nLe studio repart sur un brouillon vide.",
             )
             return
 

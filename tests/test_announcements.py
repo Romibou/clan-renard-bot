@@ -624,6 +624,7 @@ async def test_edit_long_announcement_shrinks_and_refuses_growth() -> None:
     async def log(*args):
         return None
 
+    cog.bot = SimpleNamespace(user=SimpleNamespace(id=999))
     cog.fetch_own_message = fetch
     cog.repository = SimpleNamespace(find_published=find, record_edited=record_edited)
     cog.log = log
@@ -644,3 +645,70 @@ async def test_edit_long_announcement_shrinks_and_refuses_growth() -> None:
 
     with pytest.raises(AnnouncementError, match="insérer"):
         await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5, mention="<@5>"))
+
+
+# ---------------------------------------------------------------
+# Réactions
+# ---------------------------------------------------------------
+
+
+def test_text_to_reactions() -> None:
+    from bot.features.announcements.model import text_to_reactions
+
+    assert text_to_reactions("👍 🎉, <:renard:123456789012345678> 👍") == [
+        "👍",
+        "🎉",
+        "<:renard:123456789012345678>",
+    ]
+    assert text_to_reactions("") == []
+
+    with pytest.raises(AnnouncementError):
+        text_to_reactions("👍 bonjour")
+
+    with pytest.raises(AnnouncementError, match="20"):
+        text_to_reactions(" ".join(f"<:e{i}:1234567890123456{i:02d}>" for i in range(21)))
+
+    assert normalize_draft({"reactions": ["👍", "👍", "", "🎉"]})["reactions"] == ["👍", "🎉"]
+
+
+async def test_sync_reactions_adds_removes_and_reports() -> None:
+    cog = AnnouncementCog.__new__(AnnouncementCog)
+    cog.bot = SimpleNamespace(user=SimpleNamespace(id=999))
+    added: list[str] = []
+    removed: list[str] = []
+
+    async def add_reaction(emoji):
+        if emoji == "<:autre:111111111111111111>":
+            raise discord.HTTPException(SimpleNamespace(status=400, reason="x"), "Unknown Emoji")
+        added.append(emoji)
+
+    async def remove_reaction(emoji, member):
+        removed.append(emoji)
+
+    message = SimpleNamespace(add_reaction=add_reaction, remove_reaction=remove_reaction, jump_url="url")
+    failed = await cog.sync_reactions(message, ["👍", "<:autre:111111111111111111>"], previous=["👍", "❤️"])
+
+    assert added == ["👍"] and removed == ["❤️"]
+    assert failed == ["<:autre:111111111111111111>"]
+
+    logged: list[str] = []
+
+    async def log(guild, text):
+        logged.append(text)
+
+    cog.log = log
+    warnings: list[str] = []
+    await cog.report_reactions(None, message, failed, warnings)
+    assert warnings and "autre" in warnings[0] and logged
+
+
+async def test_buttons_modal_reads_reactions() -> None:
+    cog, origin = fake_studio_parts()
+    view = studio_module.StudioView(cog, origin, filled_draft())
+    modal = studio_module.ButtonsModal(view)
+    check_modal_limits(modal)
+
+    modal.text_input._value = ""
+    modal.reactions_input._value = "👍 🎉"
+    await modal.apply(None)
+    assert view.draft["reactions"] == ["👍", "🎉"] and view.draft["buttons"] == []

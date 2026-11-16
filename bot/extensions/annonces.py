@@ -257,6 +257,9 @@ class AnnouncementCog(commands.Cog):
                 f"📐 Format **{name}** : l'aperçu ci-dessous est approximatif, clique sur 👁️ **Aperçu réel**."
             )
 
+        if draft.get("reactions"):
+            lines.append("😀 Réactions ajoutées après publication : " + " ".join(draft["reactions"]))
+
         if len(draft.get("buttons", [])) > 5:
             lines.append(f"🔗 {len(draft['buttons'])} boutons (5 visibles dans l'aperçu)")
 
@@ -399,6 +402,8 @@ class AnnouncementCog(commands.Cog):
                 ("Envoyer des messages", perms.send_messages),
                 ("Intégrer des liens", perms.embed_links),
                 ("Joindre des fichiers", perms.attach_files or not upload_ids(draft)),
+                ("Ajouter des réactions", perms.add_reactions or not draft.get("reactions")),
+                ("Voir les anciens messages", perms.read_message_history or not draft.get("reactions")),
             )
             if not ok
         ]
@@ -459,6 +464,7 @@ class AnnouncementCog(commands.Cog):
         author: discord.abc.User | discord.Object,
         *,
         scheduled: bool = False,
+        warnings: list[str] | None = None,
     ) -> discord.Message:
         channel = self.check_ready(
             guild,
@@ -476,8 +482,10 @@ class AnnouncementCog(commands.Cog):
                 messages = await self.send_parts(channel, payload)
                 message = messages[0]
                 extra_ids = [sent.id for sent in messages[1:]]
+                last = messages[-1]
             else:
                 message = await channel.send(**payload)
+                last = message
         except discord.HTTPException as error:
             raise AnnouncementError(
                 f"Discord a refusé le message : `{str(error)[:300]}`"
@@ -499,8 +507,56 @@ class AnnouncementCog(commands.Cog):
             f"📣 Annonce {'programmée ' if scheduled else ''}publiée par <@{author.id}> "
             f"dans {channel.mention} : [{summary_title(draft)}]({message.jump_url})",
         )
+        await self.report_reactions(
+            guild, message, await self.sync_reactions(last, draft.get("reactions") or []), warnings
+        )
 
         return message
+
+    async def sync_reactions(
+        self,
+        message: Any,
+        wanted: list[str],
+        previous: list[str] | tuple[str, ...] = (),
+    ) -> list[str]:
+        """Ajoute les réactions voulues, retire celles du bot qui ne le sont plus."""
+        failed: list[str] = []
+        me = self.bot.user
+
+        for emoji in previous:
+            if emoji not in wanted and me is not None:
+                try:
+                    await message.remove_reaction(emoji, me)
+                except (discord.HTTPException, TypeError, ValueError):
+                    pass
+
+        for emoji in wanted:
+            try:
+                await message.add_reaction(emoji)
+            except (discord.HTTPException, TypeError, ValueError):
+                failed.append(emoji)
+
+        return failed
+
+    async def report_reactions(
+        self,
+        guild: discord.Guild,
+        message: Any,
+        failed: list[str],
+        warnings: list[str] | None,
+    ) -> None:
+        if not failed:
+            return
+
+        text = (
+            "⚠️ Réaction(s) impossible(s) : " + " ".join(failed)
+            + " (émoji d'un autre serveur, supprimé, ou permission « Ajouter des réactions » manquante)."
+        )
+
+        if warnings is not None:
+            warnings.append(text)
+
+        await self.log(guild, f"{text}\n{message.jump_url}")
 
     @staticmethod
     def part_kwargs(payload: dict[str, Any], index: int) -> dict[str, Any]:
@@ -564,6 +620,8 @@ class AnnouncementCog(commands.Cog):
         guild: discord.Guild,
         draft: dict[str, Any],
         user: discord.abc.User,
+        *,
+        warnings: list[str] | None = None,
     ) -> discord.Message:
         editing = draft["editing"]
         issues = problems(draft)
@@ -635,6 +693,11 @@ class AnnouncementCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
+        # Les réactions sont sur le dernier morceau.
+        last = message.channel.get_partial_message(extra_ids[-1]) if extra_ids else message
+        previous = (published["data"].get("reactions") or []) if published else []
+        failed = await self.sync_reactions(last, draft.get("reactions") or [], previous)
+
         snapshot = dict(draft, editing=None, channel_id=editing["channel_id"])
         await self.repository.record_edited(
             guild.id,
@@ -649,6 +712,7 @@ class AnnouncementCog(commands.Cog):
             guild,
             f"✏️ Annonce modifiée par {user.mention} : [{summary_title(draft)}]({message.jump_url})",
         )
+        await self.report_reactions(guild, message, failed, warnings)
 
         return message
 

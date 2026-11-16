@@ -41,6 +41,7 @@ MAX_FOOTER = 2048
 MAX_AUTHOR = 256
 MAX_EMBEDS_TOTAL = 6000
 MAX_BUTTONS = 25
+MAX_REACTIONS = 20  # limite de Discord par message
 MAX_BUTTON_LABEL = 80
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -111,6 +112,7 @@ def default_draft(guild_name: str, icon_url: str | None) -> dict[str, Any]:
         "role_id": None,
         "editing": None,
         "format": "classic",
+        "reactions": [],
     }
 
 
@@ -137,6 +139,13 @@ def normalize_draft(data: Any) -> dict[str, Any]:
         for button in (buttons if isinstance(buttons, list) else [])
         if isinstance(button, dict) and button.get("label") and button.get("url")
     ][:MAX_BUTTONS]
+
+    reactions = draft.get("reactions")
+    draft["reactions"] = list(
+        dict.fromkeys(
+            str(emoji) for emoji in (reactions if isinstance(reactions, list) else []) if emoji
+        )
+    )[:MAX_REACTIONS]
 
     draft["channel_id"] = _optional_int(draft.get("channel_id"))
     draft["role_id"] = _optional_int(draft.get("role_id"))
@@ -685,6 +694,29 @@ def text_to_buttons(text: str) -> list[dict[str, Any]]:
         raise AnnouncementError(f"{MAX_BUTTONS} boutons maximum.")
 
     return buttons
+
+
+def text_to_reactions(text: str) -> list[str]:
+    """« 👍 🎉 <:renard:123…> » → liste d'émojis (doublons retirés)."""
+    reactions: list[str] = []
+
+    for token in re.split(r"[\s,;]+", text.strip()):
+        if not token:
+            continue
+
+        if not _is_emoji(token):
+            raise AnnouncementError(
+                f"« {token[:40]} » n'est pas un émoji. Sépare les émojis par des espaces : "
+                "`👍 🎉 :clanrenard_yes:`."
+            )
+
+        if token not in reactions:
+            reactions.append(token)
+
+    if len(reactions) > MAX_REACTIONS:
+        raise AnnouncementError(f"{MAX_REACTIONS} réactions maximum (limite de Discord).")
+
+    return reactions
 
 
 def parse_color(text: str) -> int | None:

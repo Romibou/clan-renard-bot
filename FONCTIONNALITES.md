@@ -549,7 +549,7 @@ Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’ann
 | 🎨 **Style** | Couleur de la barre (`#F28C28` ou `orange`, `rouge`, `bleu`…), en-tête, pied de page, date, logo du serveur |
 | 🖼️ **Images** | Grande image et miniature, en **fichier envoyé depuis le PC** (8 Mo max) ou en lien |
 | 📑 **Sections** | Blocs « titre + texte », côte à côte ou empilés |
-| 🔗 **Boutons** | Boutons liens sous l’annonce (25 max), une ligne par bouton : `🎮 Texte \| https://lien` |
+| 🔗 **Boutons et réactions** | Boutons liens sous l’annonce (25 max), une ligne par bouton : `🎮 Texte \| https://lien`. Et les réactions que le bot ajoute sous l’annonce (20 max), séparées par des espaces : `👍 🎉 :clanrenard_yes:` |
 | Menu **Cadre** | Choisir le cadre à modifier, en ajouter (10 max) ou en supprimer |
 | 📣 **Salon et mention** | Salon de publication, mention (personne, @everyone, @here ou un rôle) |
 | 🧩 **Modèles** | Charger, enregistrer ou supprimer une annonce type (25 max) |
@@ -564,6 +564,7 @@ Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’ann
 - **Brouillon enregistré** : chaque changement est sauvegardé. Le studio se ferme au bout de 14 minutes (limite de Discord), `/annonce creer` le rouvre exactement où tu en étais.
 - **Signature automatique** : un nouveau brouillon a déjà l’en-tête « Clan Renard » avec le logo, le pied de page « L’équipe Clan Renard » et la date de publication. Tout se change dans 🎨 Style.
 - **Sections** : une ligne `## Titre` puis le contenu en dessous.
+- **Réactions** : le bot les ajoute juste après la publication (sur le dernier message d’une longue annonce). Les émojis du serveur s’écrivent `:nom:`. Un émoji d’un autre serveur ou supprimé est signalé sans bloquer l’annonce. En modification, le bot ajoute les nouvelles réactions et retire les siennes qui ne sont plus dans la liste (les réactions des membres restent). Il faut les permissions « Ajouter des réactions » et « Voir les anciens messages ».
 - **Contrôles avant publication** : annonce vide, textes trop longs, salon manquant, permissions du bot (envoyer, intégrer des liens, joindre des fichiers, mentionner @everyone). Mentionner @everyone ou un rôle non mentionnable demande aussi que **toi** en aies le droit.
 
 ### Les trois formats
