@@ -42,7 +42,7 @@ class AdventAnnouncementTasks(commands.Cog):
     def cog_unload(self) -> None:
         self.check_announcements.cancel()
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def check_announcements(self) -> None:
         try:
             campaigns = (

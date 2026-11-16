@@ -156,7 +156,10 @@ class AdventTransactionRepository:
         self,
         campaign_id: int,
         limit: int = 10,
+        user_ids: list[int] | None = None,
     ) -> list[dict[str, int]]:
+        # user_ids : membres encore présents sur le serveur.
+        # None = aucun filtre (liste des membres pas encore chargée).
         records = await self.database.fetch(
             """
             SELECT
@@ -166,6 +169,10 @@ class AdventTransactionRepository:
                     AS total_points
             FROM advent_openings
             WHERE campaign_id = $1
+              AND (
+                    $3::BIGINT[] IS NULL
+                    OR user_id = ANY($3::BIGINT[])
+              )
             GROUP BY user_id
             ORDER BY
                 opened_count DESC,
@@ -175,6 +182,7 @@ class AdventTransactionRepository:
             """,
             campaign_id,
             limit,
+            user_ids,
         )
 
         return [

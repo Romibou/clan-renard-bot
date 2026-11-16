@@ -25,8 +25,8 @@ async def read_avatar(
         )
         return await asset.read()
     except (
-        discord.HTTPException,
-        discord.InvalidArgument,
+        discord.DiscordException,
+        ValueError,
         OSError,
     ):
         logger.warning(

@@ -80,7 +80,7 @@ def calendar_embed(
         inline=True,
     )
     embed.add_field(
-        name="✨ Points",
+        name="✨ Points gagnés",
         value=f"{state.total_points:,}".replace(",", " "),
         inline=True,
     )
@@ -359,8 +359,8 @@ def help_embed() -> discord.Embed:
         value=(
             "🎁 **Ouvrir la case** — ouvre la case disponible\n"
             "🔄 **Actualiser** — actualise ton calendrier\n"
-            "👤 **Mon profil** — affiche ta progression et tes points\n"
-            "🏆 **Mes récompenses** — affiche les récompenses obtenues\n"
+            "👤 **Profil** — affiche ta progression et tes points\n"
+            "🏆 **Récompenses** — affiche les récompenses obtenues\n"
             "📊 **Classement** — affiche les meilleurs participants\n"
             "🛍️ **Boutique** — permet de dépenser tes points\n"
             "❔ **Aide** — affiche ce message"
@@ -393,7 +393,8 @@ def help_embed() -> discord.Embed:
         name="🛍️ Boutique",
         value=(
             "Les points obtenus en ouvrant les cases peuvent être "
-            "dépensés dans la boutique pour débloquer des rôles.\n"
+            "dépensés dans la boutique pour débloquer des rôles "
+            "et des cosmétiques de profil.\n"
             "Les achats sont définitifs."
         ),
         inline=False,

@@ -441,7 +441,9 @@ class AdventImageGenerator:
         )
 
         safe_username = "".join(
-            character if character.isalnum() else "-"
+            character
+            if character.isascii() and character.isalnum()
+            else "-"
             for character in username
         ).strip("-")
 

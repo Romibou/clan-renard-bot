@@ -395,8 +395,10 @@ class AdventService:
         self,
         campaign_id: int,
         limit: int = 10,
+        user_ids: list[int] | None = None,
     ) -> list[dict[str, int]]:
         return await self.transactions.leaderboard(
             campaign_id,
             limit,
+            user_ids,
         )

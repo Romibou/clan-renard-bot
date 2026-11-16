@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import discord
 
-from bot.features.advent.avatar_service import read_avatar
 from bot.features.advent.image_generator import (
     AdventImageGenerator,
 )
@@ -18,12 +17,11 @@ async def build_calendar_response(
     image_generator: AdventImageGenerator,
     preview: bool = False,
 ) -> tuple[discord.Embed, discord.File, AdventView]:
-    avatar_bytes = await read_avatar(member)
-
+    # Le visuel actuel n'affiche pas l'avatar : le télécharger
+    # ralentissait chaque affichage du calendrier pour rien.
     rendered = await image_generator.render(
         state,
         member.display_name,
-        avatar_bytes=avatar_bytes,
         preview=preview,
     )
 

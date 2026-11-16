@@ -284,13 +284,24 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
             openings >= int(selected_item["min_openings"])
         )
 
+        is_role = str(
+            selected_item.get("item_type") or "role"
+        ) == "role"
+
         self.buy_button.disabled = (
-            already_purchased
-            or not can_afford
-            or not enough_openings
+            (already_purchased and not is_role)
+            or (
+                not already_purchased
+                and (not can_afford or not enough_openings)
+            )
         )
 
-        if already_purchased:
+        if already_purchased and is_role:
+            # L'achat est gratuit : le bot rend le rôle s'il a été
+            # retiré, ou indique qu'il est déjà possédé.
+            self.buy_button.label = "Restaurer le rôle"
+            self.buy_button.emoji = "♻️"
+        elif already_purchased:
             self.buy_button.label = "Déjà acheté"
             self.buy_button.emoji = "✅"
         elif not enough_openings:

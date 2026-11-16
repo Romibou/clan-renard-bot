@@ -30,6 +30,7 @@ from bot.shared.embeds import (
 )
 
 from bot.features.advent.views import CatchupDayView
+from bot.shared.members import present_member_ids
 
 logger = logging.getLogger(__name__)
 
@@ -532,7 +533,12 @@ class AdventCommands(commands.Cog):
             ranking = await self.service.get_leaderboard(
                 campaign.id,
                 limit=10,
+                user_ids=present_member_ids(
+                    self.bot,
+                    guild.id,
+                ),
             )
+
         except AdventError as error:
             await self._send_advent_error(
                 interaction,
@@ -580,6 +586,14 @@ class AdventCommands(commands.Cog):
             await self._send_guild_required(interaction)
             return
 
+        # Discord n'attend que 3 secondes une première réponse.
+        # Le 1er décembre à l'heure d'ouverture, tout le monde clique
+        # en même temps : on répond donc AVANT d'interroger la base.
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+
         try:
             campaign = await self.service.get_campaign_for_display(
                 guild.id
@@ -590,6 +604,7 @@ class AdventCommands(commands.Cog):
                 user_id=interaction.user.id,
                 campaign=campaign,
             )
+
         except AdventError as error:
             await self._send_advent_error(
                 interaction,
@@ -601,21 +616,11 @@ class AdventCommands(commands.Cog):
         available_days = sorted(state.available_days)
 
         if not available_days:
-            await interaction.response.defer(
-                ephemeral=True,
-                thinking=True,
-            )
-
             await self._open_case(interaction)
             return
 
         # S'il n'y a que la case du jour, on l'ouvre directement.
         if len(available_days) == 1:
-            await interaction.response.defer(
-                ephemeral=True,
-                thinking=True,
-            )
-
             await self._open_case(
                 interaction,
                 requested_day=available_days[0],
@@ -638,7 +643,7 @@ class AdventCommands(commands.Cog):
             ),
         )
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=embed,
             view=view,
             ephemeral=True,
@@ -735,7 +740,12 @@ class AdventCommands(commands.Cog):
             ranking = await self.service.get_leaderboard(
                 campaign.id,
                 limit=10,
+                user_ids=present_member_ids(
+                    self.bot,
+                    guild.id,
+                ),
             )
+
         except AdventError as error:
             await self._send_advent_error(
                 interaction,
