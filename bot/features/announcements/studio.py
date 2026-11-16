@@ -26,6 +26,7 @@ from bot.features.announcements.model import (
     buttons_to_text,
     color_to_text,
     convert_date_tokens,
+    convert_emojis,
     export_message,
     fields_to_text,
     import_message,
@@ -137,7 +138,16 @@ class StudioModal(discord.ui.Modal):
                 "`{dans:demain 21h}`."
             )
 
-        return converted
+        return self.emojis(converted)
+
+    def emojis(self, text: str) -> str:
+        return convert_emojis(
+            text,
+            [
+                (emoji.name, emoji.id, emoji.animated)
+                for emoji in getattr(self.studio.guild, "emojis", ())
+            ],
+        )
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
@@ -441,7 +451,7 @@ class ButtonsModal(StudioModal):
         self.add_item(label)
 
     async def apply(self, interaction: discord.Interaction) -> str | None:
-        self.studio.draft["buttons"] = text_to_buttons(self.text_input.value)
+        self.studio.draft["buttons"] = text_to_buttons(self.emojis(self.text_input.value))
 
         return None
 

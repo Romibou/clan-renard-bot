@@ -495,6 +495,28 @@ def convert_date_tokens(text: str, tz: tzinfo, now: datetime) -> tuple[str, list
     return DATE_TOKEN.sub(replace, text), errors
 
 
+EMOJI_SHORTCODE = re.compile(r"(?<![<\w\\]):([A-Za-z0-9_~]{2,32}):(?!\d)")
+
+
+def convert_emojis(text: str, emojis: list[tuple[str, int, bool]]) -> str:
+    """
+    Remplace « :clanrenard_yes: » par le vrai émoji du serveur
+    (<:clanrenard_yes:123…>). Dans une fenêtre de saisie, Discord ne
+    le fait pas tout seul. Les noms inconnus restent tels quels.
+    """
+    by_name: dict[str, str] = {}
+
+    for name, emoji_id, animated in emojis:
+        by_name.setdefault(name, f"<{'a' if animated else ''}:{name}:{emoji_id}>")
+        by_name.setdefault(name.lower(), by_name[name])
+
+    def replace(match: re.Match[str]) -> str:
+        name = match[1]
+        return by_name.get(name) or by_name.get(name.lower()) or match[0]
+
+    return EMOJI_SHORTCODE.sub(replace, text) if by_name else text
+
+
 # ------------------------------------------------------------
 # SECTIONS, BOUTONS, COULEURS (saisie texte)
 # ------------------------------------------------------------

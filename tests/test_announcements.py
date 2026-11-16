@@ -350,3 +350,19 @@ def test_permission_problem_messages() -> None:
     guild = SimpleNamespace(get_channel=lambda _id: None)
 
     assert "salon" in cog.permission_problem(guild, filled_draft())
+
+
+def test_convert_server_emojis() -> None:
+    from bot.features.announcements.model import convert_emojis
+
+    emojis = [("clanrenard_yes", 111111111111111111, False), ("Danse", 222222222222222222, True)]
+    text = r":clanrenard_yes: ok :danse: :inconnu: <:clanrenard_yes:111111111111111111> \:clanrenard_yes: 12:30:45"
+
+    assert convert_emojis(text, emojis) == (
+        "<:clanrenard_yes:111111111111111111> ok <a:Danse:222222222222222222> :inconnu: "
+        r"<:clanrenard_yes:111111111111111111> \:clanrenard_yes: 12:30:45"
+    )
+    assert convert_emojis("rien", []) == "rien"
+    assert text_to_buttons(convert_emojis(":clanrenard_yes: Oui | https://a.fr", emojis))[0]["emoji"] == (
+        "<:clanrenard_yes:111111111111111111>"
+    )
