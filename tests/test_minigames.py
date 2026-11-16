@@ -284,8 +284,6 @@ def test_bingo_helpers() -> None:
     assert bingo_module.parse_guess("-5") == -5
     assert bingo_module.parse_guess("4,2") is None
     assert bingo_module.parse_guess("abc") is None
-    assert "plus grand" in bingo_module.hint(10, 50)
-    assert "plus petit" in bingo_module.hint(90, 50)
     assert bingo_module.describe_reward(0, 500) == "500 pièces"
     assert bingo_module.describe_reward(0, 0) == "la gloire éternelle"
 
@@ -303,7 +301,12 @@ def bingo_record(**changes):
         "max_value": 100,
         "xp": 0,
         "coins": 500,
-        "hints": True,
+        "hints": False,
+        "chat_mode": True,
+        "created_by": 99,
+        "knower_ids": [],
+        "guild_id": 1,
+        "channel_id": 50,
         "max_attempts": 5,
         "secret": 77,
         "ends_at": datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -320,3 +323,102 @@ def test_bingo_embed_hides_secret_until_end() -> None:
 
     expired = bingo_module.build_bingo_embed(bingo_record(status="expired"), guesses=12, players=4)
     assert "**77**" in expired.description
+    assert "<@99>" in running.description  # l'animateur donne les indices
+    assert "dans ce salon" in running.description
+
+
+class FakePool:
+    def __init__(self) -> None:
+        self.round_updates = 0
+        self.flushed: list = []
+
+    async def fetchrow(self, query, *args):
+        self.round_updates += 1
+        return {"id": args[0]} if self.round_updates == 1 else None
+
+    async def executemany(self, query, rows):
+        self.flushed.extend(rows)
+
+
+def bingo_cog_with_state(**changes):
+    pool = FakePool()
+    bot = SimpleNamespace(database=SimpleNamespace(require_pool=lambda: pool), intents=SimpleNamespace(message_content=True))
+    cog = bingo_module.BingoCog(bot)
+    state = bingo_module.BingoState.from_record(bingo_record(round=1, winner_ids=[], found_numbers=[], **changes))
+    cog.states[state.id] = state
+    cog.by_channel[state.channel_id] = state.id
+    return cog, state, pool
+
+
+async def test_bingo_process_flow(monkeypatch) -> None:
+    async def nothing(_state):
+        return None
+
+    cog, state, pool = bingo_cog_with_state(max_attempts=2, secret=77)
+    monkeypatch.setattr(cog, "tell_knowers", nothing)
+    process = cog.process
+
+    assert (await process(3, 99, 77, 0)).kind == bingo_module.KNOWS  # l'animateur ne joue pas
+    assert (await process(3, 10, 500, 0)).kind == bingo_module.OUT_OF_RANGE
+
+    wrong = await process(3, 10, 12, 0)
+    assert wrong.kind == bingo_module.WRONG and wrong.left == 1
+    assert (await process(3, 10, 13, 10)).kind == bingo_module.COOLDOWN
+
+    assert (await process(3, 10, 14, 0)).kind == bingo_module.WRONG
+    assert (await process(3, 10, 77, 0)).kind == bingo_module.LIMIT  # 2 essais utilisés
+
+    win = await process(3, 20, 77, 0)
+    assert win.kind == bingo_module.WIN and win.secret == 77 and not win.finished
+    assert state.round == 2 and 1 <= state.secret <= 100
+    assert (2, 10) not in state.attempts  # nouvelle manche : essais remis à zéro
+    assert sum(row[3] for row in pool.flushed) == 3  # essais recopiés en base
+    assert state.guesses == 3 and state.players == {10, 20}
+
+
+async def test_bingo_last_round_closes() -> None:
+    cog, state, _pool = bingo_cog_with_state(rounds=1, secret=5)
+    win = await cog.process(3, 10, 5, 0)
+
+    assert win.finished
+    assert 3 not in cog.states and 50 not in cog.by_channel
+    assert (await cog.process(3, 11, 5, 0)).kind == bingo_module.CLOSED
+
+
+async def test_bingo_reads_channel_messages(monkeypatch) -> None:
+    cog, state, _pool = bingo_cog_with_state(secret=42)
+    reactions: list[str] = []
+    replies: list[str] = []
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(cog, "reward", nothing)
+    monkeypatch.setattr(cog, "refresh_message", nothing)
+    monkeypatch.setattr(cog, "tell_knowers", nothing)
+
+    def message(user_id: int, content: str):
+        async def add_reaction(emoji):
+            reactions.append(emoji)
+
+        async def reply(text, **kwargs):
+            replies.append(text)
+
+        return SimpleNamespace(
+            author=SimpleNamespace(id=user_id, bot=False, mention=f"<@{user_id}>"),
+            guild=SimpleNamespace(id=1),
+            channel=SimpleNamespace(id=50),
+            content=content,
+            add_reaction=add_reaction,
+            reply=reply,
+        )
+
+    await cog.on_message(message(10, "salut tout le monde"))
+    await cog.on_message(message(10, "17"))
+    assert reactions == [] and state.guesses == 1  # pas d'indice automatique
+
+    await cog.on_message(message(99, "42"))
+    assert reactions == ["🤫"]  # l'animateur ne peut pas jouer
+
+    await cog.on_message(message(11, "42"))
+    assert reactions[-1] == "🎉" and "BINGO" in replies[0]

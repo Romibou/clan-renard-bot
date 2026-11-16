@@ -21,13 +21,18 @@ UNANSWERED_COMPONENT_DELAY_SECONDS = 2.5
 
 
 class ClanRenardBot(commands.Bot):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, read_messages: bool = True) -> None:
         intents = discord.Intents.default()
 
         # Utile pour l'attribution de rôles et les futurs modules.
         # Il faut également activer Server Members Intent sur le
         # Discord Developer Portal.
         intents.members = True
+
+        # Lecture du texte des messages (bingo écrit dans le salon).
+        # Il faut activer Message Content Intent sur le Developer
+        # Portal ; sinon main.py relance le bot sans cette lecture.
+        intents.message_content = read_messages
 
         super().__init__(
             command_prefix=commands.when_mentioned,

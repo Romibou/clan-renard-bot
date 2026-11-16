@@ -57,7 +57,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/avent-admin` | Administrateur | Tout le calendrier de l’Avent |
 | `/drop` | Gérer le serveur | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
-| `/bingo lancer` / `arreter` | Gérer le serveur | Bingo « trouve le nombre » |
+| `/bingo lancer` / `nombre` / `arreter` | Gérer le serveur | Bingo « trouve le nombre » dans un salon |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
@@ -470,10 +470,12 @@ Victoires, défaites et nuls par jeu, séparés entre parties contre des membres
 ## `/bingo` (administration)
 
 ```text
-/bingo lancer pieces:1000 maximum:500 manches:3 duree:1h salon:#jeux
+/bingo lancer pieces:1000 maximum:500 manches:3 duree:1h salon:#bingo
 ```
 
-Le bot tire un nombre au hasard (personne ne le connaît, pas même l’admin qui lance). Les membres cliquent sur **🎯 Proposer un nombre** et tapent leur proposition dans une fenêtre. Le premier qui trouve gagne la récompense, et le salon est prévenu.
+Le bot tire un nombre au hasard. Les membres **écrivent leurs nombres directement dans le salon**, autant qu’ils veulent : un message qui n’est qu’un nombre (`42`, `1 000`) compte comme une proposition, le reste de la discussion est ignoré. Le premier qui trouve gagne : le bot réagit 🎉, lui répond et verse la récompense.
+
+**Les indices, c’est l’animateur** : l’admin qui lance le bingo reçoit le nombre en privé dans la confirmation, et le donne en indices comme il veut dans le salon (« plus grand ! », « il y a un 7 »…). À chaque nouvelle manche, il reçoit le nouveau nombre en message privé.
 
 | Option | Rôle | Par défaut |
 |---|---|---|
@@ -481,16 +483,27 @@ Le bot tire un nombre au hasard (personne ne le connaît, pas même l’admin qu
 | `minimum`, `maximum` | Bornes du nombre | 1 à 100 |
 | `manches` | Nombre de manches : un nouveau nombre et un nouveau gagnant à chaque fois (10 max) | 1 |
 | `duree` | Durée maximale (de 1 minute à 1 jour) | 30 minutes |
-| `indices` | Répondre en privé « plus grand / plus petit » | oui |
-| `essais` | Nombre d’essais par membre et par manche (0 = illimité) | illimité |
+| `essais` | Nombre d’essais par membre et par manche (0 = illimité). Au-delà, le bot réagit ⛔ une fois | illimité |
 | `message` | Texte affiché sur le bingo | — |
 | `salon` | Salon du bingo | salon actuel |
 
-- Les réponses aux propositions sont **privées** : seul le joueur voit son indice. Le message du bingo affiche le nombre de joueurs et de propositions, et les gagnants de chaque manche.
-- Anti-spam : 2 secondes minimum entre deux propositions d’un même membre.
-- Un seul bingo à la fois par salon. `/bingo arreter [salon]` l’arrête et révèle le nombre. À la fin du temps, le nombre est révélé aussi.
+| Commande | Rôle |
+|---|---|
+| `/bingo nombre [salon]` | Affiche en privé le nombre en cours (pour qu’un autre admin aide à animer) |
+| `/bingo arreter [salon]` | Arrête le bingo et révèle le nombre |
+
+- **Qui connaît le nombre ne joue pas** : l’admin qui a lancé le bingo et ceux qui ont fait `/bingo nombre`. Leurs nombres sont ignorés (le bot réagit 🤫 une fois).
+- Anti-spam léger : un nombre toutes les 0,8 seconde par membre, les autres sont ignorés.
+- Le message du bingo affiche le nombre de joueurs et de propositions (mis à jour toutes les 5 secondes) et les gagnants de chaque manche. À la fin du temps, le nombre est révélé.
+- Un seul bingo à la fois par salon. Un bingo en cours continue après un redémarrage du bot.
 - La récompense compte comme de l’argent gagné (comme un drop) et peut faire monter de niveau.
-- Le bouton continue de fonctionner après un redémarrage du bot.
+- Le bot doit pouvoir **ajouter des réactions** et **voir les anciens messages** dans le salon.
+
+### Lecture des messages : « Message Content Intent »
+
+Pour lire les nombres écrits dans le salon, l’option **Message Content Intent** doit être cochée sur le [Discord Developer Portal](https://discord.com/developers/applications) (application du bot → **Bot** → *Privileged Gateway Intents*), comme *Server Members Intent*.
+
+Si elle n’est pas cochée, le bot ne reste pas hors ligne : il redémarre tout seul sans lire les messages (une erreur l’explique dans les logs Render), et les nouveaux bingos passent par un bouton **🎯 Proposer un nombre** qui ouvre une fenêtre de saisie.
 
 ---
 
