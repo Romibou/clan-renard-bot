@@ -422,3 +422,135 @@ async def test_bingo_reads_channel_messages(monkeypatch) -> None:
 
     await cog.on_message(message(11, "42"))
     assert reactions[-1] == "🎉" and "BINGO" in replies[0]
+
+
+# ---------------------------------------------------------------
+# Pendu
+# ---------------------------------------------------------------
+
+from bot.features.minigames.hangman import (  # noqa: E402
+    GALLOWS,
+    MAX_ERRORS,
+    WORDS,
+    Hangman,
+    base_letter,
+    letter_count,
+    pick_word,
+)
+
+
+def test_hangman_accents_and_rules() -> None:
+    game = Hangman(word="écureuil", category="Animaux")
+
+    assert game.masked() == "_ _ _ _ _ _ _ _"
+    assert game.guess_letter("e") is True  # « e » révèle É et E
+    assert game.masked() == "É _ _ _ E _ _ _"
+
+    with pytest.raises(ValueError):
+        game.guess_letter("E")  # déjà proposée
+
+    assert game.guess_letter("z") is False and game.errors == 1 and game.wrong == ["Z"]
+
+    for letter in "CURIL":
+        game.guess_letter(letter)
+
+    assert game.solved and game.masked() == "É C U R E U I L"
+
+
+def test_hangman_word_guess_and_loss() -> None:
+    game = Hangman(word="arc-en-ciel")
+    assert game.masked() == "_ _ _ - _ _ - _ _ _ _"
+    assert game.guess_word("ARC EN CIEL") is False  # les tirets comptent
+    assert game.guess_word("arc-en-ciel") is True and game.solved
+
+    lost = Hangman(word="loup")
+
+    for letter in "ABCDEFG":
+        lost.guess_letter(letter)
+
+    assert lost.errors == MAX_ERRORS and lost.lost and lost.finished()
+    assert lost.gallows() == GALLOWS[-1]
+
+
+def test_hangman_word_list() -> None:
+    assert base_letter("ç") == "C" and base_letter("œ") == "OE"
+    assert Hangman(word="cœur").needed == {"C", "O", "E", "U", "R"}
+
+    for difficulty, (low, high) in (("facile", (3, 6)), ("difficile", (9, 30))):
+        for seed in range(20):
+            word, category = pick_word(difficulty, random.Random(seed))
+            assert low <= letter_count(word) <= high and word in WORDS[category]
+
+    assert len(GALLOWS) == MAX_ERRORS + 1
+
+
+async def test_pendu_duel_turns_and_win() -> None:
+    cog = FakeCog()
+    view = jeux.PenduView(cog, players=[10, 20], stake=100, match_id=5, guild_id=1, options={})
+    view.board = Hangman(word="loup", category="Animaux")
+    view.turn_index = 0
+    view.build()
+
+    await view.play(interaction_for(10), letter="L")  # bonne lettre : 10 rejoue
+    assert view.current_player == 10
+
+    wrong = interaction_for(20)
+    await view.play(wrong, letter="O")
+    assert wrong.response.messages  # pas son tour
+
+    await view.play(interaction_for(10), letter="Z")  # erreur : la main passe
+    assert view.current_player == 20
+
+    await view.play(interaction_for(20), word="loup")
+    assert view.over and cog.settled == [(5, 20)]
+    assert all(item.disabled for item in view.children)
+
+
+async def test_pendu_solo_loss_and_duel_draw() -> None:
+    cog = FakeCog()
+    solo = jeux.PenduView(cog, players=[None, 10], stake=0, match_id=None, guild_id=1, options={})
+    solo.board = Hangman(word="loup")
+    assert solo.current_player == 10
+
+    for letter in "ABCDEFG":
+        await solo.play(interaction_for(10), letter=letter)
+
+    assert solo.over and cog.results[-1] == (1, None)  # l'« IA » gagne : défaite en solo
+
+    cog = FakeCog()
+    duel = jeux.PenduView(cog, players=[10, 20], stake=50, match_id=8, guild_id=1, options={})
+    duel.board = Hangman(word="loup", max_errors=2)
+    duel.turn_index = 0
+    await duel.play(interaction_for(10), letter="A")
+    await duel.play(interaction_for(20), letter="B")
+    assert duel.over and cog.settled == [(8, None)]  # pendu en duel : mises rendues
+
+
+def test_pendu_view_limits() -> None:
+    view = jeux.PenduView(FakeCog(), players=[1, 2], stake=0, match_id=None, guild_id=1, options={})
+    view.board = Hangman(word="abcdefghijklm")
+
+    for letter in "ABCDEFGHIJKLM":
+        view.board.guessed.append(letter)
+
+    view.build()
+    first_select = view.children[0]
+    assert first_select.disabled and len(view.children) == 4
+    assert len(view.embed().description) <= 4096
+
+
+def test_leaderboard_lines() -> None:
+    rows = [
+        {"user_id": 1, "wins": 8, "losses": 2, "draws": 0, "ai_wins": 3, "ai_losses": 1, "coins_net": 1500},
+        {"user_id": 2, "wins": 1, "losses": 1, "draws": 0, "ai_wins": 0, "ai_losses": 0, "coins_net": -200},
+        {"user_id": 3, "wins": 0, "losses": 0, "draws": 0, "ai_wins": 9, "ai_losses": 0, "coins_net": 0},
+        {"user_id": 4, "wins": 0, "losses": 3, "draws": 1, "ai_wins": 0, "ai_losses": 0, "coins_net": 0},
+    ]
+
+    lines = jeux.leaderboard_lines(rows, "wins")
+    assert lines[0] == "🥇 <@1> — **8** V · 2 D · 0 N · 80 %"
+    assert lines[3].startswith("**4.** <@4>")
+
+    coins = jeux.leaderboard_lines(rows, "coins_net")
+    assert "**+1 500** pièces" in coins[0] and "**−200** pièces" in coins[1]
+    assert "**9** victoires" in jeux.leaderboard_lines(rows, "ai_wins")[2]

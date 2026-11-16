@@ -41,7 +41,8 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/collections [membre]` | Tableau des collections de cosmétiques |
 | `/donner` | Donne des pièces à un membre |
 | `/rappel` | Programme un rappel personnel |
-| `/jeu morpion`, `/jeu puissance4`, `/jeu pfc` | Mini-jeux contre un membre (avec mise possible) ou contre l’IA |
+| `/jeu morpion`, `/jeu puissance4`, `/jeu pfc`, `/jeu pendu` | Mini-jeux contre un membre (avec mise possible), contre l’IA ou en solo |
+| `/jeu classement [jeu] [tri]` | Classement des meilleurs joueurs aux mini-jeux |
 | `/jeu stats [membre]` | Victoires, défaites et gains aux mini-jeux |
 | `/avent` | Calendrier de l’Avent personnel (quand la campagne est activée) |
 
@@ -443,6 +444,7 @@ La variable d’environnement `ADVENT_TEST_DATE` (par exemple `2026-12-05`) fait
 | `/jeu morpion` | Morpion : aligner 3 symboles sur une grille 3×3 |
 | `/jeu puissance4` | Puissance 4 : aligner 4 jetons sur une grille de 6×7 |
 | `/jeu pfc [manches]` | Pierre-feuille-ciseaux en 1, 3 ou 5 manches (les égalités se rejouent) |
+| `/jeu pendu` | Pendu : trouver le mot avant que le bonhomme soit pendu (7 erreurs) |
 
 - **Contre l’IA** : laisser `adversaire` vide. Trois niveaux (`facile`, `normal`, `difficile`). Au morpion, l’IA difficile est imbattable. Au pierre-feuille-ciseaux, l’IA difficile apprend les habitudes du joueur. Pas de mise contre l’IA.
 - **Contre un membre** : `adversaire:@membre`. Le défi s’affiche dans le salon avec trois boutons pour le défié : **Accepter**, **Autre mise** (contre-proposition, que le défieur doit à son tour accepter) et **Refuser**. Sans réponse en 3 minutes, le défi expire.
@@ -450,6 +452,13 @@ La variable d’environnement `ADVENT_TEST_DATE` (par exemple `2026-12-05`) fait
 - **Délai** : 2 minutes par coup (60 secondes par manche au pierre-feuille-ciseaux). Celui qui ne joue pas à temps perd. Si personne ne joue une manche, la partie est annulée.
 - **🏳️ Abandonner** donne la victoire à l’adversaire.
 - Une seule partie ou un seul défi à la fois par membre.
+
+### Le pendu
+
+- **En solo** (sans `adversaire`) : le bot choisit un mot, tu le cherches seul. `difficulte` règle la longueur des mots : facile (3 à 6 lettres), normal (6 à 9), difficile (9 et plus).
+- **En duel** (`adversaire:@membre`, mise possible) : les deux joueurs cherchent **le même mot à tour de rôle**. Une bonne lettre fait rejouer, une erreur passe la main. Celui qui complète le mot gagne. Si le bonhomme est pendu, personne ne gagne et les mises sont rendues.
+- Les lettres se choisissent dans deux menus (A à M, N à Z), sans accent : « E » révèle aussi É, È, Ê. **🔤 Proposer le mot** permet de tenter le mot entier (une erreur si c’est faux).
+- La catégorie du mot est affichée (animaux, jeux vidéo, nourriture, nature, maison, fêtes et hiver). 7 erreurs maximum, 2 minutes par tour.
 
 ### Les mises
 
@@ -463,9 +472,23 @@ La variable d’environnement `ADVENT_TEST_DATE` (par exemple `2026-12-05`) fait
 - Si le bot redémarre pendant une partie, elle est perdue et **les mises sont remboursées** au démarrage.
 - Les gains de mise ne comptent pas comme de l’argent « gagné » pour les missions et le total historique (comme les dons).
 
+### `/jeu classement`
+
+```text
+/jeu classement jeu:Pendu tri:Victoires contre des membres
+```
+
+Les 10 meilleurs joueurs, tous jeux confondus ou pour un seul jeu, avec trois façons de classer :
+
+- **Victoires contre des membres** (par défaut), avec le pourcentage de victoires ;
+- **Gains des mises** : le bilan en pièces de tous les paris ;
+- **Victoires contre l’IA / en solo**.
+
+Si tu n’es pas dans le top 10, ta place s’affiche en dessous. Les membres partis du serveur sont masqués, comme dans les autres classements.
+
 ### `/jeu stats`
 
-Victoires, défaites et nuls par jeu, séparés entre parties contre des membres et contre l’IA, avec le bilan des mises.
+Victoires, défaites et nuls par jeu, séparés entre parties contre des membres et contre l’IA (ou en solo pour le pendu), avec le bilan des mises.
 
 ## `/bingo` (administration)
 

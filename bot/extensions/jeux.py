@@ -36,14 +36,17 @@ from bot.features.minigames.engines import (
     rps_ai_move,
     tictactoe_ai_move,
 )
+from bot.features.minigames.hangman import Hangman, base_letter, pick_word
+from bot.shared.members import present_member_ids
 
 LOGGER = logging.getLogger(__name__)
 
-MORPION, PUISSANCE4, PFC = "morpion", "puissance4", "pfc"
+MORPION, PUISSANCE4, PFC, PENDU = "morpion", "puissance4", "pfc", "pendu"
 GAME_NAMES = {
     MORPION: "❌⭕ Morpion",
     PUISSANCE4: "🔴🟡 Puissance 4",
     PFC: "🪨📄✂️ Pierre-feuille-ciseaux",
+    PENDU: "🔤 Pendu",
 }
 
 MAX_STAKE = 100_000
@@ -65,6 +68,32 @@ def format_coins(value: int) -> str:
 
 def error_embed(text: str) -> discord.Embed:
     return discord.Embed(description=f"❌ {text}", color=ERROR_COLOR)
+
+
+MEDALS = ("🥇", "🥈", "🥉")
+
+
+def leaderboard_lines(rows: list[Any], metric: str) -> list[str]:
+    """Une ligne par joueur, dans l'ordre du classement."""
+    lines = []
+
+    for index, row in enumerate(rows):
+        rank = MEDALS[index] if index < 3 else f"**{index + 1}.**"
+        wins, losses, draws = int(row["wins"]), int(row["losses"]), int(row["draws"])
+
+        if metric == "coins_net":
+            coins = int(row["coins_net"])
+            detail = f"**{'+' if coins >= 0 else '−'}{format_coins(abs(coins))}** pièces · {wins} V / {losses} D"
+        elif metric == "ai_wins":
+            detail = f"**{int(row['ai_wins'])}** victoires · {int(row['ai_losses'])} défaites"
+        else:
+            played = wins + losses + draws
+            ratio = f" · {round(100 * wins / played)} %" if played else ""
+            detail = f"**{wins}** V · {losses} D · {draws} N{ratio}"
+
+        lines.append(f"{rank} <@{int(row['user_id'])}> — {detail}")
+
+    return lines
 
 
 class BetError(Exception):
@@ -802,7 +831,207 @@ class PfcView(GameView):
         )
 
 
-VIEWS: dict[str, type[GameView]] = {MORPION: MorpionView, PUISSANCE4: PuissanceView, PFC: PfcView}
+class WordGuessModal(discord.ui.Modal, title="🔤 Proposer le mot entier"):
+    def __init__(self, view: PenduView) -> None:
+        super().__init__(timeout=300)
+        self.view_ref = view
+        self.word = discord.ui.TextInput(label="Le mot (sans souci d'accents)", max_length=40)
+        self.add_item(self.word)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.view_ref.play(interaction, word=self.word.value)
+
+
+class PenduView(GameView):
+    """
+    Pendu. En solo : le joueur cherche seul. En duel : les deux joueurs
+    cherchent le même mot à tour de rôle ; une bonne lettre fait
+    rejouer, une erreur passe la main. Celui qui complète le mot gagne.
+    Pendu complet en duel : personne ne gagne (mises rendues).
+    """
+
+    game = PENDU
+    HALVES = ("ABCDEFGHIJKLM", "NOPQRSTUVWXYZ")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        word, category = pick_word(self.difficulty)
+        self.board = Hangman(word=word, category=category)
+        self.turn_index = next(i for i, user_id in enumerate(self.players) if user_id is not None)
+        self.last_action = ""
+        self.build()
+
+    @property
+    def current_player(self) -> int:
+        return self.players[self.turn_index]
+
+    def header(self) -> list[str]:
+        lines = [f"Mots **{self.difficulty}s** · Catégorie : **{self.board.category}**"]
+
+        if self.stake:
+            lines.append(
+                f"💰 Mise : {format_coins(self.stake)} pièces chacun · "
+                f"🏆 {format_coins(self.stake * 2)} pour le gagnant"
+            )
+
+        return lines
+
+    def build(self) -> None:
+        self.clear_items()
+
+        for row, letters in enumerate(self.HALVES):
+            remaining = [letter for letter in letters if letter not in self.board.guessed]
+            select = discord.ui.Select(
+                placeholder=f"Lettres {letters[0]} à {letters[-1]}…" if remaining else "Toutes proposées",
+                options=[discord.SelectOption(label=letter, value=letter) for letter in remaining]
+                or [discord.SelectOption(label="—", value="-")],
+                disabled=self.over or not remaining,
+                row=row,
+            )
+            select.callback = self.on_letter
+            self.add_item(select)
+
+        word_button = discord.ui.Button(
+            label="Proposer le mot", emoji="🔤", style=discord.ButtonStyle.primary, row=2, disabled=self.over
+        )
+        word_button.callback = self.on_word
+        self.add_item(word_button)
+        self.add_forfeit(row=2)
+
+        if self.over:
+            self.disable_all()
+
+    def disable_all(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_letter(self, interaction: discord.Interaction) -> None:
+        await self.play(interaction, letter=interaction.data["values"][0])
+
+    async def on_word(self, interaction: discord.Interaction) -> None:
+        if not self.over and interaction.user.id != self.current_player:
+            await interaction.response.send_message(embed=error_embed("Ce n'est pas ton tour."), ephemeral=True)
+            return
+
+        await interaction.response.send_modal(WordGuessModal(self))
+
+    async def play(
+        self,
+        interaction: discord.Interaction,
+        *,
+        letter: str | None = None,
+        word: str | None = None,
+    ) -> None:
+        async with self.lock:
+            if self.over:
+                await interaction.response.defer()
+                return
+
+            if interaction.user.id != self.current_player:
+                await interaction.response.send_message(embed=error_embed("Ce n'est pas ton tour."), ephemeral=True)
+                return
+
+            try:
+                found = self.board.guess_letter(letter) if letter else self.board.guess_word(word or "")
+            except ValueError as error:
+                await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+                return
+
+            who = f"<@{interaction.user.id}>"
+
+            if letter:
+                self.last_action = (
+                    f"✅ {who} : la lettre **{base_letter(letter)}** est dans le mot !"
+                    if found
+                    else f"❌ {who} : pas de **{base_letter(letter)}**."
+                )
+            else:
+                self.last_action = (
+                    f"✅ {who} a trouvé le mot !" if found else f"❌ {who} : ce n'est pas « {word.strip()[:30]} »."
+                )
+
+            self.reset_deadline()
+            winner_index = self.turn_index + 1
+
+            if self.board.solved:
+                await self.end(winner_index, f"🏆 {who} trouve le mot **{self.board.word.upper()}** !")
+            elif self.board.lost:
+                if self.vs_ai:
+                    loser_index = self.players.index(None) + 1
+                    await self.end(loser_index, f"💀 Pendu ! Le mot était **{self.board.word.upper()}**.")
+                else:
+                    await self.end(0, f"💀 Pendu ! Personne ne gagne. Le mot était **{self.board.word.upper()}**.")
+            elif not found and not self.vs_ai:
+                self.turn_index = 1 - self.turn_index  # une erreur passe la main
+
+            self.build()
+            await self.refresh(interaction)
+
+    async def on_deadline(self) -> None:
+        loser = self.turn_index + 1
+
+        if self.vs_ai:
+            await self.end(self.players.index(None) + 1, f"⌛ Temps écoulé ! Le mot était **{self.board.word.upper()}**.")
+        else:
+            await self.end(
+                3 - loser,
+                f"⌛ {player_name(self.current_player)} n'a pas joué à temps : défaite. "
+                f"Le mot était **{self.board.word.upper()}**.",
+            )
+
+        self.build()
+        await self.refresh()
+
+    def embed(self) -> discord.Embed:
+        board = self.board
+        players = (
+            f"🧍 {player_name(self.current_player)} joue en solo"
+            if self.vs_ai
+            else f"{player_name(self.players[0])}  contre  {player_name(self.players[1])}"
+        )
+        lines = [
+            players,
+            *self.header(),
+            "",
+            f"```\n{board.gallows()}\n```",
+            f"## `{board.masked()}`",
+            f"❤️ Erreurs : **{board.errors}/{board.max_errors}**",
+        ]
+
+        if board.wrong:
+            lines.append("🚫 Lettres absentes : " + " ".join(board.wrong))
+
+        if board.wrong_words:
+            lines.append("🚫 Mots refusés : " + ", ".join(board.wrong_words))
+
+        if self.last_action:
+            lines += ["", self.last_action]
+
+        if self.over:
+            lines += ["", self.result_text]
+        else:
+            lines += [
+                "",
+                f"👉 À {player_name(self.current_player)} de jouer "
+                f"(<t:{int(self.deadline.timestamp())}:R>) : choisis une lettre ou propose le mot.",
+            ]
+
+            if not self.vs_ai:
+                lines.append("-# Bonne lettre : tu rejoues. Erreur : la main passe.")
+
+        return discord.Embed(
+            title=GAME_NAMES[PENDU],
+            description="\n".join(lines),
+            color=WIN_COLOR if self.over else GAME_COLOR,
+        )
+
+
+VIEWS: dict[str, type[GameView]] = {
+    MORPION: MorpionView,
+    PUISSANCE4: PuissanceView,
+    PFC: PfcView,
+    PENDU: PenduView,
+}
 
 
 # ============================================================
@@ -1134,7 +1363,7 @@ class GamesCog(commands.Cog):
         if opponent is None:
             if stake:
                 await interaction.response.send_message(
-                    embed=error_embed("Les mises se font contre un membre. Contre l'IA, c'est pour l'honneur !"),
+                    embed=error_embed("Les mises se font contre un membre. Seul ou contre l'IA, c'est pour l'honneur !"),
                     ephemeral=True,
                 )
                 return
@@ -1257,6 +1486,76 @@ class GamesCog(commands.Cog):
             },
         )
 
+    @jeu.command(name="pendu", description="Pendu en solo, ou en duel contre un membre (avec mise possible).")
+    @app_commands.describe(
+        adversaire="Le membre à défier (vide = en solo).",
+        mise="Pièces misées par chaque joueur (contre un membre).",
+        difficulte="Longueur des mots : facile (courts), normal, difficile (longs).",
+    )
+    @app_commands.choices(difficulte=DIFFICULTY_CHOICES)
+    async def pendu(
+        self,
+        interaction: discord.Interaction,
+        adversaire: discord.Member | None = None,
+        mise: app_commands.Range[int, 0, MAX_STAKE] = 0,
+        difficulte: app_commands.Choice[str] | None = None,
+    ) -> None:
+        await self.launch(
+            interaction, PENDU, adversaire, mise,
+            {"difficulty": difficulte.value if difficulte else NORMAL},
+        )
+
+    @jeu.command(name="classement", description="Les meilleurs joueurs aux mini-jeux.")
+    @app_commands.describe(jeu="Un jeu en particulier (tous par défaut).", tri="Ce qui compte pour le classement.")
+    @app_commands.choices(
+        jeu=[app_commands.Choice(name=name, value=game) for game, name in GAME_NAMES.items()],
+        tri=[
+            app_commands.Choice(name="Victoires contre des membres", value="wins"),
+            app_commands.Choice(name="Gains des mises", value="coins_net"),
+            app_commands.Choice(name="Victoires contre l'IA / en solo", value="ai_wins"),
+        ],
+    )
+    async def classement(
+        self,
+        interaction: discord.Interaction,
+        jeu: app_commands.Choice[str] | None = None,
+        tri: app_commands.Choice[str] | None = None,
+    ) -> None:
+        metric = tri.value if tri else "wins"
+        rows = await self.get_pool().fetch(
+            f"""
+            SELECT user_id,
+                   SUM(wins) AS wins, SUM(losses) AS losses, SUM(draws) AS draws,
+                   SUM(ai_wins) AS ai_wins, SUM(ai_losses) AS ai_losses,
+                   SUM(coins_net) AS coins_net
+            FROM minigame_stats
+            WHERE guild_id = $1 AND ($2::text IS NULL OR game = $2)
+            GROUP BY user_id
+            HAVING SUM({metric}) <> 0
+            ORDER BY SUM({metric}) DESC, SUM(wins) DESC
+            LIMIT 200
+            """,
+            interaction.guild_id,
+            jeu.value if jeu else None,
+        )
+        present = present_member_ids(self.bot, interaction.guild_id)
+
+        if present is not None:
+            allowed = set(present)
+            rows = [row for row in rows if int(row["user_id"]) in allowed]
+
+        ranking = leaderboard_lines(rows, metric)
+        title = f"🏆 Classement des mini-jeux — {jeu.name if jeu else 'tous les jeux'}"
+        embed = discord.Embed(title=title, color=GAME_COLOR)
+        embed.description = "\n".join(ranking[:10]) if ranking else "Personne n'est encore classé ici. À vous de jouer !"
+        own = next((index for index, row in enumerate(rows) if int(row["user_id"]) == interaction.user.id), None)
+
+        if own is not None and own >= 10:
+            embed.add_field(name="Ta place", value=ranking[own], inline=False)
+
+        embed.set_footer(text=f"Classé par : {tri.name if tri else 'Victoires contre des membres'}")
+        await interaction.response.send_message(embed=embed)
+
     @jeu.command(name="stats", description="Victoires, défaites et gains aux mini-jeux.")
     @app_commands.describe(membre="Le membre (toi par défaut).")
     async def stats(self, interaction: discord.Interaction, membre: discord.Member | None = None) -> None:
@@ -1281,7 +1580,7 @@ class GamesCog(commands.Cog):
                 name=name,
                 value=(
                     f"👥 Contre des membres : **{record['wins']}** V · {record['losses']} D · {record['draws']} N\n"
-                    f"🤖 Contre l'IA : **{record['ai_wins']}** V · {record['ai_losses']} D · {record['ai_draws']} N\n"
+                    f"🤖 Contre l'IA / en solo : **{record['ai_wins']}** V · {record['ai_losses']} D · {record['ai_draws']} N\n"
                     f"💰 Mises : {'+' if record['coins_net'] >= 0 else '−'}"
                     f"{format_coins(abs(int(record['coins_net'])))} pièces"
                 ),
