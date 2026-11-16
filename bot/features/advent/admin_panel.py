@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 import discord
@@ -13,6 +14,7 @@ from bot.features.advent.constants import (
 from bot.shared.embeds import (
     base_embed,
     error_embed,
+    success_embed,
 )
 
 
@@ -833,6 +835,263 @@ class PickerView(discord.ui.View):
         return False
 
 
+RESET_ALL_CONFIRMATION_WORD = "REINITIALISER"
+
+
+def normalize_confirmation(
+    text: str,
+) -> str:
+    """« Réinitialiser », « RÉINITIALISER »… → « REINITIALISER »."""
+    return (
+        unicodedata.normalize("NFKD", text)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .strip()
+        .upper()
+    )
+
+
+class ResetAllConfirmModal(
+    discord.ui.Modal,
+    title="Réinitialiser tout le monde",
+):
+    confirmation = discord.ui.TextInput(
+        label="Tape RÉINITIALISER pour confirmer",
+        placeholder="RÉINITIALISER",
+        min_length=1,
+        max_length=30,
+    )
+
+    def __init__(
+        self,
+        *,
+        campaign_id: int,
+        year: int,
+    ) -> None:
+        super().__init__(timeout=120)
+        self.campaign_id = campaign_id
+        self.year = year
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        if (
+            normalize_confirmation(str(self.confirmation.value))
+            != RESET_ALL_CONFIRMATION_WORD
+        ):
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Réinitialisation annulée",
+                    (
+                        "Le mot de confirmation est incorrect.\n"
+                        "**Aucune donnée n'a été supprimée.**"
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        cog = get_cog(
+            interaction,
+            "AdventAdminRewardsCommands",
+        )
+
+        if cog is None:
+            await send_error(
+                interaction,
+                "Le module administratif est indisponible.",
+            )
+            return
+
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+
+        deleted = await cog.transactions.reset_all(
+            self.campaign_id
+        )
+
+        await cog._audit(
+            interaction,
+            campaign_id=self.campaign_id,
+            action="all_users_reset",
+            details=deleted,
+        )
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "Tout le monde a été réinitialisé",
+                (
+                    f"Campagne **{self.year}** :\n"
+                    f"• **{deleted['openings']}** case(s) ouverte(s) "
+                    "supprimée(s)\n"
+                    f"• **{deleted['purchases']}** achat(s) de la "
+                    "boutique de l'Avent supprimé(s)\n\n"
+                    "Les récompenses, la boutique et la configuration "
+                    "du calendrier sont intactes."
+                ),
+            ),
+            ephemeral=True,
+        )
+
+
+class ResetAllWarningView(discord.ui.View):
+    """
+    Premier verrou : avertissement et bouton « Je comprends ».
+    Le second verrou est le mot à taper dans ResetAllConfirmModal.
+    """
+
+    def __init__(
+        self,
+        *,
+        owner_id: int,
+        campaign_id: int,
+        year: int,
+    ) -> None:
+        super().__init__(timeout=60)
+        self.owner_id = owner_id
+        self.campaign_id = campaign_id
+        self.year = year
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+
+        await interaction.response.send_message(
+            embed=error_embed(
+                "Action interdite",
+                "Seul l'administrateur qui a lancé cette action peut confirmer.",
+            ),
+            ephemeral=True,
+        )
+        return False
+
+    def _disable(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+
+    @discord.ui.button(
+        label="Annuler",
+        emoji="✖️",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def cancel(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        self._disable()
+        self.stop()
+
+        await interaction.response.edit_message(
+            embed=base_embed(
+                "Action annulée",
+                "Aucune donnée n'a été supprimée.",
+            ),
+            view=self,
+        )
+
+    @discord.ui.button(
+        label="Je comprends, continuer",
+        emoji="⚠️",
+        style=discord.ButtonStyle.danger,
+    )
+    async def proceed(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        self._disable()
+        self.stop()
+
+        await interaction.response.send_modal(
+            ResetAllConfirmModal(
+                campaign_id=self.campaign_id,
+                year=self.year,
+            )
+        )
+
+
+async def start_reset_all(
+    interaction: discord.Interaction,
+) -> None:
+    cog = get_cog(
+        interaction,
+        "AdventAdminRewardsCommands",
+    )
+
+    if cog is None or interaction.guild_id is None:
+        await send_error(
+            interaction,
+            "Le module administratif est indisponible.",
+        )
+        return
+
+    try:
+        campaign = await cog._campaign(
+            interaction.guild_id,
+            None,
+        )
+    except Exception as error:
+        await send_error(
+            interaction,
+            str(error),
+        )
+        return
+
+    counts = await cog.transactions.count_campaign_data(
+        campaign.id
+    )
+
+    if counts["openings"] == 0 and counts["purchases"] == 0:
+        await interaction.response.send_message(
+            embed=base_embed(
+                "Rien à réinitialiser",
+                (
+                    "Aucun membre n'a ouvert de case ni acheté dans la "
+                    f"boutique pour la campagne **{campaign.year}**."
+                ),
+            ),
+            ephemeral=True,
+        )
+        return
+
+    warning = error_embed(
+        "⚠️ Réinitialiser TOUT LE MONDE ?",
+        (
+            f"Tu es sur le point d'effacer les données de l'Avent "
+            f"**{campaign.year}** de **{counts['members']} membre(s)** :\n\n"
+            f"• **{counts['openings']}** case(s) ouverte(s) et les "
+            "points gagnés\n"
+            f"• **{counts['purchases']}** achat(s) de la boutique de "
+            "l'Avent\n\n"
+            "**Cette action est définitive et ne peut pas être "
+            "annulée.**\n"
+            "Les rôles et cosmétiques déjà distribués ne sont pas "
+            "retirés. Les récompenses, la boutique et la configuration "
+            "restent intactes.\n\n"
+            "Si tu continues, il faudra encore taper **RÉINITIALISER** "
+            "pour confirmer. Ce message expire dans 60 secondes."
+        ),
+    )
+
+    await interaction.response.send_message(
+        embed=warning,
+        view=ResetAllWarningView(
+            owner_id=interaction.user.id,
+            campaign_id=campaign.id,
+            year=campaign.year,
+        ),
+        ephemeral=True,
+    )
+
+
 class AdminActionSelect(discord.ui.Select):
     def __init__(self) -> None:
         options = [
@@ -932,6 +1191,15 @@ class AdminActionSelect(discord.ui.Select):
                 emoji="⚠️",
             ),
             discord.SelectOption(
+                label="Réinitialiser TOUT LE MONDE",
+                value="reset_all",
+                emoji="🧨",
+                description=(
+                    "Efface les cases et achats de tous les membres "
+                    "(double confirmation)."
+                ),
+            ),
+            discord.SelectOption(
                 label="Ajouter un rôle à la boutique",
                 value="shop_role",
                 emoji="🎭",
@@ -962,6 +1230,10 @@ class AdminActionSelect(discord.ui.Select):
         interaction: discord.Interaction,
     ) -> None:
         action = self.values[0]
+
+        if action == "reset_all":
+            await start_reset_all(interaction)
+            return
 
         if action == "configuration":
             await invoke_command(

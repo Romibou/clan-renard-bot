@@ -1257,6 +1257,7 @@ class AdventAdminRewardsCommands(commands.Cog):
             "Confirmation obligatoire",
             (
                 f"Tu vas supprimer **{len(openings)} ouverture(s)** "
+                f"et les achats de la boutique de l'Avent "
                 f"de {membre.mention} pour la campagne "
                 f"**{campaign.year}**.\n\n"
                 "Cette action ne retire pas automatiquement les rôles "

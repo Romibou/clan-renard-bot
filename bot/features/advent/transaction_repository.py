@@ -368,17 +368,115 @@ class AdventTransactionRepository:
         campaign_id: int,
         user_id: int,
     ) -> int:
-        result = await self.database.execute(
-            """
-            DELETE FROM advent_openings
-            WHERE campaign_id = $1
-              AND user_id = $2
-            """,
-            campaign_id,
-            user_id,
-        )
+        """
+        Efface les cases ouvertes ET les achats de la boutique de
+        l'Avent du membre : sans cela, les points dépensés avant la
+        remise à zéro restaient déduits de ses futurs points.
+        """
+        async with self.database.transaction() as connection:
+            result = await connection.execute(
+                """
+                DELETE FROM advent_openings
+                WHERE campaign_id = $1
+                  AND user_id = $2
+                """,
+                campaign_id,
+                user_id,
+            )
+
+            if await self._shop_purchases_exist(connection):
+                await connection.execute(
+                    """
+                    DELETE FROM advent_shop_purchases_v2
+                    WHERE campaign_id = $1
+                      AND user_id = $2
+                    """,
+                    campaign_id,
+                    user_id,
+                )
 
         return self._affected_rows(result)
+
+    async def count_campaign_data(
+        self,
+        campaign_id: int,
+    ) -> dict[str, int]:
+        """Ce que « Réinitialiser tout le monde » effacerait."""
+        record = await self.database.fetchrow(
+            """
+            SELECT
+                COUNT(DISTINCT user_id)::INTEGER AS members,
+                COUNT(*)::INTEGER AS openings
+            FROM advent_openings
+            WHERE campaign_id = $1
+            """,
+            campaign_id,
+        )
+
+        purchases = 0
+
+        async with self.database.transaction() as connection:
+            if await self._shop_purchases_exist(connection):
+                purchases = int(
+                    await connection.fetchval(
+                        """
+                        SELECT COUNT(*)
+                        FROM advent_shop_purchases_v2
+                        WHERE campaign_id = $1
+                        """,
+                        campaign_id,
+                    )
+                    or 0
+                )
+
+        return {
+            "members": int(record["members"] or 0) if record else 0,
+            "openings": int(record["openings"] or 0) if record else 0,
+            "purchases": purchases,
+        }
+
+    async def reset_all(
+        self,
+        campaign_id: int,
+    ) -> dict[str, int]:
+        """
+        Efface, pour TOUS les membres, les cases ouvertes et les achats
+        de la boutique de cette campagne. Les récompenses, la boutique
+        et la configuration de la campagne ne sont pas touchées.
+        """
+        async with self.database.transaction() as connection:
+            openings = await connection.execute(
+                """
+                DELETE FROM advent_openings
+                WHERE campaign_id = $1
+                """,
+                campaign_id,
+            )
+
+            purchases = "DELETE 0"
+
+            if await self._shop_purchases_exist(connection):
+                purchases = await connection.execute(
+                    """
+                    DELETE FROM advent_shop_purchases_v2
+                    WHERE campaign_id = $1
+                    """,
+                    campaign_id,
+                )
+
+        return {
+            "openings": self._affected_rows(openings),
+            "purchases": self._affected_rows(purchases),
+        }
+
+    @staticmethod
+    async def _shop_purchases_exist(connection) -> bool:
+        return bool(
+            await connection.fetchval(
+                "SELECT to_regclass('public.advent_shop_purchases_v2') "
+                "IS NOT NULL"
+            )
+        )
 
     @staticmethod
     def _affected_rows(result: str) -> int:
