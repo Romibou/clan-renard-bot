@@ -16,8 +16,9 @@ Pour l’installation et le déploiement, voir `README.md`.
 8. [Classements, statistiques et bilan](#classements-statistiques-et-bilan)
 9. [Calendrier de l’Avent](#calendrier-de-lavent)
 10. [Outils : rappels, rôles à la réaction, aide](#outils--rappels-rôles-à-la-réaction-aide)
-11. [Modération](#modération)
-12. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
+11. [Annonces](#annonces)
+12. [Modération](#modération)
+13. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
 
 ---
 
@@ -53,6 +54,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/avent-admin` | Administrateur | Tout le calendrier de l’Avent |
 | `/drop` | Gérer le serveur | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
+| `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
 | `/warn`, `/mute`, `/unmute`, `/amende`, `/pardon`, `/casier`, `/note` | Exclure temporairement | Sanctions, annulations, casier (voir [Modération](#modération)) |
@@ -453,6 +455,90 @@ Réagir donne le rôle, retirer sa réaction l’enlève. Les émojis personnali
 ## `/aide`
 
 Liste les commandes membres, classées par thème. La liste se construit automatiquement : une nouvelle commande y apparaît sans rien modifier. Les administrateurs voient aussi les commandes d’administration.
+
+---
+
+# Annonces
+
+Le bot publie les annonces à ta place : le message est signé par le bot, avec le logo et le nom du serveur, et tout se règle depuis Discord.
+
+## `/annonce creer` : le studio
+
+Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’annonce, mis à jour après chaque changement. En dessous, les boutons :
+
+| Bouton | Rôle |
+|---|---|
+| ✏️ **Texte** | Titre, lien du titre, contenu du cadre (4 000 caractères), message au-dessus du cadre |
+| 🎨 **Style** | Couleur de la barre (`#F28C28` ou `orange`, `rouge`, `bleu`…), en-tête, pied de page, date, logo du serveur |
+| 🖼️ **Images** | Grande image et miniature, en **fichier envoyé depuis le PC** (8 Mo max) ou en lien |
+| 📑 **Sections** | Blocs « titre + texte », côte à côte ou empilés |
+| 🔗 **Boutons** | Boutons liens sous l’annonce (25 max), une ligne par bouton : `🎮 Texte \| https://lien` |
+| Menu **Cadre** | Choisir le cadre à modifier, en ajouter (10 max) ou en supprimer |
+| 📣 **Salon et mention** | Salon de publication, mention (personne, @everyone, @here ou un rôle) |
+| 🧩 **Modèles** | Charger, enregistrer ou supprimer une annonce type (25 max) |
+| 📥 **Importer** / 📤 **Exporter** | Échange avec Discohook (voir plus bas) |
+| ❔ **Aide** | Rappel de la mise en forme et des raccourcis |
+| 🚀 **Publier** | Demande confirmation (salon, mention), puis publie |
+| ⏰ **Programmer** | Publie automatiquement à la date choisie |
+| 🔄 **Recommencer** | Efface le brouillon (deux clics pour confirmer) |
+
+- **Brouillon enregistré** : chaque changement est sauvegardé. Le studio se ferme au bout de 14 minutes (limite de Discord), `/annonce creer` le rouvre exactement où tu en étais.
+- **Signature automatique** : un nouveau brouillon a déjà l’en-tête « Clan Renard » avec le logo, le pied de page « L’équipe Clan Renard » et la date de publication. Tout se change dans 🎨 Style.
+- **Sections** : une ligne `## Titre` puis le contenu en dessous.
+- **Contrôles avant publication** : annonce vide, textes trop longs, salon manquant, permissions du bot (envoyer, intégrer des liens, joindre des fichiers, mentionner @everyone). Mentionner @everyone ou un rôle non mentionnable demande aussi que **toi** en aies le droit.
+
+### Dates à l’heure de chaque membre
+
+Dans les textes et les sections, ces raccourcis deviennent des dates Discord, affichées dans le fuseau de chaque membre :
+
+| Raccourci | Affichage |
+|---|---|
+| `{date:25/12 18h}` | date et heure complètes |
+| `{dans:25/12 18h}` | « dans 3 jours » (compte à rebours) |
+| `{jour:25/12}` | « 25 décembre 2026 » |
+| `{heure:18h30}` | « 18:30 » |
+
+Formats compris : `25/12/2026 18:00`, `25/12 18h`, `01/12 18h30`, `demain 21h`, `aujourd’hui 20h`. Sans année, c’est la prochaine fois que la date arrive. L’heure saisie est celle de `DEFAULT_TIMEZONE` (Europe/Paris).
+
+### Émojis, rôles et salons
+
+Dans n’importe quel salon, taper `\:emoji:`, `\@Rôle` ou `\#salon` puis envoyer affiche leur code (`<:renard:123…>`, `<@&123…>`, `<#123…>`). Ce code se colle dans le studio.
+
+## Programmer une annonce
+
+⏰ **Programmer** accepte `01/12 18h`, `25/12/2026 18:00`, `demain 9h` ou `dans 2h` (d’une minute à un an). L’annonce est figée à ce moment-là et le studio repart sur un brouillon vide.
+
+`/annonce programmees` liste les envois en attente :
+
+- **Annuler un envoi** : il ne sera pas publié.
+- **Reprendre dans le studio** : annule l’envoi et rouvre l’annonce pour la modifier, puis la reprogrammer.
+
+Si l’envoi échoue au moment prévu (salon supprimé, permission retirée…), l’auteur reçoit un message privé et l’erreur est notée dans le journal de modération. Un envoi interrompu par un redémarrage du bot repart au démarrage suivant.
+
+## `/annonce modifier`
+
+```text
+/annonce modifier lien:https://discord.com/channels/…
+```
+
+Le lien s’obtient par clic droit sur le message → **Copier le lien du message**. Le studio s’ouvre sur l’annonce publiée, et 💾 **Enregistrer les modifications** la corrige sur place, sans republier ni renvoyer de notification. **Quitter la modification** abandonne sans rien changer.
+
+Seuls les messages du bot peuvent être modifiés. Pour un message qui n’a pas été créé avec le studio, le bot le reconstruit à partir de ce qui est affiché : il vaut mieux renvoyer ses images avec 🖼️.
+
+Si tu avais un brouillon en cours, il est gardé automatiquement dans 🧩 Modèles (« Brouillon du … »).
+
+## Discohook : les mises en page très précises
+
+[discohook.app](https://discohook.app) est un éditeur web gratuit pour construire un message à la souris.
+
+- **Importer** : sur Discohook, ouvrir l’éditeur JSON, copier, puis 📥 **Importer** dans le studio (coller le texte, ou envoyer un fichier `.json` pour les longs messages). Les sauvegardes Discohook sont acceptées (seul le premier message est pris). Les boutons liens sont gardés, les boutons d’action sont ignorés.
+- **Exporter** : 📤 **Exporter** envoie un fichier `annonce.json` à coller dans l’éditeur JSON de Discohook. Les images envoyées depuis Discord ne sont pas exportées (seulement les liens).
+
+## `/annonce historique` et journal
+
+`/annonce historique` liste les 15 dernières annonces publiées, avec leur lien, l’auteur et la date de modification éventuelle. Chaque publication, modification, programmation ou annulation est aussi notée dans le salon de journal de la modération (s’il est réglé dans `/moderation-admin`).
+
+Les images envoyées sont stockées dans la base. Celles qui ne servent plus à aucun brouillon, modèle, envoi programmé ou annonce publiée sont supprimées automatiquement après 2 jours.
 
 ---
 
