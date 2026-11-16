@@ -3,9 +3,15 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from bot.extensions.profile import ProfileCog, fit_layer, readability_overlay
+from bot.extensions.profile import (
+    ProfileCog,
+    detect_frame_shape,
+    fit_layer,
+    readability_overlay,
+    shape_card,
+)
 
 
 def solid(size: tuple[int, int], color: tuple[int, int, int, int]) -> Image.Image:
@@ -75,8 +81,10 @@ def render_with(tmp_path: Path, equipped_files: dict[str, Image.Image]) -> Image
 def test_card_without_frame_keeps_the_colored_border(tmp_path: Path) -> None:
     card = render_with(tmp_path, {})
 
-    # Bordure couleur du membre (rose) sur le côté gauche de la carte.
-    red, green, blue = card.getpixel((36, 250))
+    # La carte est découpée sur sa bordure : la bordure couleur du
+    # membre (rose) se trouve donc tout au bord de l'image.
+    assert card.size == (1130, 430)
+    red, green, blue = card.getpixel((2, 215))
     assert red > 150 and red > green
 
 
@@ -90,3 +98,32 @@ def test_equipped_frame_replaces_the_colored_border(tmp_path: Path) -> None:
     red, green, blue = card.getpixel((36, 250))
     # Plus de bordure rose : on voit le fond vert.
     assert green > red
+
+
+def drawn_frame(inset: int, radius: int) -> Image.Image:
+    frame = solid((1200, 500), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rounded_rectangle(
+        (inset, inset, 1199 - inset, 499 - inset),
+        radius=radius,
+        outline=(0, 200, 255, 255),
+        width=6,
+    )
+    return frame
+
+
+def test_detect_frame_shape() -> None:
+    box, radius = detect_frame_shape(drawn_frame(12, 30))
+
+    assert box == (12, 12, 1188, 488)
+    assert 20 <= radius <= 40
+    assert detect_frame_shape(solid((1200, 500), (0, 0, 0, 0))) is None
+
+
+def test_card_is_cut_to_its_frame_with_transparent_corners() -> None:
+    card = solid((1200, 500), (20, 120, 40, 255))
+    shaped = shape_card(card, drawn_frame(12, 30))
+
+    assert shaped.size == (1176, 476)
+    # Coin extérieur transparent, centre opaque.
+    assert shaped.getpixel((0, 0))[3] == 0
+    assert shaped.getpixel((588, 238))[3] == 255

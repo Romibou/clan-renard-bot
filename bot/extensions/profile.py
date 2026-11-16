@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import app_commands
 from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 from bot.core.bot import ClanRenardBot
 
@@ -238,6 +238,80 @@ def readability_overlay(
     shade.putalpha(mask)
 
     return shade
+
+
+# Bordure dessinée par défaut quand aucun cadre n'est équipé.
+DEFAULT_BORDER_BOX = (35, 35, 1165, 465)
+DEFAULT_BORDER_RADIUS = 40
+
+
+def detect_frame_shape(
+    frame: Image.Image,
+) -> tuple[tuple[int, int, int, int], int] | None:
+    """
+    Contour extérieur d'un cadre : rectangle occupé par ses pixels
+    visibles et rayon de ses coins. None si le cadre est vide.
+    """
+    visible = frame.getchannel("A").point(
+        lambda alpha: 255 if alpha > 60 else 0
+    )
+    box = visible.getbbox()
+
+    if box is None:
+        return None
+
+    left, top, right, bottom = box
+    # Sur la ligne du haut du cadre, le trait commence après l'arrondi
+    # du coin : cet écart donne une bonne estimation du rayon.
+    row = top + 1
+    first = next(
+        (
+            x
+            for x in range(left, right)
+            if visible.getpixel((x, row))
+        ),
+        left,
+    )
+    radius = max(8, min(80, first - left))
+
+    return (left, top, right, bottom), radius
+
+
+def shape_card(
+    card: Image.Image,
+    frame: Image.Image | None,
+) -> Image.Image:
+    """
+    Découpe la carte selon son contour visible (le cadre équipé, ou la
+    bordure par défaut) avec des coins arrondis transparents.
+
+    Sans cela, le fond dépassait autour du cadre et Discord rognait
+    les coins de l'image.
+    """
+    shape = detect_frame_shape(frame) if frame is not None else None
+
+    if shape is None:
+        if frame is not None:
+            return card
+
+        box, radius = DEFAULT_BORDER_BOX, DEFAULT_BORDER_RADIUS
+    else:
+        box, radius = shape
+
+    left, top, right, bottom = box
+    mask = Image.new("L", card.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (left, top, right - 1, bottom - 1),
+        radius=radius,
+        fill=255,
+    )
+
+    shaped = card.copy()
+    shaped.putalpha(
+        ImageChops.multiply(card.getchannel("A"), mask)
+    )
+
+    return shaped.crop(box)
 
 
 def load_rgba_asset(
@@ -2829,7 +2903,7 @@ class ProfileCog(commands.Cog):
         frame_cosmetic = equipped.get(
             "frame"
         )
-
+        applied_frame = None
         if frame_cosmetic is not None:
             frame_asset = load_rgba_asset(
                 self.assets_root,
@@ -2843,15 +2917,14 @@ class ProfileCog(commands.Cog):
                     frame_asset,
                     background.size,
                 )
-
                 background.alpha_composite(
                     frame_asset
                 )
-
+                applied_frame = frame_asset
         output = io.BytesIO()
-
-        background.convert(
-            "RGB"
+        shape_card(
+            background,
+            applied_frame,
         ).save(
             output,
             format="PNG",
