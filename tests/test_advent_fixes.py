@@ -210,3 +210,53 @@ def test_bought_role_can_be_restored_from_the_advent_shop() -> None:
     )
     assert view.buy_button.disabled
     assert view.buy_button.label == "Déjà acheté"
+
+
+# ---------- Calendrier désactivé dans /avent-admin ----------
+
+
+def make_disabled_cog() -> AdventCommands:
+    from dataclasses import replace
+
+    async def get_campaign(guild_id: int) -> AdventCampaign:
+        return replace(make_campaign(), enabled=False)
+
+    return AdventCommands(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        service=SimpleNamespace(get_campaign_for_display=get_campaign),  # type: ignore[arg-type]
+        image_generator=SimpleNamespace(),  # type: ignore[arg-type]
+    )
+
+
+def make_member(*, administrator: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=7,
+        guild_permissions=discord.Permissions(administrator=administrator),
+    )
+
+
+async def test_disabled_calendar_is_closed_to_members() -> None:
+    import pytest
+
+    from bot.features.advent.exceptions import CampaignDisabled
+
+    cog = make_disabled_cog()
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        user=make_member(administrator=False),
+    )
+
+    with pytest.raises(CampaignDisabled, match="fermé"):
+        await cog._get_open_campaign(interaction)  # type: ignore[arg-type]
+
+
+async def test_disabled_calendar_stays_visible_to_admins() -> None:
+    cog = make_disabled_cog()
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        user=make_member(administrator=True),
+    )
+
+    campaign = await cog._get_open_campaign(interaction)  # type: ignore[arg-type]
+
+    assert campaign.enabled is False

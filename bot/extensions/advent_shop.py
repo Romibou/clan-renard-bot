@@ -1810,6 +1810,26 @@ class AdventShop(commands.Cog):
                 )
                 return
 
+            # Boutique fermée aux membres tant que le calendrier
+            # est désactivé dans /avent-admin (pas de spoil).
+            is_admin = (
+                isinstance(interaction.user, discord.Member)
+                and interaction.user.guild_permissions.administrator
+            )
+
+            if not campaign["enabled"] and not is_admin:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Boutique fermée",
+                        (
+                            "🔒 La boutique ouvrira en même temps que "
+                            "le calendrier de l'Avent. Reviens bientôt !"
+                        ),
+                    ),
+                    ephemeral=True,
+                )
+                return
+
             campaign_id = int(campaign["id"])
 
             (

@@ -12,7 +12,10 @@ from bot.features.advent.discord_calendar import (
 from bot.features.advent.discord_rewards import (
     grant_role_reward,
 )
-from bot.features.advent.exceptions import AdventError
+from bot.features.advent.exceptions import (
+    AdventError,
+    CampaignDisabled,
+)
 from bot.features.advent.image_generator import (
     AdventImageGenerator,
 )
@@ -33,6 +36,11 @@ from bot.features.advent.views import CatchupDayView
 from bot.shared.members import present_member_ids
 
 logger = logging.getLogger(__name__)
+
+CLOSED_MESSAGE = (
+    "🔒 Le calendrier de l'Avent est fermé pour le moment.\n"
+    "Reviens bientôt !"
+)
 
 
 class AdventCommands(commands.Cog):
@@ -143,6 +151,50 @@ class AdventCommands(commands.Cog):
         ):
             return None
 
+    @staticmethod
+    def _is_advent_admin(
+        interaction: discord.Interaction,
+    ) -> bool:
+        # Seul un Member possède guild_permissions (pas un User).
+        permissions = getattr(
+            interaction.user,
+            "guild_permissions",
+            None,
+        )
+
+        return (
+            permissions is not None
+            and permissions.administrator
+        )
+
+    async def _get_open_campaign(
+        self,
+        interaction: discord.Interaction,
+    ):
+        """
+        Campagne affichée à ce membre.
+
+        Tant que la campagne est désactivée dans /avent-admin, les
+        membres voient seulement « calendrier fermé ». Les
+        administrateurs gardent l'accès pour tout préparer.
+        """
+        guild = interaction.guild
+
+        if guild is None:
+            raise CampaignDisabled(CLOSED_MESSAGE)
+
+        campaign = await self.service.get_campaign_for_display(
+            guild.id
+        )
+
+        if (
+            not campaign.enabled
+            and not self._is_advent_admin(interaction)
+        ):
+            raise CampaignDisabled(CLOSED_MESSAGE)
+
+        return campaign
+
     async def _send_calendar(
         self,
         interaction: discord.Interaction,
@@ -162,9 +214,7 @@ class AdventCommands(commands.Cog):
 
         try:
             campaign = (
-                await self.service.get_campaign_for_display(
-                    guild.id
-                )
+                await self._get_open_campaign(interaction)
             )
             state = (
                 await self.service.get_calendar_state(
@@ -188,6 +238,14 @@ class AdventCommands(commands.Cog):
                 preview=preview,
             )
         )
+
+        if not campaign.enabled:
+            embed.description = (
+                f"{embed.description}\n\n"
+                "🔒 **Calendrier désactivé** : les membres voient "
+                "« calendrier fermé ». Active-le dans `/avent-admin` "
+                "pour l'ouvrir."
+            )
 
         await interaction.followup.send(
             embed=embed,
@@ -218,9 +276,7 @@ class AdventCommands(commands.Cog):
 
         try:
             campaign = (
-                await self.service.get_campaign_for_display(
-                    guild.id
-                )
+                await self._get_open_campaign(interaction)
             )
             result = await self.service.open_day(
                 guild_id=guild.id,
@@ -354,9 +410,7 @@ class AdventCommands(commands.Cog):
 
         try:
             campaign = (
-                await self.service.get_campaign_for_display(
-                    guild.id
-                )
+                await self._get_open_campaign(interaction)
             )
             history = (
                 await self.service.get_reward_history(
@@ -393,7 +447,6 @@ class AdventCommands(commands.Cog):
             "Affiche ton calendrier de l'Avent personnel."
         ),
     )
-    @app_commands.default_permissions(administrator=True) # SUPPRIMER CETTE LUGNE POUR REDONNER ACCES AUX MEMBRES A LA COMMANDE AVENT
     @app_commands.guild_only()
     @app_commands.checks.cooldown(
         1,
@@ -443,9 +496,7 @@ class AdventCommands(commands.Cog):
 
         try:
             campaign = (
-                await self.service.get_campaign_for_display(
-                    guild.id
-                )
+                await self._get_open_campaign(interaction)
             )
             state = (
                 await self.service.get_calendar_state(
@@ -526,9 +577,7 @@ class AdventCommands(commands.Cog):
 
         try:
             campaign = (
-                await self.service.get_campaign_for_display(
-                    guild.id
-                )
+                await self._get_open_campaign(interaction)
             )
             ranking = await self.service.get_leaderboard(
                 campaign.id,
@@ -595,9 +644,7 @@ class AdventCommands(commands.Cog):
         )
 
         try:
-            campaign = await self.service.get_campaign_for_display(
-                guild.id
-            )
+            campaign = await self._get_open_campaign(interaction)
 
             state = await self.service.get_calendar_state(
                 guild_id=guild.id,
@@ -690,9 +737,7 @@ class AdventCommands(commands.Cog):
             return
 
         try:
-            campaign = await self.service.get_campaign_for_display(
-                guild.id
-            )
+            campaign = await self._get_open_campaign(interaction)
 
             state = await self.service.get_calendar_state(
                 guild_id=guild.id,
@@ -733,9 +778,7 @@ class AdventCommands(commands.Cog):
             return
 
         try:
-            campaign = await self.service.get_campaign_for_display(
-                guild.id
-            )
+            campaign = await self._get_open_campaign(interaction)
 
             ranking = await self.service.get_leaderboard(
                 campaign.id,
