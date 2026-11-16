@@ -77,6 +77,7 @@ Clan Renard Bot possède actuellement les systèmes suivants :
 | `/rappel` | Membres | Programme un rappel |
 | `/aide` | Membres | Liste les commandes |
 | `/bilan` | Membres | Bilan de l’année (du 31 décembre au 31 janvier) |
+| `/drop` | Administration | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` | Administration | Lance un giveaway |
 | `/giveaway terminer` | Administration | Termine un giveaway et tire les gagnants |
 | `/giveaway retirer` | Administration | Tire de nouveaux gagnants |
@@ -1251,6 +1252,20 @@ Seuls `lot` et `duree` sont obligatoires.
 - À la fin, le bot tire au sort parmi les participants encore présents sur le serveur, annonce les gagnants et remet automatiquement les pièces et le rôle s’ils sont configurés. Le lot texte (par exemple un Nitro) est à remettre à la main.
 - `niveau_minimum` réserve la participation aux membres de ce niveau ou plus.
 - `/giveaway terminer numero:12` tire les gagnants tout de suite. `/giveaway retirer numero:12` tire de nouveaux gagnants (par exemple si un gagnant ne répond pas), en excluant les précédents. Le numéro est indiqué en bas du message du giveaway.
+
+---
+
+# Drops
+
+```text
+/drop xp:500 pieces:100 gagnants:3 duree:10m mystere:Non message:Le premier qui clique !
+```
+
+Un message avec un bouton **Récupérer** apparaît : les premiers membres à cliquer (`gagnants`, 1 par défaut) reçoivent l’XP et les pièces indiquées, une seule fois chacun. Le drop disparaît une fois toutes les places prises, ou au bout de `duree` (10 minutes par défaut, 1 jour maximum).
+
+- **Pièges** : `xp` et `pieces` acceptent des nombres négatifs pour en retirer. L’XP et le portefeuille ne descendent jamais sous 0, et un rôle de niveau peut être retiré si le membre redescend de niveau.
+- **Mystère** : `mystere:True` cache le contenu jusqu’au clic. Les montants sont révélés sur le message une fois le drop terminé.
+- Les pièces gagnées comptent comme de l’argent gagné ; les pièces perdues n’annulent pas le total historique.
 
 ---
 
