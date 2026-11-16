@@ -30,6 +30,10 @@ from bot.features.advent.transaction_repository import (
     AdventTransactionRepository,
 )
 from bot.features.advent.views import AdventView
+from bot.features.advent.visibility import (
+    any_campaign_enabled,
+    apply_visibility,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +150,18 @@ async def setup(
     for command_name in OLD_COMMANDS:
         bot.tree.remove_command(
             command_name
+        )
+
+    # /avent n'est visible par les membres que si une campagne est
+    # activée. Réglé ici, avant la synchronisation du démarrage.
+    try:
+        apply_visibility(
+            bot,
+            await any_campaign_enabled(repository),
+        )
+    except Exception:
+        logger.exception(
+            "Visibilité de /avent non déterminée au démarrage"
         )
 
     logger.info(

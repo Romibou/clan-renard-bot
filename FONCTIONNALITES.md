@@ -343,6 +343,7 @@ Le calendrier s’ouvre et se ferme depuis Discord, sans toucher au code : `/ave
 
 - **Campagne désactivée** : `/avent` et tous les boutons du calendrier (boutique comprise) répondent « 🔒 Le calendrier de l’Avent est fermé pour le moment ». Les administrateurs continuent de tout voir pour préparer, avec un rappel « Calendrier désactivé ».
 - **Campagne activée** : tout s’ouvre immédiatement.
+- **Commande cachée** : tant qu’aucune campagne n’est activée, `/avent` n’apparaît même pas dans la liste des commandes des membres (seuls les administrateurs la voient). Elle réapparaît dès l’activation ; Discord peut mettre une minute à mettre à jour la liste.
 - Une campagne nouvellement initialisée démarre **désactivée**, et la réinitialiser ne change pas son état.
 
 ## `/avent` et ses boutons

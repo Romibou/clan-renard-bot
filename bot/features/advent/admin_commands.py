@@ -11,6 +11,7 @@ from bot.features.advent.constants import (
     CATCHUP_DISABLED,
     CATCHUP_ENABLED,
 )
+from bot.features.advent.visibility import update_visibility
 from bot.features.advent.exceptions import AdventError
 from bot.features.advent.full_repository import (
     FullAdventRepository,
@@ -505,6 +506,12 @@ class AdventAdminCommands(commands.Cog):
             actif,
         )
 
+        # /avent apparaît ou disparaît de la liste des membres.
+        visibility_changed = await update_visibility(
+            self.bot,
+            self.repository,
+        )
+
         await self._audit(
             interaction,
             campaign_id=campaign.id,
@@ -520,6 +527,18 @@ class AdventAdminCommands(commands.Cog):
                 (
                     f"La campagne **{campaign.year}** est maintenant "
                     f"{'activée ✅' if actif else 'désactivée ❌'}."
+                    + (
+                        (
+                            "\n\n`/avent` est maintenant visible par tous les membres."
+                            if actif
+                            else "\n\n`/avent` est maintenant cachée aux membres "
+                            "(seuls les administrateurs la voient)."
+                        )
+                        + " Discord peut mettre une minute à mettre à jour "
+                        "la liste des commandes."
+                        if visibility_changed
+                        else ""
+                    )
                 ),
             ),
             ephemeral=True,
