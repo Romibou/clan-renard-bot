@@ -77,10 +77,12 @@ async def send_ephemeral(
     view: discord.ui.View | None = None,
 ) -> None:
     if interaction.response.is_done():
+        # discord.py refuse view=None dans un message de suivi.
+        extra = {"view": view} if view is not None else {}
         await interaction.followup.send(
             embed=embed,
-            view=view,
             ephemeral=True,
+            **extra,
         )
     else:
         await interaction.response.send_message(

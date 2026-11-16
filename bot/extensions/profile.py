@@ -2962,21 +2962,21 @@ class ProfileCog(commands.Cog):
             )
         )
 
-        view: ProfileView | None = None
+        extra: dict[str, Any] = {}
 
-        if (
-            member.id
-            == interaction.user.id
-        ):
-            view = ProfileView(
+        # Les boutons (personnaliser, inventaire…) ne s'affichent que
+        # sur son propre profil. discord.py refuse view=None dans un
+        # message de suivi : la vue n'est passée que si elle existe.
+        if member.id == interaction.user.id:
+            extra["view"] = ProfileView(
                 cog=self,
                 owner=member,
             )
 
         await interaction.followup.send(
             file=profile_file,
-            view=view,
             ephemeral=ephemeral,
+            **extra,
         )
 
     @app_commands.command(
