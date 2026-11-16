@@ -34,7 +34,7 @@ from bot.features.announcements.model import (
     summary_title,
     upload_ids,
 )
-from bot.features.announcements.layout import build_layout, plain_text
+from bot.features.announcements.layout import build_layout, plain_parts
 from bot.features.announcements.repository import AnnouncementRepository
 from bot.features.announcements.studio import (
     FORMAT_NAMES,
@@ -190,10 +190,9 @@ class AnnouncementCog(commands.Cog):
             }
 
         if draft.get("format") == "text":
-            # Pleine largeur : un message texte normal, sans cadre.
+            # Pleine largeur : un ou plusieurs messages texte normaux, sans cadre.
             return {
-                "content": plain_text(draft, now=datetime.now(timezone.utc)) or None,
-                "embeds": [],
+                "parts": plain_parts(draft, now=datetime.now(timezone.utc)),
                 "files": files,
                 "view": links_view(draft),
                 "allowed_mentions": allowed_mentions(draft),
@@ -245,6 +244,12 @@ class AnnouncementCog(commands.Cog):
             f"📍 Salon : {channel} · 📣 Mention : {mention} · "
             f"🖊️ Cadre {studio.index + 1}/{len(draft['embeds'])}"
         )
+
+        if draft.get("format") == "text":
+            count = len(plain_parts(draft, now=datetime.now(timezone.utc)))
+
+            if count > 1:
+                lines.append(f"📄 Trop long pour un seul message : publiée en **{count} messages** à la suite.")
 
         if draft.get("format") in NEW_FORMATS:
             name = FORMAT_NAMES[draft["format"]]
@@ -299,16 +304,24 @@ class AnnouncementCog(commands.Cog):
             return
 
         if draft.get("format") == "text":
-            view = links_view(draft)
-            await interaction.response.send_message(
-                content=plain_text(
+            payload = {
+                "parts": plain_parts(
                     draft, now=datetime.now(timezone.utc), placeholder=PREVIEW_PLACEHOLDER
-                )[:2000],
-                files=files,
-                ephemeral=True,
-                allowed_mentions=discord.AllowedMentions.none(),
-                **({"view": view} if view else {}),
-            )
+                ),
+                "files": files,
+                "view": links_view(draft),
+                "allowed_mentions": discord.AllowedMentions.none(),
+            }
+
+            for index in range(len(payload["parts"])):
+                kwargs = self.part_kwargs(payload, index)
+                kwargs["allowed_mentions"] = discord.AllowedMentions.none()
+
+                if index == 0:
+                    await interaction.response.send_message(**kwargs, ephemeral=True)
+                else:
+                    await interaction.followup.send(**kwargs, ephemeral=True)
+
             return
 
         try:
@@ -453,12 +466,18 @@ class AnnouncementCog(commands.Cog):
             member=author if isinstance(author, discord.Member) else None,
         )
         payload = await self.payload(guild, draft)
+        extra_ids: list[int] = []
 
         if payload.get("view") is None:
             payload.pop("view", None)
 
         try:
-            message = await channel.send(**payload)
+            if "parts" in payload:
+                messages = await self.send_parts(channel, payload)
+                message = messages[0]
+                extra_ids = [sent.id for sent in messages[1:]]
+            else:
+                message = await channel.send(**payload)
         except discord.HTTPException as error:
             raise AnnouncementError(
                 f"Discord a refusé le message : `{str(error)[:300]}`"
@@ -466,7 +485,14 @@ class AnnouncementCog(commands.Cog):
 
         snapshot = dict(draft, editing=None)
         await self.repository.record_published(
-            guild.id, channel.id, message.id, author.id, summary_title(draft), snapshot, scheduled=scheduled
+            guild.id,
+            channel.id,
+            message.id,
+            author.id,
+            summary_title(draft),
+            snapshot,
+            scheduled=scheduled,
+            extra_ids=extra_ids,
         )
         await self.log(
             guild,
@@ -475,6 +501,43 @@ class AnnouncementCog(commands.Cog):
         )
 
         return message
+
+    @staticmethod
+    def part_kwargs(payload: dict[str, Any], index: int) -> dict[str, Any]:
+        """La mention notifie au 1er morceau ; images et boutons vont au dernier."""
+        parts = payload["parts"]
+        last = index == len(parts) - 1
+        kwargs: dict[str, Any] = {
+            "content": parts[index],
+            "allowed_mentions": payload["allowed_mentions"]
+            if index == 0
+            else discord.AllowedMentions(everyone=False, roles=False, users=True),
+        }
+
+        if last and payload.get("files"):
+            kwargs["files"] = payload["files"]
+
+        if last and payload.get("view") is not None:
+            kwargs["view"] = payload["view"]
+
+        return kwargs
+
+    async def send_parts(self, channel: discord.abc.Messageable, payload: dict[str, Any]) -> list[discord.Message]:
+        messages: list[discord.Message] = []
+
+        try:
+            for index in range(len(payload["parts"])):
+                messages.append(await channel.send(**self.part_kwargs(payload, index)))
+        except discord.HTTPException:
+            # Pas d'annonce coupée en deux : on retire ce qui est parti.
+            for sent in messages:
+                try:
+                    await sent.delete()
+                except discord.HTTPException:
+                    pass
+            raise
+
+        return messages
 
     async def fetch_own_message(self, guild: discord.Guild, channel_id: int, message_id: int) -> discord.Message:
         channel = guild.get_channel(channel_id)
@@ -520,9 +583,35 @@ class AnnouncementCog(commands.Cog):
             )
 
         payload = await self.payload(guild, draft)
+        published = await self.repository.find_published(guild.id, message.id)
+        old_extras = published["extra_ids"] if published else []
+        extra_ids: list[int] = []
+
+        if "parts" in payload and len(payload["parts"]) > 1 + len(old_extras):
+            raise AnnouncementError(
+                f"Le texte demande maintenant {len(payload['parts'])} messages, mais l'annonce "
+                f"publiée n'en a que {1 + len(old_extras)} : je ne peux pas en insérer au milieu "
+                "du salon. Raccourcis le texte, ou publie une nouvelle annonce."
+            )
 
         try:
-            if large:
+            if "parts" in payload:
+                parts = payload["parts"]
+                channel = message.channel
+
+                for index in range(len(parts)):
+                    target = message if index == 0 else channel.get_partial_message(old_extras[index - 1])
+                    kwargs = self.part_kwargs(payload, index)
+                    await target.edit(
+                        content=kwargs["content"],
+                        embeds=[],
+                        attachments=kwargs.get("files", []),
+                        view=kwargs.get("view"),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+
+                extra_ids = old_extras[: len(parts) - 1]
+            elif large:
                 await message.edit(
                     view=payload["view"],
                     attachments=payload["files"],
@@ -539,9 +628,22 @@ class AnnouncementCog(commands.Cog):
         except discord.HTTPException as error:
             raise AnnouncementError(f"Discord a refusé la modification : `{str(error)[:300]}`") from error
 
+        # Morceaux devenus inutiles (texte raccourci) : supprimés.
+        for leftover in old_extras[len(extra_ids):]:
+            try:
+                await message.channel.get_partial_message(leftover).delete()
+            except discord.HTTPException:
+                pass
+
         snapshot = dict(draft, editing=None, channel_id=editing["channel_id"])
         await self.repository.record_edited(
-            guild.id, editing["channel_id"], message.id, user.id, summary_title(draft), snapshot
+            guild.id,
+            editing["channel_id"],
+            message.id,
+            user.id,
+            summary_title(draft),
+            snapshot,
+            extra_ids=extra_ids,
         )
         await self.log(
             guild,
@@ -691,8 +793,25 @@ class AnnouncementCog(commands.Cog):
             await interaction.edit_original_response(embed=error_embed(str(error)))
             return
 
-        draft = await self.repository.get_published(interaction.guild_id, message_id)
+        found = await self.repository.find_published(interaction.guild_id, message_id)
+        draft = found["data"] if found else None
         notice = "✏️ Fais tes changements puis clique sur 💾 **Enregistrer les modifications**."
+
+        if found and found["message_id"] != message_id:
+            # Lien d'un morceau d'une longue annonce : on reprend l'annonce entière.
+            channel_id, message_id = found["channel_id"], found["message_id"]
+
+            try:
+                await self.fetch_own_message(interaction.guild, channel_id, message_id)
+            except AnnouncementError as error:
+                await interaction.edit_original_response(embed=error_embed(str(error)))
+                return
+
+        if found and found["extra_ids"]:
+            notice += (
+                f"\n📄 Cette annonce est publiée en {1 + len(found['extra_ids'])} messages : "
+                "elle peut raccourcir, mais pas dépasser ce nombre."
+            )
 
         if draft is None:
             draft = from_discord_message(

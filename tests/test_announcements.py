@@ -482,8 +482,28 @@ def test_full_width_format_is_plain_message() -> None:
     assert text.endswith("## Deuxième\nsuite")
     assert normalize_draft({"format": "text"})["format"] == "text"
 
+    # Plus de 2 000 caractères : plusieurs messages, sans erreur jusqu'à 5.
     draft["embeds"][0]["description"] = "x" * 2100
-    assert any("2000 caractères" in issue for issue in problems(draft))
+    assert not problems(draft)
+
+    draft["embeds"][0]["description"] = ("mot " * 400 + "\n\n") * 7
+    assert any("5 maximum" in issue for issue in problems(draft))
+
+
+def test_split_plain_cuts_cleanly() -> None:
+    from bot.features.announcements.layout import split_plain
+
+    paragraphs = [(f"Paragraphe {i} " + "bla " * 120).strip() for i in range(10)]
+    text = "\n\n".join(paragraphs)
+    parts = split_plain(text)
+
+    assert len(parts) > 1 and all(len(part) <= 2000 for part in parts)
+    assert all(part.startswith("Paragraphe") for part in parts)  # coupé entre deux paragraphes
+    assert "\n\n".join(parts) == text
+
+    # Un bloc sans aucun espace est coupé net.
+    assert [len(part) for part in split_plain("y" * 4500)] == [2000, 2000, 500]
+    assert split_plain("court") == ["court"]
 
 
 async def test_full_width_payload_is_plain_message() -> None:
@@ -493,11 +513,60 @@ async def test_full_width_payload_is_plain_message() -> None:
     cog._images = OrderedDict({4: ("affiche.png", b"data")})
     draft = large_draft()
     draft["format"] = "text"
+    draft["embeds"][0]["description"] = "\n\n".join("phrase " * 100 for _ in range(8))
     payload = await cog.payload(SimpleNamespace(id=1), draft)
+    parts = payload["parts"]
 
-    assert payload["embeds"] == [] and payload["content"].startswith("@everyone")
+    assert len(parts) >= 2 and parts[0].startswith("@everyone")
     assert [file.filename for file in payload["files"]] == ["4_affiche.png"]
     assert payload["view"] is not None and payload["allowed_mentions"].everyone
+
+    first = cog.part_kwargs(payload, 0)
+    last = cog.part_kwargs(payload, len(parts) - 1)
+    assert "files" not in first and "view" not in first and first["allowed_mentions"].everyone
+    assert last["files"] and last["view"] is not None
+    assert last["allowed_mentions"].everyone is False  # une seule notification
+
+
+class FakeChannel:
+    def __init__(self, fail_at: int | None = None) -> None:
+        self.sent: list = []
+        self.deleted: list = []
+        self.fail_at = fail_at
+
+    async def send(self, **kwargs):
+        if self.fail_at is not None and len(self.sent) == self.fail_at:
+            raise discord.HTTPException(SimpleNamespace(status=400, reason="x"), "refusé")
+
+        message = SimpleNamespace(id=100 + len(self.sent), kwargs=kwargs)
+
+        async def delete():
+            self.deleted.append(message.id)
+
+        message.delete = delete
+        self.sent.append(message)
+        return message
+
+
+async def test_send_parts_rolls_back_on_failure() -> None:
+    cog = AnnouncementCog.__new__(AnnouncementCog)
+    payload = {
+        "parts": ["un", "deux", "trois"],
+        "files": [],
+        "view": None,
+        "allowed_mentions": discord.AllowedMentions.none(),
+    }
+
+    channel = FakeChannel()
+    messages = await cog.send_parts(channel, payload)
+    assert [m.kwargs["content"] for m in messages] == ["un", "deux", "trois"]
+
+    failing = FakeChannel(fail_at=2)
+
+    with pytest.raises(discord.HTTPException):
+        await cog.send_parts(failing, payload)
+
+    assert failing.deleted == [100, 101]  # pas d'annonce coupée en deux
 
 
 async def test_format_button_cycles_three_formats() -> None:
@@ -515,3 +584,63 @@ async def test_format_button_cycles_three_formats() -> None:
 
     assert [fmt for fmt, _ in seen] == ["large", "text", "classic"]
     assert "pleine largeur" in seen[1][1]
+
+
+async def test_edit_long_announcement_shrinks_and_refuses_growth() -> None:
+    from collections import OrderedDict
+
+    edits: dict[int, dict] = {}
+    deleted: list[int] = []
+
+    def partial(message_id: int):
+        async def edit(**kwargs):
+            edits[message_id] = kwargs
+
+        async def delete():
+            deleted.append(message_id)
+
+        return SimpleNamespace(id=message_id, edit=edit, delete=delete)
+
+    channel = SimpleNamespace(get_partial_message=partial)
+    main = partial(1)
+    main.flags = SimpleNamespace(components_v2=False)
+    main.channel = channel
+    main.jump_url = "https://discord.com/channels/1/10/1"
+
+    cog = AnnouncementCog.__new__(AnnouncementCog)
+    cog._images = OrderedDict()
+
+    async def fetch(*args):
+        return main
+
+    async def find(guild_id, message_id):
+        return {"message_id": 1, "channel_id": 10, "extra_ids": [2, 3], "data": {}}
+
+    recorded: dict = {}
+
+    async def record_edited(*args, extra_ids=()):
+        recorded["extra_ids"] = list(extra_ids)
+
+    async def log(*args):
+        return None
+
+    cog.fetch_own_message = fetch
+    cog.repository = SimpleNamespace(find_published=find, record_edited=record_edited)
+    cog.log = log
+
+    draft = filled_draft()
+    draft["format"] = "text"
+    draft["editing"] = {"channel_id": 10, "message_id": 1}
+    draft["embeds"][0]["description"] = "\n\n".join("phrase " * 150 for _ in range(2))  # 2 messages
+
+    await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5, mention="<@5>"))
+    assert set(edits) == {1, 2} and deleted == [3]  # le 3e morceau n'a plus lieu d'être
+    assert recorded["extra_ids"] == [2]
+
+    long_text = "\n\n".join("phrase " * 150 for _ in range(3))
+    draft["embeds"][0]["description"] = long_text
+    shorter = "\n\n".join("phrase " * 150 for _ in range(2))
+    draft["embeds"].append({"title": "Suite", "description": shorter, "fields": []})  # 5 messages > 3
+
+    with pytest.raises(AnnouncementError, match="insérer"):
+        await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5, mention="<@5>"))

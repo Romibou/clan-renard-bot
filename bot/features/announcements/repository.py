@@ -73,6 +73,11 @@ SCHEMA = (
         edited_by BIGINT
     )
     """,
+    # Pleine largeur : une longue annonce est publiée en plusieurs messages.
+    """
+    ALTER TABLE announcement_history
+    ADD COLUMN IF NOT EXISTS extra_message_ids BIGINT[] NOT NULL DEFAULT '{}'
+    """,
 )
 
 
@@ -372,12 +377,14 @@ class AnnouncementRepository:
         draft: dict[str, Any],
         *,
         scheduled: bool = False,
+        extra_ids: list[int] | tuple[int, ...] = (),
     ) -> None:
         await self.pool.execute(
             """
             INSERT INTO announcement_history
-                (guild_id, channel_id, message_id, author_id, title, data, scheduled)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+                (guild_id, channel_id, message_id, author_id, title, data, scheduled,
+                 extra_message_ids)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::bigint[])
             ON CONFLICT (message_id) DO NOTHING
             """,
             guild_id,
@@ -387,6 +394,7 @@ class AnnouncementRepository:
             title[:120],
             _dump(draft),
             scheduled,
+            list(extra_ids),
         )
 
     async def record_edited(
@@ -397,18 +405,20 @@ class AnnouncementRepository:
         user_id: int,
         title: str,
         draft: dict[str, Any],
+        extra_ids: list[int] | tuple[int, ...] = (),
     ) -> None:
         await self.pool.execute(
             """
             INSERT INTO announcement_history
                 (guild_id, channel_id, message_id, author_id, title, data,
-                 edited_at, edited_by)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), $4)
+                 edited_at, edited_by, extra_message_ids)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), $4, $7::bigint[])
             ON CONFLICT (message_id)
             DO UPDATE SET title = EXCLUDED.title,
                           data = EXCLUDED.data,
                           edited_at = NOW(),
-                          edited_by = EXCLUDED.edited_by
+                          edited_by = EXCLUDED.edited_by,
+                          extra_message_ids = EXCLUDED.extra_message_ids
             """,
             guild_id,
             channel_id,
@@ -416,7 +426,31 @@ class AnnouncementRepository:
             user_id,
             title[:120],
             _dump(draft),
+            list(extra_ids),
         )
+
+    async def find_published(self, guild_id: int, message_id: int) -> dict[str, Any] | None:
+        """Retrouve une annonce par son message, ou par l'un de ses morceaux."""
+        record = await self.pool.fetchrow(
+            """
+            SELECT message_id, channel_id, extra_message_ids, data
+            FROM announcement_history
+            WHERE guild_id = $1
+              AND (message_id = $2 OR $2 = ANY(extra_message_ids))
+            """,
+            guild_id,
+            message_id,
+        )
+
+        if record is None:
+            return None
+
+        return {
+            "message_id": int(record["message_id"]),
+            "channel_id": int(record["channel_id"]),
+            "extra_ids": [int(value) for value in record["extra_message_ids"] or []],
+            "data": _load(record["data"]),
+        }
 
     async def get_published(self, guild_id: int, message_id: int) -> dict[str, Any] | None:
         value = await self.pool.fetchval(

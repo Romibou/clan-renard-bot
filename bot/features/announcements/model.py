@@ -54,7 +54,6 @@ MENTIONS = ("none", "everyone", "here", "role")
 # text = message texte simple, en pleine largeur comme un message de membre.
 FORMATS = ("classic", "large", "text")
 NEW_FORMATS = ("large",)  # formats « Components V2 »
-MAX_PLAIN = 2000
 
 COLOR_NAMES = {
     "renard": 0xF28C28,
@@ -298,14 +297,14 @@ def problems(draft: dict[str, Any]) -> list[str]:
 
         found += layout_problems(draft)
     elif draft.get("format") == "text":
-        from bot.features.announcements.layout import plain_text
+        from bot.features.announcements.layout import MAX_PARTS, plain_parts
 
-        length = len(plain_text(draft, now=datetime.now()))
+        count = len(plain_parts(draft, now=datetime.now()))
 
-        if length > MAX_PLAIN:
+        if count > MAX_PARTS:
             found.append(
-                f"En pleine largeur, Discord limite le message à {MAX_PLAIN} caractères "
-                f"(ici {length}). Raccourcis, ou passe en format classique ou grand."
+                f"En pleine largeur, l'annonce ferait {count} messages : {MAX_PARTS} maximum "
+                "(environ 10 000 caractères). Raccourcis-la."
             )
     elif total > MAX_EMBEDS_TOTAL:
         found.append(

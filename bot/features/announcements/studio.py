@@ -126,7 +126,8 @@ FORMAT_NOTICES = {
     "text": (
         "📐 Format **pleine largeur** : un message texte normal, sans cadre ni barre de couleur, "
         "qui prend toute la largeur du salon. Images et boutons en dessous, pas de miniature. "
-        "2 000 caractères au total. Clique sur 👁️ **Aperçu réel** pour le voir."
+        "Au-delà de 2 000 caractères, l'annonce est publiée en plusieurs messages à la suite "
+        "(5 maximum). Clique sur 👁️ **Aperçu réel** pour le voir."
     ),
 }
 

@@ -160,6 +160,52 @@ def plain_text(
     return "\n\n".join(part for part in parts if part)
 
 
+MAX_PART = 2000  # limite d'un message de bot
+MAX_PARTS = 5  # environ 10 000 caractères
+
+
+def split_plain(text: str, limit: int = MAX_PART) -> list[str]:
+    """
+    Découpe un long texte en messages de `limit` caractères au plus,
+    de préférence entre deux paragraphes, sinon entre deux lignes,
+    sinon entre deux mots.
+    """
+    parts: list[str] = []
+    rest = text.strip()
+
+    while len(rest) > limit:
+        window = rest[: limit + 1]
+        cut = -1
+
+        for separator in ("\n\n", "\n", " "):
+            cut = window.rfind(separator)
+
+            if cut > limit // 3:
+                break
+        else:
+            cut = -1
+
+        if cut <= 0:
+            cut = limit
+
+        parts.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip("\n ").rstrip()
+
+    if rest:
+        parts.append(rest)
+
+    return parts
+
+
+def plain_parts(
+    draft: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    placeholder: str | None = None,
+) -> list[str]:
+    return split_plain(plain_text(draft, now=now, placeholder=placeholder))
+
+
 def layout_problems(draft: dict[str, Any]) -> list[str]:
     """Limites propres au format grand."""
     found = []
