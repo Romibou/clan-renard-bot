@@ -951,6 +951,8 @@ def render_leaderboard_card(
         "xp",
         "money",
         "streak",
+        "xp_week",
+        "xp_month",
     }:
         normalized_type = "xp"
 
@@ -1031,6 +1033,16 @@ def render_leaderboard_card(
         title = "CLASSEMENT SÉRIE"
         value_header = "MEILLEURE SÉRIE"
         accent_color = STREAK_ACCENT
+
+    elif normalized_type == "xp_week":
+        title = "XP DE LA SEMAINE"
+        value_header = "XP GAGNÉE"
+        accent_color = XP_ACCENT
+
+    elif normalized_type == "xp_month":
+        title = "XP DU MOIS"
+        value_header = "XP GAGNÉE"
+        accent_color = XP_ACCENT
 
     else:
         title = "CLASSEMENT XP"

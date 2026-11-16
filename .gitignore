@@ -36,3 +36,6 @@ logs/
 # Sauvegardes locales
 *.sqlite
 *.db
+
+# Sauvegardes de la base (scripts/sauvegarder_base.py) : données des membres
+sauvegardes/

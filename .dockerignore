@@ -15,3 +15,4 @@ generated/
 *.md
 installer_nouveau_visuel.py
 requirements-dev.txt
+sauvegardes/

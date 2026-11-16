@@ -41,7 +41,16 @@ Clan Renard Bot possède actuellement les systèmes suivants :
 - vente de rôles Discord ;
 - vente de cosmétiques ;
 - importation depuis DraftBot ;
-- panneaux administratifs interactifs.
+- panneaux administratifs interactifs ;
+- récompense quotidienne avec série et rappel ;
+- missions quotidiennes et hebdomadaires ;
+- dons de pièces entre membres ;
+- classements de la semaine et du mois ;
+- statistiques personnelles ;
+- rappels personnels ;
+- rôles à la réaction ;
+- commande d’aide ;
+- sauvegarde de la base.
 
 ---
 
@@ -58,6 +67,18 @@ Clan Renard Bot possède actuellement les systèmes suivants :
 | `/boutique` | Membres | Ouvre la boutique permanente |
 | `/boutique-admin` | Administration | Gère les articles de la boutique |
 | `/import_draftbot` | Administration | Importe une progression provenant de DraftBot |
+| `/quotidien` | Membres | Récupère la récompense quotidienne |
+| `/quotidien-admin` | Administration | Configure la récompense quotidienne |
+| `/missions` | Membres | Affiche et réclame les missions |
+| `/missions-admin` | Administration | Configure les missions |
+| `/donner` | Membres | Donne des pièces à un membre |
+| `/classement` | Membres | Classements XP, argent, série, semaine et mois |
+| `/stats` | Membres | Statistiques d’un membre |
+| `/rappel` | Membres | Programme un rappel |
+| `/aide` | Membres | Liste les commandes |
+| `/reaction-role` | Administration | Lie une réaction à un rôle |
+| `/reaction-role-retirer` | Administration | Supprime une réaction-rôle |
+| `/reaction-role-liste` | Administration | Liste les réactions-rôles |
 
 Les commandes administratives sont généralement limitées aux membres possédant les permissions nécessaires, notamment **Gérer le serveur** ou une permission équivalente.
 
@@ -1059,6 +1080,166 @@ L’XP totale est recalculée pour être compatible avec la courbe de progressio
 Si l’extension d’import ne sert plus après la migration, elle peut être désactivée ou retirée afin de ne pas conserver inutilement une commande administrative sensible.
 
 Il est recommandé de conserver une sauvegarde de la base avant tout import important.
+
+---
+
+# Récompense quotidienne
+
+## Commande `/quotidien`
+
+Chaque membre peut récupérer une récompense **une fois par jour**. Le compteur repart à **minuit, heure de Paris**.
+
+La récompense contient de l’XP et des pièces, configurées avec `/quotidien-admin`.
+
+## Série
+
+- Récupérer la récompense deux jours de suite fait monter la série.
+- Sauter un jour remet la série à 1.
+- La meilleure série est conservée et sert au classement **Meilleure série quotidienne**.
+
+Des règles de bonus (au format JSON, voir le bouton **Exemple JSON** de `/quotidien-admin`) peuvent multiplier ou augmenter la récompense à certains jours de série, par exemple tous les 7 jours ou au 30e jour.
+
+## Rappel en message privé
+
+Sous la réponse de `/quotidien` :
+
+- le bouton **Activer / désactiver rappel** active ou coupe le rappel ;
+- le menu **Choisir l’heure du rappel** fixe l’heure du message privé (heure de Paris) et active le rappel.
+
+L’heure par défaut est **09:00**. Le rappel est envoyé une seule fois, le jour où la récompense redevient disponible. Il n’arrive pas si le membre a fermé ses messages privés.
+
+---
+
+# Missions
+
+## Commande `/missions`
+
+Affiche les missions du jour et de la semaine, avec la progression du membre. Une mission terminée se réclame avec le bouton du panneau.
+
+- Missions quotidiennes : remises à zéro à minuit (heure de Paris).
+- Missions hebdomadaires : remises à zéro le lundi à minuit.
+
+La progression compte depuis le début réel de la période, même si le membre n’a pas encore ouvert `/missions`.
+
+## Objectifs possibles
+
+| Valeur | Objectif |
+|---|---|
+| `messages` | Messages récompensés en XP (un seul par délai entre deux récompenses) |
+| `voice_minutes` | Minutes passées en vocal avec au moins un autre membre |
+| `xp` | XP gagnée |
+| `coins` | Pièces gagnées (les dons reçus avec `/donner` ne comptent pas) |
+| `daily_claims` | Récompenses quotidiennes récupérées |
+| `streak` | Série quotidienne en cours |
+
+## Administration
+
+`/missions-admin` permet d’activer le système et de configurer jusqu’à 25 missions au format JSON (bouton **Exemple**). Chaque mission peut donner de l’XP, des pièces et un cosmétique de profil.
+
+---
+
+# Dons de pièces
+
+## Commande `/donner`
+
+```text
+/donner membre:@Membre montant:100 raison:Merci !
+```
+
+- Un membre peut donner au total **500 pièces par jour** (heure de Paris).
+- On ne peut pas se donner des pièces, ni en donner à un bot.
+- Le don est annoncé dans le salon.
+- Les pièces reçues s’ajoutent au portefeuille mais ne comptent pas comme de l’argent « gagné » : elles ne font pas avancer les missions `coins`.
+
+La limite quotidienne se règle dans le code (`DAILY_GIFT_LIMIT` dans `bot/extensions/donner.py`).
+
+---
+
+# Classements
+
+## Commande `/classement`
+
+| Type | Contenu |
+|---|---|
+| XP | XP totale |
+| Argent | Portefeuille actuel |
+| Meilleure série quotidienne | Plus longue série de `/quotidien` |
+| XP de la semaine | XP gagnée depuis lundi minuit (heure de Paris) |
+| XP du mois | XP gagnée depuis le 1er du mois |
+
+Les classements de la semaine et du mois donnent leur chance aux nouveaux membres face aux anciens. Ils se mettent à jour environ une fois par minute.
+
+Les membres qui ont quitté le serveur sont masqués de tous les classements et ne comptent plus dans les rangs. Leurs données sont conservées : ils retrouvent leur place s’ils reviennent.
+
+## Commande `/stats`
+
+Affiche les statistiques d’un membre pour **aujourd’hui** ou les **7 derniers jours** : XP gagnée, pièces gagnées, meilleure série, messages récompensés, temps vocal récompensé, progression vers le niveau suivant et classements actuels.
+
+---
+
+# Rappels personnels
+
+## Commande `/rappel`
+
+```text
+/rappel raison:Lancer la partie temps:1h30 destination:Dans ce salon
+```
+
+Formats de durée acceptés : `10s`, `10m`, `5mn`, `2h`, `1h30`, `1j12h`, `3sem`, ou un nombre seul en minutes (`45`).
+
+- Durée minimale : 10 secondes. Durée maximale : 90 jours.
+- Si le salon n’est plus accessible, le rappel part en message privé (et inversement).
+- Le bouton **Relancer le rappel** reprogramme le même rappel avec la même durée.
+
+---
+
+# Rôles à la réaction
+
+| Commande | Rôle |
+|---|---|
+| `/reaction-role` | Lie un émoji, sur un message, à un rôle. Le bot ajoute lui-même la réaction. |
+| `/reaction-role-retirer` | Supprime une association. |
+| `/reaction-role-liste` | Liste les associations du serveur. |
+
+Ces commandes demandent la permission **Gérer les rôles**. Réagir donne le rôle, retirer sa réaction l’enlève.
+
+Les émojis personnalisés restent reconnus s’ils sont renommés ou animés.
+
+---
+
+# Aide
+
+`/aide` liste toutes les commandes membres, classées par thème. Les administrateurs voient aussi la liste des commandes d’administration.
+
+La liste est construite automatiquement à partir des commandes chargées : une nouvelle commande y apparaît sans rien modifier.
+
+---
+
+# Sauvegarde de la base
+
+Les données sont stockées sur Supabase. Pour en garder une copie sur ton PC :
+
+1. Ajoute dans le fichier `.env` du bot la ligne `DATABASE_URL=...` (la même valeur que sur Render). Ce fichier n’est jamais envoyé sur GitHub.
+2. Depuis le dossier du bot, lance :
+
+```text
+python scripts/sauvegarder_base.py
+```
+
+Un fichier `sauvegardes/clan-renard-AAAA-MM-JJ_HH-MM.zip` est créé. Il contient un fichier CSV par table (lisible dans Excel) et un fichier `informations.json` avec le nombre de lignes de chaque table.
+
+Le dossier `sauvegardes/` est exclu de git : la base contient les identifiants Discord des membres et ne doit pas finir sur le dépôt public.
+
+## Restaurer une sauvegarde
+
+```text
+python scripts/restaurer_base.py sauvegardes/clan-renard-AAAA-MM-JJ_HH-MM.zip
+```
+
+- Arrête le bot pendant la restauration.
+- Les tables sont **vidées puis remplies** avec la sauvegarde : tout ce qui a changé depuis est perdu. Le script demande de taper `RESTAURER` pour confirmer.
+- En cas d’erreur, rien n’est modifié.
+- Sur une base neuve, démarre d’abord le bot une fois pour qu’il crée les tables.
 
 ---
 

@@ -29,7 +29,11 @@ MAXIMUM_MULTIPLIER = Decimal("100")
 MAXIMUM_RULES = 30
 MAXIMUM_STREAK_DAY = 100_000
 
-REMINDER_CHECK_INTERVAL_SECONDS = 300
+REMINDER_CHECK_INTERVAL_SECONDS = 60
+
+# Heure (Paris) du rappel quotidien par défaut. Le membre peut la
+# changer avec le menu affiché sous /quotidien.
+DEFAULT_REMINDER_HOUR = 9
 
 
 def get_next_daily_reset(
@@ -54,6 +58,36 @@ def get_next_daily_reset(
 
     return next_midnight.astimezone(
         timezone.utc
+    )
+
+
+def get_reminder_time(
+    last_claim_at: datetime,
+    reminder_hour: int,
+) -> datetime:
+    """
+    Moment où envoyer le rappel : le jour où la récompense redevient
+    disponible, à l'heure choisie par le membre (heure de Paris).
+    """
+    available_at = get_next_daily_reset(
+        last_claim_at
+    )
+
+    available_day = available_at.astimezone(
+        PARIS_TIMEZONE
+    ).date()
+
+    reminder_at = datetime(
+        available_day.year,
+        available_day.month,
+        available_day.day,
+        min(max(int(reminder_hour), 0), 23),
+        tzinfo=PARIS_TIMEZONE,
+    )
+
+    return max(
+        reminder_at.astimezone(timezone.utc),
+        available_at,
     )
 
 
@@ -1699,6 +1733,66 @@ class DailyReminderToggleView(
     async def on_timeout(self) -> None:
         self.disable_buttons()
 
+    @discord.ui.select(
+        placeholder="⏰ Choisir l'heure du rappel…",
+        options=[
+            discord.SelectOption(
+                label=f"{hour:02d}:00",
+                value=str(hour),
+                description=(
+                    "Par défaut"
+                    if hour == DEFAULT_REMINDER_HOUR
+                    else None
+                ),
+            )
+            for hour in range(24)
+        ],
+        row=1,
+    )
+    async def choose_reminder_hour(
+        self,
+        interaction: discord.Interaction,
+        select: discord.ui.Select,
+    ) -> None:
+        try:
+            hour = int(select.values[0])
+
+            await self.cog.set_daily_reminder_hour(
+                guild_id=self.guild_id,
+                user_id=self.user_id,
+                hour=hour,
+            )
+        except Exception:
+            LOGGER.exception(
+                (
+                    "Impossible de modifier l'heure du rappel "
+                    "quotidien de %s sur le serveur %s."
+                ),
+                self.user_id,
+                self.guild_id,
+            )
+
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Erreur",
+                    (
+                        "L'heure du rappel n'a pas pu être "
+                        "modifiée. Réessaie plus tard."
+                    ),
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            content=(
+                f"🔔 Rappel activé : je te préviendrai en message "
+                f"privé à **{hour:02d}:00** (heure de Paris) dès que "
+                "ta récompense sera de nouveau disponible."
+            ),
+            ephemeral=True,
+        )
+
     @discord.ui.button(
         label="Activer / désactiver rappel",
         emoji="🔔",
@@ -1738,8 +1832,17 @@ class DailyReminderToggleView(
             return
 
         if enabled:
+            hour = await self.cog.get_daily_reminder_hour(
+                guild_id=self.guild_id,
+                user_id=self.user_id,
+            )
+
             await interaction.response.send_message(
-                content="🔔 Rappel activé.",
+                content=(
+                    f"🔔 Rappel activé, à **{hour:02d}:00** "
+                    "(heure de Paris). Change l'heure avec le menu "
+                    "ci-dessous."
+                ),
                 ephemeral=True,
             )
         else:
@@ -1981,6 +2084,15 @@ class DailyCog(
             """
         )
 
+        await pool.execute(
+            """
+            ALTER TABLE daily_reminders
+            ADD COLUMN IF NOT EXISTS reminder_hour SMALLINT
+                NOT NULL DEFAULT 9
+                CHECK (reminder_hour BETWEEN 0 AND 23)
+            """
+        )
+
         LOGGER.info(
             "Tables des récompenses quotidiennes vérifiées"
         )
@@ -2036,6 +2148,61 @@ class DailyCog(
         return bool(
             record["enabled"]
         )
+
+    async def set_daily_reminder_hour(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+        hour: int,
+    ) -> None:
+        """
+        Enregistre l'heure du rappel et active le rappel.
+        """
+        if not 0 <= hour <= 23:
+            raise ValueError("L'heure doit être comprise entre 0 et 23.")
+
+        await self.get_pool().execute(
+            """
+            INSERT INTO daily_reminders (
+                guild_id,
+                user_id,
+                enabled,
+                reminder_hour
+            )
+            VALUES ($1, $2, TRUE, $3)
+            ON CONFLICT (guild_id, user_id)
+            DO UPDATE SET
+                enabled = TRUE,
+                reminder_hour = EXCLUDED.reminder_hour,
+                updated_at = NOW()
+            """,
+            guild_id,
+            user_id,
+            hour,
+        )
+
+    async def get_daily_reminder_hour(
+        self,
+        *,
+        guild_id: int,
+        user_id: int,
+    ) -> int:
+        value = await self.get_pool().fetchval(
+            """
+            SELECT reminder_hour
+            FROM daily_reminders
+            WHERE guild_id = $1
+              AND user_id = $2
+            """,
+            guild_id,
+            user_id,
+        )
+
+        if value is None:
+            return DEFAULT_REMINDER_HOUR
+
+        return int(value)
 
     async def send_daily_reminder(
         self,
@@ -2131,7 +2298,8 @@ class DailyCog(
                     r.guild_id,
                     r.user_id,
                     m.last_claim_at,
-                    r.last_reminded_at
+                    r.last_reminded_at,
+                    r.reminder_hour
                 FROM daily_reminders r
                 JOIN daily_members m
                     ON m.guild_id = r.guild_id
@@ -2163,7 +2331,17 @@ class DailyCog(
                 last_claim_at
             )
 
-            if current_time < available_at:
+            reminder_at = get_reminder_time(
+                last_claim_at,
+                int(record["reminder_hour"]),
+            )
+
+            if current_time < reminder_at:
+                continue
+
+            # Le membre a laissé passer toute la journée : on ne lui
+            # envoie pas un rappel devenu inutile le lendemain.
+            if current_time >= available_at + timedelta(days=1):
                 continue
 
             last_reminded_at = record["last_reminded_at"]

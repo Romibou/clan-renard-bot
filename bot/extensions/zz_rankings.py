@@ -4,8 +4,10 @@ import asyncio
 import io
 import logging
 import math
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
@@ -48,19 +50,44 @@ def normalize_ranking_type(
         ranking_type
     ).strip().lower()
 
-    if normalized not in {
-        "xp",
-        "money",
-        "streak",
-    }:
+    if normalized not in RANKING_TYPES:
         raise ValueError(
             (
                 "Le type de classement doit être "
-                "`xp`, `money` ou `streak`."
+                "`xp`, `money`, `streak`, `xp_week` ou `xp_month`."
             )
         )
 
     return normalized
+
+
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
+
+# Classements calculés sur une période (XP gagnée depuis le lundi
+# ou depuis le 1er du mois, heure de Paris).
+PERIOD_RANKING_TYPES = {
+    "xp_week",
+    "xp_month",
+}
+
+RANKING_TYPES = {
+    "xp",
+    "money",
+    "streak",
+    *PERIOD_RANKING_TYPES,
+}
+
+
+def get_period_start(
+    ranking_type: str,
+    today: date | None = None,
+) -> date:
+    current = today or datetime.now(PARIS_TIMEZONE).date()
+
+    if ranking_type == "xp_month":
+        return current.replace(day=1)
+
+    return current - timedelta(days=current.weekday())
 
 
 class LeaderboardPageModal(
@@ -441,6 +468,46 @@ class RankingsCog(commands.Cog):
             guild_id,
         )
 
+    async def get_period_leaderboard(
+        self,
+        *,
+        guild_id: int,
+        ranking_type: str,
+        present_ids: list[int] | None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Any]:
+        """
+        XP gagnée depuis le début de la semaine ou du mois (heure de
+        Paris), d'après les statistiques quotidiennes.
+        """
+        return await self.get_pool().fetch(
+            """
+            SELECT
+                user_id,
+                SUM(xp_gained)::BIGINT AS period_xp
+            FROM statistics_daily
+            WHERE guild_id = $1
+              AND statistic_date >= $2
+              AND (
+                    $3::BIGINT[] IS NULL
+                    OR user_id = ANY($3::BIGINT[])
+              )
+            GROUP BY user_id
+            HAVING SUM(xp_gained) > 0
+            ORDER BY
+                period_xp DESC,
+                user_id ASC
+            LIMIT $4
+            OFFSET $5
+            """,
+            guild_id,
+            get_period_start(ranking_type),
+            present_ids,
+            limit,
+            offset,
+        )
+
     async def get_leaderboard_total_members(
         self,
         *,
@@ -456,6 +523,15 @@ class RankingsCog(commands.Cog):
         )
 
         pool = self.get_pool()
+
+        if ranking_type in PERIOD_RANKING_TYPES:
+            return len(
+                await self.get_period_leaderboard(
+                    guild_id=guild_id,
+                    ranking_type=ranking_type,
+                    present_ids=present_ids,
+                )
+            )
 
         if ranking_type == "streak":
             result = await pool.fetchval(
@@ -545,6 +621,17 @@ class RankingsCog(commands.Cog):
         )
 
         pool = self.get_pool()
+
+        if ranking_type in PERIOD_RANKING_TYPES:
+            return list(
+                await self.get_period_leaderboard(
+                    guild_id=guild_id,
+                    ranking_type=ranking_type,
+                    present_ids=present_ids,
+                    limit=LEADERBOARD_PAGE_SIZE,
+                    offset=offset,
+                )
+            )
 
         if ranking_type == "streak":
             records = await pool.fetch(
@@ -645,6 +732,31 @@ class RankingsCog(commands.Cog):
         )
 
         pool = self.get_pool()
+
+        if ranking_type in PERIOD_RANKING_TYPES:
+            ranking = await self.get_period_leaderboard(
+                guild_id=guild_id,
+                ranking_type=ranking_type,
+                present_ids=present_ids,
+            )
+
+            for position, record in enumerate(ranking, start=1):
+                if int(record["user_id"]) == user_id:
+                    return {
+                        "rank": position,
+                        "total_xp": 0,
+                        "wallet": 0,
+                        "best_streak": 0,
+                        "period_xp": int(record["period_xp"]),
+                    }
+
+            return {
+                "rank": None,
+                "total_xp": 0,
+                "wallet": 0,
+                "best_streak": 0,
+                "period_xp": 0,
+            }
 
         if ranking_type == "streak":
             personal_record = await pool.fetchrow(
@@ -901,7 +1013,12 @@ class RankingsCog(commands.Cog):
                 record["user_id"]
             )
 
-            if ranking_type == "streak":
+            if ranking_type in PERIOD_RANKING_TYPES:
+                value = int(
+                    record["period_xp"]
+                    or 0
+                )
+            elif ranking_type == "streak":
                 value = int(
                     record["best_streak"]
                     or 0
@@ -944,7 +1061,12 @@ class RankingsCog(commands.Cog):
             user_id=requester_id,
         )
 
-        if ranking_type == "streak":
+        if ranking_type in PERIOD_RANKING_TYPES:
+            personal_value = int(
+                personal_data.get("period_xp")
+                or 0
+            )
+        elif ranking_type == "streak":
             personal_value = int(
                 personal_data["best_streak"]
                 or 0
@@ -1161,6 +1283,14 @@ class RankingsCog(commands.Cog):
             app_commands.Choice(
                 name="Meilleure série quotidienne",
                 value="streak",
+            ),
+            app_commands.Choice(
+                name="XP de la semaine",
+                value="xp_week",
+            ),
+            app_commands.Choice(
+                name="XP du mois",
+                value="xp_month",
             ),
         ]
     )
