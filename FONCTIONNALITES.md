@@ -16,7 +16,8 @@ Pour l’installation et le déploiement, voir `README.md`.
 8. [Classements, statistiques et bilan](#classements-statistiques-et-bilan)
 9. [Calendrier de l’Avent](#calendrier-de-lavent)
 10. [Outils : rappels, rôles à la réaction, aide](#outils--rappels-rôles-à-la-réaction-aide)
-11. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
+11. [Modération](#modération)
+12. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
 
 ---
 
@@ -54,6 +55,12 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
+| `/warn`, `/mute`, `/unmute`, `/amende`, `/pardon`, `/casier`, `/note` | Exclure temporairement | Sanctions, annulations, casier (voir [Modération](#modération)) |
+| `/kick` | Expulser | Expulsion |
+| `/ban`, `/unban` | Bannir | Bannissement définitif ou temporaire |
+| `/clear` | Gérer les messages | Suppression de messages |
+| `/lock`, `/unlock` | Gérer les salons | Verrouillage d’un salon |
+| `/moderation-admin` | Gérer le serveur | Journal, contestations, échelle de sanctions, AutoMod |
 
 Les commandes d’administration n’apparaissent pas aux membres qui n’ont pas la permission. Dans `/aide`, les administrateurs voient en plus la liste de ces commandes.
 
@@ -448,6 +455,98 @@ Liste les commandes membres, classées par thème. La liste se construit automat
 
 ---
 
+# Modération
+
+## Les sanctions
+
+| Commande | Permission | Effet |
+|---|---|---|
+| `/warn membre raison` | Exclure temporairement | Avertissement (compte pour l’échelle automatique) |
+| `/mute membre duree [raison]` | Exclure temporairement | Exclusion temporaire de Discord : le membre ne peut plus écrire, réagir ni parler (28 jours max) |
+| `/unmute membre [raison]` | Exclure temporairement | Met fin à l’exclusion |
+| `/kick membre [raison]` | Expulser | Expulse du serveur (retour possible avec une invitation) |
+| `/ban membre [duree] [raison] [supprimer_messages]` | Bannir | Sans durée : définitif. Avec durée (`3j`, `2sem`…) : **bannissement temporaire**, levé automatiquement (1 an max) |
+| `/unban identifiant [raison]` | Bannir | Lève un bannissement |
+| `/amende membre montant raison` | Exclure temporairement | Retire des pièces du portefeuille (jamais sous 0) |
+| `/pardon numero [raison]` | Exclure temporairement | **Annule** une sanction : retire l’avertissement du compte, démute, débannit ou rembourse l’amende |
+
+Chaque sanction :
+
+1. reçoit un **numéro de cas** (`#12`) et entre dans le casier du membre ;
+2. est envoyée au membre en **message privé** (raison, durée, numéro), avant l’expulsion ou le bannissement pour qu’il la reçoive ;
+3. est publiée dans le **salon du journal** ;
+4. est confirmée au modérateur en privé, avec un avertissement si le message privé n’a pas pu partir.
+
+Garde-fous : impossible de se sanctionner soi-même, de sanctionner le bot ou le propriétaire du serveur, ou un membre dont le rôle est égal ou supérieur au sien. Le bot prévient aussi si un membre est au-dessus de son propre rôle. Si Discord refuse l’action, aucun cas n’est enregistré.
+
+## Échelle de sanctions automatiques
+
+Les avertissements s’additionnent et déclenchent des sanctions automatiques. Par défaut :
+
+```text
+3 = mute 1h
+5 = mute 1j
+7 = ban 7j
+```
+
+- Un avertissement compte pendant **30 jours** (réglable). Un avertissement annulé avec `/pardon` ne compte plus.
+- Le palier s’applique quand le membre atteint exactement ce nombre d’avertissements ; la sanction automatique a son propre numéro de cas, avec la raison « Sanction automatique : N avertissements ».
+- Actions possibles : `mute <durée>`, `kick`, `ban <durée>` ou `ban` (définitif).
+- Le casier affiche la prochaine sanction automatique (« Prochaine sanction automatique à 5 : exclusion de 1 j »).
+
+## Contestations
+
+Quand un salon de contestations est choisi dans `/moderation-admin`, le message privé d’un avertissement, d’une exclusion, d’un bannissement ou d’une amende contient un bouton **📨 Contester**.
+
+1. Le membre explique sa version dans un formulaire (une seule contestation par sanction).
+2. La contestation arrive dans le salon choisi, avec le détail de la sanction et deux boutons : **Accepter et annuler la sanction** / **Refuser**.
+3. Accepter annule la sanction (comme `/pardon`) ; dans les deux cas, le membre reçoit la décision en message privé.
+
+Seuls les membres ayant la permission « Exclure temporairement des membres » peuvent décider. Les boutons fonctionnent après un redémarrage du bot.
+
+## Casier et notes
+
+- `/casier membre` (privé) : identité, ancienneté du compte et sur le serveur, état actuel (exclu, banni…), avertissements actifs et prochaine sanction automatique, total par type, les 12 dernières sanctions (les annulées sont barrées) et les notes de l’équipe. Fonctionne aussi pour un membre parti ou banni.
+- `/note ajouter membre texte` : note privée de l’équipe sur un membre (il n’en est pas informé).
+- `/note supprimer numero` : supprime une note (`n7` dans le casier → numéro `7`).
+
+## Outils de salon
+
+- `/clear nombre [membre]` : supprime jusqu’à 100 messages récents, éventuellement d’un seul membre. Les messages épinglés sont conservés.
+- `/lock [salon] [raison]` : plus personne ne peut écrire ni réagir dans le salon (sauf l’équipe) ; un message l’annonce.
+- `/unlock [salon]` : rouvre le salon.
+
+## Modération automatique
+
+Réglée dans `/moderation-admin`. Les trois filtres utilisent l’**AutoMod de Discord** : Discord bloque le message **avant** qu’il soit publié et affiche un message au membre, puis le bot lui donne un avertissement (au plus un par minute et par filtre), ce qui alimente l’échelle de sanctions.
+
+| Filtre | Effet |
+|---|---|
+| 🔗 Liens d’invitation | Bloque les invitations vers d’autres serveurs Discord |
+| 🚫 Mots interdits | Bloque les messages contenant un mot de la liste (`*morceau*` pour une partie de mot) |
+| 📣 Mentions de masse | Bloque les messages avec trop de mentions |
+| 💬 Anti-spam | Trop de messages en peu de temps (par exemple 6 en 8 s) → exclusion de quelques minutes et suppression des messages |
+
+Les membres qui ont la permission « Gérer le serveur » (ou « Gérer les messages » pour l’anti-spam) ne sont pas concernés. Les règles créées par le bot s’appellent « Clan Renard • … » dans Paramètres du serveur → AutoMod : modifie-les depuis `/moderation-admin`, pas à la main.
+
+## `/moderation-admin`
+
+| Bouton | Réglage |
+|---|---|
+| 📋 Salon du journal | Salon où sont publiées toutes les sanctions (réservé à l’équipe, de préférence) |
+| 📨 Contestations | Salon des contestations, ou désactivation |
+| ⚡ Échelle de sanctions | Paliers (un par ligne) et durée de validité d’un avertissement |
+| 🔗 Liens d’invitation | Active ou désactive le filtre |
+| 🚫 Mots interdits | Liste séparée par des virgules (vide = désactiver) |
+| 📣 Mentions de masse | Nombre maximal de mentions par message (0 = désactiver) |
+| 💬 Anti-spam | Nombre de messages, fenêtre en secondes, durée d’exclusion (0 message = désactiver) |
+
+## Permissions du bot
+
+Pour que tout fonctionne, le rôle du bot doit avoir : **Exclure temporairement des membres**, **Expulser des membres**, **Bannir des membres**, **Gérer les messages**, **Gérer les salons** et **Gérer le serveur** (pour l’AutoMod), et être placé au-dessus des rôles des membres à sanctionner. Discord ne permet pas d’exclure temporairement un administrateur.
+
+---
+
 # Maintenance : sauvegardes, import, permissions
 
 ## Sauvegarde de la base
@@ -494,7 +593,7 @@ Tout est enregistré dans PostgreSQL (Supabase) : un redémarrage ou un redéplo
 
 Après un redémarrage :
 
-- les boutons du calendrier de l’Avent, des giveaways, des drops et « Relancer le rappel » continuent de fonctionner ;
+- les boutons du calendrier de l’Avent, des giveaways, des drops, des contestations et « Relancer le rappel » continuent de fonctionner ;
 - les autres panneaux ouverts (boutique, profil, classement…) répondent « Ce panneau ne répond plus » : il suffit de relancer la commande.
 
 ## Images générées
