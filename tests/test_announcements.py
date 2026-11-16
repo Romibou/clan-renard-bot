@@ -366,3 +366,101 @@ def test_convert_server_emojis() -> None:
     assert text_to_buttons(convert_emojis(":clanrenard_yes: Oui | https://a.fr", emojis))[0]["emoji"] == (
         "<:clanrenard_yes:111111111111111111>"
     )
+
+
+# ---------------------------------------------------------------
+# Format grand (Components V2)
+# ---------------------------------------------------------------
+
+
+def large_draft() -> dict:
+    draft = filled_draft()
+    draft["format"] = "large"
+    draft["mention"] = "everyone"
+    draft["embeds"][0]["url"] = "https://a.fr"
+    draft["embeds"][0]["fields"] = [{"name": "Date", "value": "Samedi", "inline": True}]
+    draft["embeds"][0]["image"] = {"url": "upload:4"}
+    draft["embeds"][0]["thumbnail"] = {"url": "https://a.fr/mini.png"}
+    draft["buttons"] = [{"label": f"B{i}", "url": "https://a.fr"} for i in range(6)]
+    return draft
+
+
+def test_large_layout_structure() -> None:
+    from bot.features.announcements.layout import build_layout, count_components
+
+    view = build_layout(large_draft(), uploads={4: "4_affiche.png"}, now=NOW)
+    payload = view.to_components()
+    text = json.dumps(payload, ensure_ascii=False)
+
+    assert payload[0]["type"] == 10 and payload[0]["content"] == "@everyone"  # mention en haut
+    container = payload[1]
+    assert container["type"] == 17 and container["accent_color"] == 0xF28C28
+    kinds = [child["type"] for child in container["components"]]
+    assert kinds[0] == 9  # section : texte + miniature
+    assert 12 in kinds and 14 in kinds  # galerie d'image et séparateur
+    assert kinds[-2:] == [1, 1]  # 6 boutons = 2 rangées dans le cadre
+    assert "## [Soirée jeux](https://a.fr)" in text
+    assert "attachment://4_affiche.png" in text
+    assert "-# Clan Renard" in text and "-# L'équipe Clan Renard · <t:" in text
+    assert "**Date**\\nSamedi" in text  # JSON : retour à la ligne échappé
+    assert count_components(large_draft()) <= 40
+
+
+def test_large_format_limits_and_normalize() -> None:
+    draft = large_draft()
+    draft["embeds"][0]["description"] = "x" * 3990
+    assert any("4000 caractères" in issue for issue in problems(draft))
+
+    draft["format"] = "classic"
+    assert not any("4000" in issue for issue in problems(draft))
+
+    assert normalize_draft({"format": "bizarre"})["format"] == "classic"
+    assert normalize_draft({"format": "large"})["format"] == "large"
+
+
+def test_large_layout_preview_placeholder() -> None:
+    from bot.features.announcements.layout import build_layout
+
+    draft = default_draft("Clan Renard", None)
+    draft["format"] = "large"
+    assert build_layout(draft, now=NOW).children == []
+    preview = build_layout(draft, now=NOW, placeholder="vide").to_components()
+    assert "vide" in json.dumps(preview)
+
+
+async def test_studio_format_toggle() -> None:
+    cog, origin = fake_studio_parts()
+    view = studio_module.StudioView(cog, origin, filled_draft())
+    labels = [getattr(item, "label", None) for item in view.children]
+    assert "Format : classique" in labels and "Aperçu réel" not in labels
+
+    view.draft["format"] = "large"
+    view.build()
+    labels = [getattr(item, "label", None) for item in view.children]
+    assert "Format : grand" in labels and "Aperçu réel" in labels
+    assert len([item for item in view.children if item.row == 3]) <= 5
+
+    cog.new_draft = lambda guild: default_draft(guild.name, None)
+    view.reset_after_send()
+    assert view.draft["format"] == "large"
+
+    view.draft["editing"] = {"channel_id": 1, "message_id": 2}
+    view.build()
+    toggle = next(item for item in view.children if getattr(item, "label", "").startswith("Format"))
+    assert toggle.disabled  # pas de changement de format en modification
+
+
+async def test_edit_refuses_format_change() -> None:
+    cog = AnnouncementCog.__new__(AnnouncementCog)
+    message = SimpleNamespace(flags=SimpleNamespace(components_v2=False))
+
+    async def fetch(*args):
+        return message
+
+    cog.fetch_own_message = fetch
+    draft = large_draft()
+    draft["mention"] = "none"
+    draft["editing"] = {"channel_id": 10, "message_id": 99}
+
+    with pytest.raises(AnnouncementError, match="format"):
+        await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5))

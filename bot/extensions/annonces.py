@@ -33,6 +33,7 @@ from bot.features.announcements.model import (
     summary_title,
     upload_ids,
 )
+from bot.features.announcements.layout import build_layout
 from bot.features.announcements.repository import AnnouncementRepository
 from bot.features.announcements.studio import (
     INFO_COLOR,
@@ -177,6 +178,15 @@ class AnnouncementCog(commands.Cog):
 
     async def payload(self, guild: discord.Guild, draft: dict[str, Any]) -> dict[str, Any]:
         names, files = await self.load_images(guild.id, draft)
+
+        if draft.get("format") == "large":
+            # Nouveau format : tout est dans la vue (pas de texte ni de cadre classique).
+            return {
+                "view": build_layout(draft, uploads=names, now=datetime.now(timezone.utc)),
+                "files": files,
+                "allowed_mentions": allowed_mentions(draft),
+            }
+
         embeds = [
             discord.Embed.from_dict(data)
             for data in render_embeds(draft, uploads=names, now=datetime.now(timezone.utc))
@@ -224,6 +234,9 @@ class AnnouncementCog(commands.Cog):
             f"🖊️ Cadre {studio.index + 1}/{len(draft['embeds'])}"
         )
 
+        if draft.get("format") == "large":
+            lines.append("📐 Format **grand** : l'aperçu ci-dessous est approximatif, clique sur 👁️ **Aperçu réel**.")
+
         if len(draft.get("buttons", [])) > 5:
             lines.append(f"🔗 {len(draft['buttons'])} boutons (5 visibles dans l'aperçu)")
 
@@ -261,6 +274,32 @@ class AnnouncementCog(commands.Cog):
             "attachments": files,
             "allowed_mentions": discord.AllowedMentions.none(),
         }
+
+    async def large_preview(self, interaction: discord.Interaction, draft: dict[str, Any]) -> None:
+        """Aperçu exact du format grand, dans un message privé à part."""
+        try:
+            names, files = await self.load_images(interaction.guild_id, draft)
+        except AnnouncementError as error:
+            await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+            return
+
+        try:
+            await interaction.response.send_message(
+                view=build_layout(
+                    draft,
+                    uploads=names,
+                    now=datetime.now(timezone.utc),
+                    placeholder=PREVIEW_PLACEHOLDER,
+                ),
+                files=files,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException as error:
+            await interaction.response.send_message(
+                embed=error_embed(f"Discord a refusé l'aperçu : `{str(error)[:300]}`"),
+                ephemeral=True,
+            )
 
     async def open_studio(
         self,
@@ -387,8 +426,8 @@ class AnnouncementCog(commands.Cog):
         )
         payload = await self.payload(guild, draft)
 
-        if payload["view"] is None:
-            payload.pop("view")
+        if payload.get("view") is None:
+            payload.pop("view", None)
 
         try:
             message = await channel.send(**payload)
@@ -442,16 +481,32 @@ class AnnouncementCog(commands.Cog):
             raise AnnouncementError("\n".join(f"• {issue}" for issue in issues))
 
         message = await self.fetch_own_message(guild, editing["channel_id"], editing["message_id"])
+        large = draft.get("format") == "large"
+
+        if bool(message.flags.components_v2) != large:
+            raise AnnouncementError(
+                "Discord ne permet pas de changer le format d'une annonce déjà publiée "
+                f"(elle est en format {'grand' if message.flags.components_v2 else 'classique'}). "
+                "Remets ce format, ou publie une nouvelle annonce."
+            )
+
         payload = await self.payload(guild, draft)
 
         try:
-            await message.edit(
-                content=payload["content"],
-                embeds=payload["embeds"],
-                attachments=payload["files"],
-                view=payload["view"],
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            if large:
+                await message.edit(
+                    view=payload["view"],
+                    attachments=payload["files"],
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            else:
+                await message.edit(
+                    content=payload["content"],
+                    embeds=payload["embeds"],
+                    attachments=payload["files"],
+                    view=payload["view"],
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
         except discord.HTTPException as error:
             raise AnnouncementError(f"Discord a refusé la modification : `{str(error)[:300]}`") from error
 

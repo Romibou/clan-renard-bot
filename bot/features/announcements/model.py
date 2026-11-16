@@ -105,6 +105,7 @@ def default_draft(guild_name: str, icon_url: str | None) -> dict[str, Any]:
         "mention": "none",
         "role_id": None,
         "editing": None,
+        "format": "classic",
     }
 
 
@@ -140,6 +141,8 @@ def normalize_draft(data: Any) -> dict[str, Any]:
 
     if draft["mention"] == "role" and draft["role_id"] is None:
         draft["mention"] = "none"
+
+    draft["format"] = "large" if draft.get("format") == "large" else "classic"
 
     editing = draft.get("editing")
 
@@ -284,7 +287,11 @@ def problems(draft: dict[str, Any]) -> list[str]:
         if len((embed.get("author") or {}).get("name") or "") > MAX_AUTHOR:
             found.append(f"{name} : en-tête trop long ({MAX_AUTHOR} max).")
 
-    if total > MAX_EMBEDS_TOTAL:
+    if draft.get("format") == "large":
+        from bot.features.announcements.layout import layout_problems
+
+        found += layout_problems(draft)
+    elif total > MAX_EMBEDS_TOTAL:
         found.append(
             f"Les cadres font {total} caractères au total "
             f"(Discord en accepte {MAX_EMBEDS_TOTAL})."

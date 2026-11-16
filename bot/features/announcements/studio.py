@@ -823,7 +823,9 @@ class StudioView(discord.ui.View):
 
     def reset_after_send(self) -> None:
         channel_id = None if self.editing else self.draft.get("channel_id")
+        chosen_format = self.draft.get("format", "classic")
         self.draft = self.cog.new_draft(self.guild)
+        self.draft["format"] = chosen_format  # on garde le format choisi
 
         if channel_id:
             self.draft["channel_id"] = channel_id
@@ -957,6 +959,19 @@ class StudioView(discord.ui.View):
         else:
             self.button("Publier", "🚀", self.on_publish, row=3, style=discord.ButtonStyle.success)
             self.button("Programmer", "⏰", self.on_schedule, row=3, style=discord.ButtonStyle.primary)
+
+        large = self.draft.get("format") == "large"
+        # Discord ne permet pas de changer le format d'un message publié.
+        self.button(
+            "Format : grand" if large else "Format : classique",
+            "📐",
+            self.on_format,
+            row=3,
+            disabled=self.editing,
+        )
+
+        if large:
+            self.button("Aperçu réel", "👁️", self.on_large_preview, row=3)
 
         self.button(
             "Confirmer : tout effacer ?" if self.confirm_reset
@@ -1114,6 +1129,23 @@ class StudioView(discord.ui.View):
             return
 
         await interaction.response.send_modal(ScheduleModal(self))
+
+    async def on_format(self, interaction: discord.Interaction) -> None:
+        large = self.draft.get("format") != "large"
+        self.draft["format"] = "large" if large else "classic"
+        await self.refresh(
+            interaction,
+            notice=(
+                "📐 Format **grand** : nouveau type de message Discord. En-tête et pied de page "
+                "en petit texte, sections empilées, boutons dans le cadre, 4 000 caractères au total. "
+                "Clique sur 👁️ **Aperçu réel** pour le voir."
+                if large
+                else "📐 Format **classique** : le cadre habituel."
+            ),
+        )
+
+    async def on_large_preview(self, interaction: discord.Interaction) -> None:
+        await self.cog.large_preview(interaction, self.draft)
 
     async def on_reset(self, interaction: discord.Interaction) -> None:
         if not self.confirm_reset:
