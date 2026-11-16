@@ -34,7 +34,7 @@ from bot.features.announcements.model import (
     summary_title,
     upload_ids,
 )
-from bot.features.announcements.layout import build_layout
+from bot.features.announcements.layout import build_layout, plain_text
 from bot.features.announcements.repository import AnnouncementRepository
 from bot.features.announcements.studio import (
     FORMAT_NAMES,
@@ -189,6 +189,16 @@ class AnnouncementCog(commands.Cog):
                 "allowed_mentions": allowed_mentions(draft),
             }
 
+        if draft.get("format") == "text":
+            # Pleine largeur : un message texte normal, sans cadre.
+            return {
+                "content": plain_text(draft, now=datetime.now(timezone.utc)) or None,
+                "embeds": [],
+                "files": files,
+                "view": links_view(draft),
+                "allowed_mentions": allowed_mentions(draft),
+            }
+
         embeds = [
             discord.Embed.from_dict(data)
             for data in render_embeds(draft, uploads=names, now=datetime.now(timezone.utc))
@@ -286,6 +296,19 @@ class AnnouncementCog(commands.Cog):
             names, files = await self.load_images(interaction.guild_id, draft)
         except AnnouncementError as error:
             await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+            return
+
+        if draft.get("format") == "text":
+            view = links_view(draft)
+            await interaction.response.send_message(
+                content=plain_text(
+                    draft, now=datetime.now(timezone.utc), placeholder=PREVIEW_PLACEHOLDER
+                )[:2000],
+                files=files,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+                **({"view": view} if view else {}),
+            )
             return
 
         try:
@@ -489,10 +512,10 @@ class AnnouncementCog(commands.Cog):
         large = draft.get("format") in NEW_FORMATS
 
         if bool(message.flags.components_v2) != large:
-            published = "grand ou pleine largeur" if message.flags.components_v2 else "classique"
+            published = "grand" if message.flags.components_v2 else "classique ou pleine largeur"
             raise AnnouncementError(
-                "Discord ne permet pas de passer du format classique aux nouveaux formats "
-                f"(ou l'inverse) sur une annonce déjà publiée (elle est en format {published}). "
+                "Discord ne permet pas de passer au format grand (ou d'en sortir) "
+                f"sur une annonce déjà publiée (elle est en format {published}). "
                 "Remets ce format, ou publie une nouvelle annonce."
             )
 

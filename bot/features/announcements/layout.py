@@ -4,8 +4,8 @@ type de message Discord (« Components V2 »).
 
 - grand : chaque cadre devient un bloc (Container) avec la barre de
   couleur, un peu plus large qu'un cadre classique ;
-- pleine largeur : pas de bloc du tout, le texte prend toute la
-  largeur du salon comme un message normal (pas de barre de couleur).
+- pleine largeur : un message texte normal (plain_text), car même
+  sans bloc, les messages « Components V2 » ont une largeur limitée.
 
 Différences avec le format classique :
 - l'en-tête et le pied de page deviennent du petit texte gris ;
@@ -126,6 +126,38 @@ def layout_texts(
         )
 
     return blocks
+
+
+def plain_text(
+    draft: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    placeholder: str | None = None,
+) -> str:
+    """
+    Format pleine largeur : tout devient un message texte normal
+    (titre en gros, en-tête et pied de page en petit texte gris).
+    Les images envoyées sont jointes au message ; les liens d'images
+    sont ajoutés tels quels (Discord en affiche l'aperçu).
+    """
+    parts = [message_content(draft)]
+
+    for block, embed in zip(
+        layout_texts(draft, now=now, placeholder=placeholder),
+        [e for e in draft.get("embeds", []) if placeholder or _has_body(e)],
+    ):
+        lines = [block["header"], block["fields"]]
+
+        for key in ("thumbnail", "image"):
+            url = (embed.get(key) or {}).get("url") or ""
+
+            if url.startswith("http"):
+                lines.append(url)
+
+        lines.append(block["footer"])
+        parts.append("\n\n".join(line for line in lines if line))
+
+    return "\n\n".join(part for part in parts if part)
 
 
 def layout_problems(draft: dict[str, Any]) -> list[str]:

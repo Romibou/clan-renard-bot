@@ -570,10 +570,10 @@ Ouvre un panneau visible par toi seul. En haut, l’**aperçu exact** de l’ann
 
 - **Classique** (par défaut) : le cadre habituel des bots. Sa largeur maximale est fixée par Discord.
 - **Grand** : le nouveau type de message de Discord, où chaque cadre devient un bloc avec la barre de couleur. L’en-tête et le pied de page deviennent du petit texte gris, les sections s’empilent (pas de colonnes) et les boutons liens sont dans le dernier bloc. Discord y limite le texte total à 4 000 caractères.
-- **Pleine largeur** : même nouveau type de message, mais **sans cadre ni barre de couleur** : le texte prend toute la largeur du salon, comme un message écrit par un membre. Les images et les boutons suivent en dessous, un séparateur marque chaque nouveau cadre.
+- **Pleine largeur** : un **message texte normal**, sans cadre ni barre de couleur, qui prend toute la largeur du salon comme un message écrit par un membre. Le titre est en gros, l’en-tête et le pied de page en petit texte gris. Les images envoyées sont jointes en dessous, les liens d’images s’affichent en aperçu, pas de miniature. Discord limite ce format à 2 000 caractères.
 - Le bouton 📐 passe d’un format à l’autre : classique → grand → pleine largeur.
 - L’aperçu du studio reste au format classique : 👁️ **Aperçu réel** montre les autres formats tels quels.
-- Le format choisi est gardé pour l’annonce suivante. Une annonce publiée ne peut pas passer du classique à un nouveau format, ou l’inverse (règle de Discord) : il faut en publier une nouvelle.
+- Le format choisi est gardé pour l’annonce suivante. Une annonce publiée ne peut pas passer au format grand, ni en sortir (règle de Discord) : il faut en publier une nouvelle.
 - Les :émojis: du serveur écrits sous la forme `:nom:` sont convertis automatiquement, dans les deux formats.
 
 ### Dates à l’heure de chaque membre

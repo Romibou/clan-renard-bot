@@ -124,9 +124,9 @@ FORMAT_NOTICES = {
         "Clique sur 👁️ **Aperçu réel** pour le voir."
     ),
     "text": (
-        "📐 Format **pleine largeur** : sans cadre ni barre de couleur, le texte prend toute la "
-        "largeur du salon comme un message normal (images et boutons en dessous). "
-        "4 000 caractères au total. Clique sur 👁️ **Aperçu réel** pour le voir."
+        "📐 Format **pleine largeur** : un message texte normal, sans cadre ni barre de couleur, "
+        "qui prend toute la largeur du salon. Images et boutons en dessous, pas de miniature. "
+        "2 000 caractères au total. Clique sur 👁️ **Aperçu réel** pour le voir."
     ),
 }
 

@@ -50,10 +50,11 @@ DEFAULT_COLOR = 0xF28C28  # orange renard
 
 MENTIONS = ("none", "everyone", "here", "role")
 
-# classic = cadre habituel ; large = nouveau format dans un bloc ;
-# text = nouveau format sans bloc, en pleine largeur comme un message normal.
+# classic = cadre habituel ; large = nouveau format Discord, dans un bloc ;
+# text = message texte simple, en pleine largeur comme un message de membre.
 FORMATS = ("classic", "large", "text")
-NEW_FORMATS = ("large", "text")
+NEW_FORMATS = ("large",)  # formats « Components V2 »
+MAX_PLAIN = 2000
 
 COLOR_NAMES = {
     "renard": 0xF28C28,
@@ -296,6 +297,16 @@ def problems(draft: dict[str, Any]) -> list[str]:
         from bot.features.announcements.layout import layout_problems
 
         found += layout_problems(draft)
+    elif draft.get("format") == "text":
+        from bot.features.announcements.layout import plain_text
+
+        length = len(plain_text(draft, now=datetime.now()))
+
+        if length > MAX_PLAIN:
+            found.append(
+                f"En pleine largeur, Discord limite le message à {MAX_PLAIN} caractères "
+                f"(ici {length}). Raccourcis, ou passe en format classique ou grand."
+            )
     elif total > MAX_EMBEDS_TOTAL:
         found.append(
             f"Les cadres font {total} caractères au total "

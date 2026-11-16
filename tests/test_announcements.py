@@ -466,21 +466,38 @@ async def test_edit_refuses_format_change() -> None:
         await cog.apply_edit(SimpleNamespace(id=1), draft, SimpleNamespace(id=5))
 
 
-def test_full_width_format_has_no_container() -> None:
-    from bot.features.announcements.layout import build_layout
+def test_full_width_format_is_plain_message() -> None:
+    from bot.features.announcements.layout import plain_text
 
     draft = large_draft()
     draft["format"] = "text"
     draft["embeds"].append({"title": "Deuxième", "description": "suite", "fields": []})
-    payload = build_layout(draft, uploads={4: "4_affiche.png"}, now=NOW).to_components()
-    kinds = [item["type"] for item in payload]
+    text = plain_text(draft, now=NOW)
 
-    assert 17 not in kinds  # aucun bloc : pleine largeur
-    assert kinds[0] == 10 and payload[0]["content"] == "@everyone"
-    assert 9 in kinds and 12 in kinds  # section avec miniature, image
-    assert kinds.count(14) >= 2  # séparateur avant le pied de page et entre les cadres
-    assert kinds[-2:] == [1, 1]  # boutons en bas
+    assert text.startswith("@everyone\n\n-# Clan Renard\n## [Soirée jeux](https://a.fr)\nRendez-vous ce soir !")
+    assert "**Date**\nSamedi" in text
+    assert "https://a.fr/mini.png" in text  # lien d'image : aperçu par Discord
+    assert "upload:" not in text  # image envoyée : jointe au message
+    assert "-# L'équipe Clan Renard · <t:" in text
+    assert text.endswith("## Deuxième\nsuite")
     assert normalize_draft({"format": "text"})["format"] == "text"
+
+    draft["embeds"][0]["description"] = "x" * 2100
+    assert any("2000 caractères" in issue for issue in problems(draft))
+
+
+async def test_full_width_payload_is_plain_message() -> None:
+    from collections import OrderedDict
+
+    cog = AnnouncementCog.__new__(AnnouncementCog)
+    cog._images = OrderedDict({4: ("affiche.png", b"data")})
+    draft = large_draft()
+    draft["format"] = "text"
+    payload = await cog.payload(SimpleNamespace(id=1), draft)
+
+    assert payload["embeds"] == [] and payload["content"].startswith("@everyone")
+    assert [file.filename for file in payload["files"]] == ["4_affiche.png"]
+    assert payload["view"] is not None and payload["allowed_mentions"].everyone
 
 
 async def test_format_button_cycles_three_formats() -> None:
