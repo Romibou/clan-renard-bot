@@ -37,6 +37,9 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "avent-boutique",
         "avent-aide",
     ),
+    "🎮 Mini-jeux": (
+        "jeu",
+    ),
     "🧰 Outils": (
         "rappel",
         "aide",

@@ -15,10 +15,11 @@ Pour l’installation et le déploiement, voir `README.md`.
 7. [Profils, cosmétiques et collections](#profils-cosmétiques-et-collections)
 8. [Classements, statistiques et bilan](#classements-statistiques-et-bilan)
 9. [Calendrier de l’Avent](#calendrier-de-lavent)
-10. [Outils : rappels, rôles à la réaction, aide](#outils--rappels-rôles-à-la-réaction-aide)
-11. [Annonces](#annonces)
-12. [Modération](#modération)
-13. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
+10. [Mini-jeux et bingo](#mini-jeux-et-bingo)
+11. [Outils : rappels, rôles à la réaction, aide](#outils--rappels-rôles-à-la-réaction-aide)
+12. [Annonces](#annonces)
+13. [Modération](#modération)
+14. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
 
 ---
 
@@ -40,6 +41,8 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/collections [membre]` | Tableau des collections de cosmétiques |
 | `/donner` | Donne des pièces à un membre |
 | `/rappel` | Programme un rappel personnel |
+| `/jeu morpion`, `/jeu puissance4`, `/jeu pfc` | Mini-jeux contre un membre (avec mise possible) ou contre l’IA |
+| `/jeu stats [membre]` | Victoires, défaites et gains aux mini-jeux |
 | `/avent` | Calendrier de l’Avent personnel (quand la campagne est activée) |
 
 ## Administration
@@ -54,6 +57,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/avent-admin` | Administrateur | Tout le calendrier de l’Avent |
 | `/drop` | Gérer le serveur | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
+| `/bingo lancer` / `arreter` | Gérer le serveur | Bingo « trouve le nombre » |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
@@ -427,6 +431,66 @@ Conditions : campagne activée, annonces activées (**Activer les annonces**, av
 ## Date de test
 
 La variable d’environnement `ADVENT_TEST_DATE` (par exemple `2026-12-05`) fait croire au bot qu’on est à cette date, pour tester en local. Elle ne doit **jamais** être définie sur Render, sinon le calendrier resterait bloqué sur ce jour.
+
+---
+
+# Mini-jeux et bingo
+
+## `/jeu` : les mini-jeux
+
+| Commande | Jeu |
+|---|---|
+| `/jeu morpion` | Morpion : aligner 3 symboles sur une grille 3×3 |
+| `/jeu puissance4` | Puissance 4 : aligner 4 jetons sur une grille de 6×7 |
+| `/jeu pfc [manches]` | Pierre-feuille-ciseaux en 1, 3 ou 5 manches (les égalités se rejouent) |
+
+- **Contre l’IA** : laisser `adversaire` vide. Trois niveaux (`facile`, `normal`, `difficile`). Au morpion, l’IA difficile est imbattable. Au pierre-feuille-ciseaux, l’IA difficile apprend les habitudes du joueur. Pas de mise contre l’IA.
+- **Contre un membre** : `adversaire:@membre`. Le défi s’affiche dans le salon avec trois boutons pour le défié : **Accepter**, **Autre mise** (contre-proposition, que le défieur doit à son tour accepter) et **Refuser**. Sans réponse en 3 minutes, le défi expire.
+- **Qui commence** : tiré au sort.
+- **Délai** : 2 minutes par coup (60 secondes par manche au pierre-feuille-ciseaux). Celui qui ne joue pas à temps perd. Si personne ne joue une manche, la partie est annulée.
+- **🏳️ Abandonner** donne la victoire à l’adversaire.
+- Une seule partie ou un seul défi à la fois par membre.
+
+### Les mises
+
+```text
+/jeu puissance4 adversaire:@Renard mise:500
+```
+
+- La mise (jusqu’à 100 000 pièces) est la même pour les deux joueurs. Il faut que **les deux acceptent** : le défieur en lançant le défi, le défié en cliquant sur Accepter. Une contre-proposition change de main jusqu’à ce que l’un des deux accepte.
+- Au début de la partie, les deux mises sont **retirées des portefeuilles**. Si l’un des deux n’a plus assez, la partie ne démarre pas.
+- Le gagnant reçoit le tout (2 × la mise). En cas d’égalité ou de partie annulée, chacun est remboursé.
+- Si le bot redémarre pendant une partie, elle est perdue et **les mises sont remboursées** au démarrage.
+- Les gains de mise ne comptent pas comme de l’argent « gagné » pour les missions et le total historique (comme les dons).
+
+### `/jeu stats`
+
+Victoires, défaites et nuls par jeu, séparés entre parties contre des membres et contre l’IA, avec le bilan des mises.
+
+## `/bingo` (administration)
+
+```text
+/bingo lancer pieces:1000 maximum:500 manches:3 duree:1h salon:#jeux
+```
+
+Le bot tire un nombre au hasard (personne ne le connaît, pas même l’admin qui lance). Les membres cliquent sur **🎯 Proposer un nombre** et tapent leur proposition dans une fenêtre. Le premier qui trouve gagne la récompense, et le salon est prévenu.
+
+| Option | Rôle | Par défaut |
+|---|---|---|
+| `pieces`, `xp` | Récompense de chaque gagnant | rien (« pour la gloire ») |
+| `minimum`, `maximum` | Bornes du nombre | 1 à 100 |
+| `manches` | Nombre de manches : un nouveau nombre et un nouveau gagnant à chaque fois (10 max) | 1 |
+| `duree` | Durée maximale (de 1 minute à 1 jour) | 30 minutes |
+| `indices` | Répondre en privé « plus grand / plus petit » | oui |
+| `essais` | Nombre d’essais par membre et par manche (0 = illimité) | illimité |
+| `message` | Texte affiché sur le bingo | — |
+| `salon` | Salon du bingo | salon actuel |
+
+- Les réponses aux propositions sont **privées** : seul le joueur voit son indice. Le message du bingo affiche le nombre de joueurs et de propositions, et les gagnants de chaque manche.
+- Anti-spam : 2 secondes minimum entre deux propositions d’un même membre.
+- Un seul bingo à la fois par salon. `/bingo arreter [salon]` l’arrête et révèle le nombre. À la fin du temps, le nombre est révélé aussi.
+- La récompense compte comme de l’argent gagné (comme un drop) et peut faire monter de niveau.
+- Le bouton continue de fonctionner après un redémarrage du bot.
 
 ---
 
