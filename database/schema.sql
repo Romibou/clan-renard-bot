@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS advent_campaigns (
 );
 
 
+-- Nombre maximal de jours en arrière ouvrables en rattrapage.
+-- NULL = sans limite.
+ALTER TABLE advent_campaigns
+    ADD COLUMN IF NOT EXISTS catchup_days SMALLINT
+        CHECK (catchup_days IS NULL OR catchup_days BETWEEN 1 AND 23);
+
 CREATE INDEX IF NOT EXISTS advent_campaigns_guild_index
     ON advent_campaigns (guild_id);
 

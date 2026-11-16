@@ -835,6 +835,191 @@ class PickerView(discord.ui.View):
         return False
 
 
+def parse_catchup_days(
+    text: str,
+) -> tuple[str, int | None]:
+    """
+    Interprète la saisie du formulaire de rattrapage.
+
+    - vide         → ("unlimited", None) : rattrapage sans limite ;
+    - 0            → ("disabled", None)  : rattrapage désactivé ;
+    - 1 à 23       → ("limited", n)      : n jours en arrière au plus.
+    """
+    cleaned = text.strip().lower().removesuffix("jours").removesuffix(
+        "jour"
+    ).removesuffix("j").strip()
+
+    if not cleaned:
+        return "unlimited", None
+
+    if not cleaned.isdigit():
+        raise ValueError(
+            "Écris un nombre entre 0 et 23 (ou laisse vide)."
+        )
+
+    days = int(cleaned)
+
+    if days == 0:
+        return "disabled", None
+
+    if days > 23:
+        raise ValueError(
+            "Le calendrier n'a que 24 cases : 23 jours au maximum."
+        )
+
+    return "limited", days
+
+
+class CatchupDaysModal(
+    discord.ui.Modal,
+    title="Limite du rattrapage",
+):
+    days = discord.ui.TextInput(
+        label="Nombre de jours de rattrapage maximum",
+        placeholder="Ex. 3 • 0 = pas de rattrapage • vide = sans limite",
+        required=False,
+        max_length=10,
+    )
+
+    def __init__(
+        self,
+        *,
+        current: int | None,
+        catchup_enabled: bool,
+    ) -> None:
+        super().__init__(timeout=300)
+
+        if not catchup_enabled:
+            self.days.default = "0"
+        elif current is not None:
+            self.days.default = str(current)
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
+            mode, days = parse_catchup_days(
+                str(self.days.value)
+            )
+        except ValueError as error:
+            await send_error(
+                interaction,
+                str(error),
+            )
+            return
+
+        cog = get_cog(
+            interaction,
+            "AdventAdminCommands",
+        )
+
+        if cog is None or interaction.guild_id is None:
+            await send_error(
+                interaction,
+                "Le module administratif est indisponible.",
+            )
+            return
+
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True,
+        )
+
+        try:
+            campaign = await cog._campaign(
+                interaction.guild_id,
+                None,
+            )
+        except Exception as error:
+            await send_error(
+                interaction,
+                str(error),
+            )
+            return
+
+        await cog.repository.update_campaign_catchup(
+            campaign.id,
+            CATCHUP_DISABLED if mode == "disabled" else CATCHUP_ENABLED,
+        )
+        await cog.repository.update_campaign_catchup_days(
+            campaign.id,
+            days,
+        )
+        await cog._audit(
+            interaction,
+            campaign_id=campaign.id,
+            action="campaign_catchup_days_changed",
+            details={
+                "mode": mode,
+                "catchup_days": days,
+            },
+        )
+
+        if mode == "disabled":
+            description = (
+                "Rattrapage **désactivé** : une case non ouverte le "
+                "jour même est manquée."
+            )
+        elif mode == "unlimited":
+            description = (
+                "Rattrapage **activé sans limite** : les membres "
+                "peuvent ouvrir toutes les cases passées."
+            )
+        else:
+            example_day = max(10, days + 2)
+            first = example_day - days
+            description = (
+                f"Rattrapage **activé** sur les **{days} dernier(s) "
+                f"jour(s)**.\n\nExemple : le {example_day} décembre, "
+                f"les cases {first} à {example_day - 1} peuvent encore "
+                "être ouvertes ; les plus anciennes sont manquées."
+            )
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "Rattrapage enregistré",
+                description,
+            ),
+            ephemeral=True,
+        )
+
+
+async def open_catchup_days_modal(
+    interaction: discord.Interaction,
+) -> None:
+    cog = get_cog(
+        interaction,
+        "AdventAdminCommands",
+    )
+
+    if cog is None or interaction.guild_id is None:
+        await send_error(
+            interaction,
+            "Le module administratif est indisponible.",
+        )
+        return
+
+    try:
+        campaign = await cog._campaign(
+            interaction.guild_id,
+            None,
+        )
+    except Exception as error:
+        await send_error(
+            interaction,
+            str(error),
+        )
+        return
+
+    await interaction.response.send_modal(
+        CatchupDaysModal(
+            current=campaign.catchup_days,
+            catchup_enabled=campaign.catchup_mode == CATCHUP_ENABLED,
+        )
+    )
+
+
 RESET_ALL_CONFIRMATION_WORD = "REINITIALISER"
 
 
@@ -1131,6 +1316,15 @@ class AdminActionSelect(discord.ui.Select):
                 emoji="🔁",
             ),
             discord.SelectOption(
+                label="Limiter le rattrapage (jours)",
+                value="catchup_days",
+                emoji="📅",
+                description=(
+                    "Choisis combien de jours en arrière les membres "
+                    "peuvent rattraper."
+                ),
+            ),
+            discord.SelectOption(
                 label="Activer les annonces",
                 value="announcements_on",
                 emoji="🔔",
@@ -1233,6 +1427,10 @@ class AdminActionSelect(discord.ui.Select):
 
         if action == "reset_all":
             await start_reset_all(interaction)
+            return
+
+        if action == "catchup_days":
+            await open_catchup_days_modal(interaction)
             return
 
         if action == "configuration":

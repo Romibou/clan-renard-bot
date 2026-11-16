@@ -21,6 +21,9 @@ class AdventCampaign:
     announcements_enabled: bool
     enabled: bool
     day_order: tuple[int, ...]
+    # Nombre maximal de jours en arrière ouvrables en rattrapage.
+    # None = sans limite.
+    catchup_days: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

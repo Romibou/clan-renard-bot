@@ -35,6 +35,24 @@ from bot.features.advent.transaction_repository import (
 from bot.shared.dates import now_in_timezone
 
 
+def catchup_window(
+    active_day: int,
+    catchup_days: int | None,
+) -> set[int]:
+    """
+    Jours passés encore ouvrables en rattrapage le jour active_day.
+
+    Exemple avec une limite de 3 jours, le 10 décembre : 7, 8 et 9.
+    Sans limite (None) : tous les jours précédents.
+    """
+    if catchup_days is None:
+        return set(range(1, active_day))
+
+    first_day = max(1, active_day - catchup_days)
+
+    return set(range(first_day, active_day))
+
+
 class AdventService:
     def __init__(
         self,
@@ -210,10 +228,19 @@ class AdventService:
                 future_days = all_days - set(opened_days)
             else:
                 previous_days = set(range(1, active_day))
+                catchable_days = catchup_window(
+                    active_day,
+                    selected.catchup_days,
+                )
 
                 if selected.catchup_mode == CATCHUP_ENABLED:
                     available_days.update(
-                        previous_days - set(opened_days)
+                        (previous_days & catchable_days)
+                        - set(opened_days)
+                    )
+                    missed_days.update(
+                        (previous_days - catchable_days)
+                        - set(opened_days)
                     )
                 else:
                     missed_days.update(

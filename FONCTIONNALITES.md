@@ -148,6 +148,12 @@ Le membre sélectionne alors la case concernée dans un menu.
 
 Si le rattrapage est désactivé, les anciennes cases non ouvertes restent manquées.
 
+La limite se règle dans `/avent-admin` avec **Limiter le rattrapage (jours)**, qui ouvre un formulaire :
+
+- un nombre de 1 à 23 : nombre maximal de jours en arrière (avec 3, le 10 décembre, les cases 7, 8 et 9 peuvent encore être ouvertes) ;
+- `0` : rattrapage désactivé ;
+- vide : rattrapage sans limite.
+
 ## Types de récompenses
 
 Le calendrier peut distribuer :
@@ -179,6 +185,8 @@ Le classement peut afficher les membres selon leurs performances pendant la camp
 ## Annonces automatiques
 
 Le bot peut publier automatiquement une annonce quotidienne dans un salon configuré.
+
+Conditions : la campagne est activée, les annonces sont activées et un canal est choisi dans `/avent-admin`. L'annonce part moins d'une minute après l'heure d'ouverture, une seule fois par jour, avec les boutons du calendrier et la mention du rôle choisi (facultatif).
 
 L’annonce peut prévenir les membres qu’une nouvelle case est disponible.
 

@@ -920,8 +920,8 @@ class AdventAdminRewardsCommands(commands.Cog):
                     interaction,
                     "Canal manquant",
                     (
-                        "Indique un canal dans la commande ou utilise "
-                        "d'abord `/avent-admin-canal`."
+                        "Choisis d'abord un canal avec "
+                        "« Modifier le canal » dans `/avent-admin`."
                     ),
                 )
                 return

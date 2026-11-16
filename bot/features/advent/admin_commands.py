@@ -180,6 +180,13 @@ class AdventAdminCommands(commands.Cog):
             if campaign.catchup_mode == CATCHUP_ENABLED
             else "Désactivé"
         )
+
+        if campaign.catchup_mode == CATCHUP_ENABLED:
+            catchup_text += (
+                f" ({campaign.catchup_days} jour(s) max)"
+                if campaign.catchup_days is not None
+                else " (sans limite)"
+            )
         channel_text = (
             f"<#{campaign.channel_id}>"
             if campaign.channel_id is not None
@@ -349,7 +356,9 @@ class AdventAdminCommands(commands.Cog):
             name="Étape suivante",
             value=(
                 "Configure les récompenses, choisis le canal, "
-                "puis utilise `/avent-admin-publier`."
+                "publie le panneau public, puis active la campagne "
+                "(« Activer ou désactiver ») quand tu veux l'ouvrir "
+                "aux membres. Elle reste fermée jusque-là."
             ),
             inline=False,
         )
@@ -963,8 +972,8 @@ class AdventAdminCommands(commands.Cog):
                 interaction,
                 "Canal manquant",
                 (
-                    "Configure d'abord un canal avec "
-                    "`/avent-admin-canal`."
+                    "Choisis d'abord un canal avec "
+                    "« Modifier le canal » dans `/avent-admin`."
                 ),
             )
             return

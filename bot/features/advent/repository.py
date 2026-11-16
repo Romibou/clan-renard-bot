@@ -52,6 +52,7 @@ def _campaign_from_record(
         announcements_enabled=record["announcements_enabled"],
         enabled=record["enabled"],
         day_order=tuple(record["day_order"]),
+        catchup_days=record["catchup_days"],
     )
 
 
@@ -173,6 +174,7 @@ class AdventRepository:
                 timezone,
                 opening_hour,
                 catchup_mode,
+                catchup_days,
                 channel_id,
                 announcement_role_id,
                 announcements_enabled,
@@ -207,6 +209,7 @@ class AdventRepository:
                 timezone,
                 opening_hour,
                 catchup_mode,
+                catchup_days,
                 channel_id,
                 announcement_role_id,
                 announcements_enabled,
@@ -239,6 +242,7 @@ class AdventRepository:
                 timezone,
                 opening_hour,
                 catchup_mode,
+                catchup_days,
                 channel_id,
                 announcement_role_id,
                 announcements_enabled,
@@ -272,6 +276,7 @@ class AdventRepository:
                 timezone,
                 opening_hour,
                 catchup_mode,
+                catchup_days,
                 channel_id,
                 announcement_role_id,
                 announcements_enabled,
@@ -328,7 +333,7 @@ class AdventRepository:
                 $7,
                 $8,
                 $9::SMALLINT[],
-                TRUE,
+                FALSE,
                 NOW()
             )
             ON CONFLICT (guild_id, year)
@@ -340,7 +345,6 @@ class AdventRepository:
                 opening_hour = EXCLUDED.opening_hour,
                 catchup_mode = EXCLUDED.catchup_mode,
                 day_order = EXCLUDED.day_order,
-                enabled = TRUE,
                 updated_at = NOW()
             RETURNING
                 id,
@@ -352,6 +356,7 @@ class AdventRepository:
                 timezone,
                 opening_hour,
                 catchup_mode,
+                catchup_days,
                 channel_id,
                 announcement_role_id,
                 announcements_enabled,
@@ -406,6 +411,22 @@ class AdventRepository:
             """,
             campaign_id,
             catchup_mode,
+        )
+
+    async def update_campaign_catchup_days(
+        self,
+        campaign_id: int,
+        catchup_days: int | None,
+    ) -> None:
+        await self.database.execute(
+            """
+            UPDATE advent_campaigns
+            SET catchup_days = $2,
+                updated_at = NOW()
+            WHERE id = $1
+            """,
+            campaign_id,
+            catchup_days,
         )
 
     async def update_announcements(
