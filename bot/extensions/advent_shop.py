@@ -10,6 +10,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.shared.pagination import (
+    SELECT_PAGE_SIZE,
+    PaginatedSelectMixin,
+)
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -144,7 +149,7 @@ class ShopRefreshButton(discord.ui.Button):
         await self.shop_view.refresh(interaction)
 
 
-class AdventShopView(discord.ui.View):
+class AdventShopView(PaginatedSelectMixin, discord.ui.View):
     def __init__(
         self,
         *,
@@ -169,6 +174,8 @@ class AdventShopView(discord.ui.View):
         self.add_item(self.product_select)
         self.add_item(self.buy_button)
         self.add_item(self.refresh_button)
+
+        self.setup_pagination(row=2)
 
     async def interaction_check(
         self,
@@ -196,6 +203,9 @@ class AdventShopView(discord.ui.View):
         openings: int,
     ) -> None:
         if not items:
+            # Retire les boutons de page devenus inutiles.
+            self.apply_pagination([])
+
             self.product_select.options = [
                 discord.SelectOption(
                     label="Aucune récompense",
@@ -207,17 +217,16 @@ class AdventShopView(discord.ui.View):
             self.buy_button.disabled = True
             return
 
-        identifiers = {
-            str(item["identifier"])
-            for item in items
-        }
-
-        if self.selected_identifier not in identifiers:
-            self.selected_identifier = str(items[0]["identifier"])
+        visible = self.apply_pagination(
+            [
+                str(item["identifier"])
+                for item in items
+            ]
+        )
 
         options: list[discord.SelectOption] = []
 
-        for item in items[:25]:
+        for item in items[visible]:
             item_id = int(item["id"])
             price = int(item["price"])
             minimum = int(item["min_openings"])
@@ -714,9 +723,10 @@ class AdventShop(commands.Cog):
             WHERE campaign_id = $1
               AND enabled = TRUE
             ORDER BY price ASC, id ASC
-            LIMIT 25
+            LIMIT $2
             """,
             campaign_id,
+            SELECT_PAGE_SIZE * 10,
         )
     
         return list(records)

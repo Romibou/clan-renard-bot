@@ -8,10 +8,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from bot.extensions.progression import level_from_xp
+from bot.shared.pagination import (
+    SELECT_PAGE_SIZE,
+    PaginatedSelectMixin,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 SHOP_COLOR = discord.Color.from_rgb(115, 92, 255)
+
+# 10 pages de 25 articles dans le menu de /boutique.
+MAXIMUM_SHOP_ITEMS = SELECT_PAGE_SIZE * 10
 SUCCESS_COLOR = discord.Color.from_rgb(88, 191, 126)
 ERROR_COLOR = discord.Color.from_rgb(220, 75, 85)
 WARNING_COLOR = discord.Color.from_rgb(235, 174, 65)
@@ -188,7 +195,7 @@ class ShopRefreshButton(discord.ui.Button):
         await self.shop_view.refresh(interaction)
 
 
-class PermanentShopView(discord.ui.View):
+class PermanentShopView(PaginatedSelectMixin, discord.ui.View):
     def __init__(
         self,
         *,
@@ -211,6 +218,8 @@ class PermanentShopView(discord.ui.View):
         self.add_item(self.item_select)
         self.add_item(self.buy_button)
         self.add_item(self.refresh_button)
+
+        self.setup_pagination(row=2)
 
     async def interaction_check(
         self,
@@ -240,6 +249,9 @@ class PermanentShopView(discord.ui.View):
         level: int,
     ) -> None:
         if not items:
+            # Retire les boutons de page devenus inutiles.
+            self.apply_pagination([])
+
             self.item_select.options = [
                 discord.SelectOption(
                     label="Boutique vide",
@@ -253,19 +265,16 @@ class PermanentShopView(discord.ui.View):
             self.buy_button.emoji = "❌"
             return
 
-        identifiers = {
-            str(item["identifier"])
-            for item in items
-        }
-
-        if self.selected_identifier not in identifiers:
-            self.selected_identifier = str(
-                items[0]["identifier"]
-            )
+        visible = self.apply_pagination(
+            [
+                str(item["identifier"])
+                for item in items
+            ]
+        )
 
         options: list[discord.SelectOption] = []
 
-        for item in items[:25]:
+        for item in items[visible]:
             item_id = int(item["id"])
             identifier = str(item["identifier"])
             item_type = str(item["item_type"])
@@ -1233,9 +1242,10 @@ class PermanentShop(commands.Cog):
             ORDER BY
                 price ASC,
                 display_name ASC
-            LIMIT 25
+            LIMIT $2
             """,
             guild_id,
+            MAXIMUM_SHOP_ITEMS,
         )
 
         return list(records)
@@ -1757,7 +1767,29 @@ class PermanentShop(commands.Cog):
                 f"Niveau {int(item['minimum_level'])}"
             )
 
-        embed.description = "\n\n".join(lines)[:4096]
+        # Une description d'embed est limitée à 4096 caractères :
+        # on coupe proprement entre deux articles.
+        description = ""
+
+        for index, line in enumerate(lines):
+            candidate = (
+                f"{description}\n\n{line}"
+                if description
+                else line
+            )
+            hidden_after = len(lines) - index - 1
+            suffix = f"\n\n… et {hidden_after} autre(s) article(s)."
+
+            if len(candidate) + len(suffix) > 4096:
+                description += (
+                    f"\n\n… et {len(lines) - index} "
+                    "autre(s) article(s)."
+                )
+                break
+
+            description = candidate
+
+        embed.description = description
 
         return embed
 
