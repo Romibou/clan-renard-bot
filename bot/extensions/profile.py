@@ -1465,6 +1465,21 @@ class ProfileAdminView(
         )
 
     @discord.ui.button(
+        label="Catalogue",
+        emoji="📚",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def catalogue_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        # Tous les cosmétiques par thème, avec nom affiché, ID et prix.
+        from bot.shared.cosmetic_catalogue import send_catalogue
+
+        await send_catalogue(interaction)
+
+    @discord.ui.button(
         label="Supprimer un cosmétique",
         emoji="🗑️",
         style=discord.ButtonStyle.danger,

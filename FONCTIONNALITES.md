@@ -306,6 +306,7 @@ Les images sont rangées dans `assets/profile/` (`badges/`, `backgrounds/`, `fra
 - **Créer un cosmétique** : identifiant, type, nom affiché, chemin de l’image (relatif à `assets/profile/`, vide pour un titre) et valeur facultative (texte d’un titre, nom d’un effet).
 - **Distribuer** : donner un cosmétique à un membre. Au-delà de 25 cosmétiques, le choix se répartit sur plusieurs menus.
 - **Supprimer un cosmétique** : retire définitivement le cosmétique du catalogue. Retire-le d’abord des boutiques.
+- **📚 Catalogue** : tous les cosmétiques du bot, vendus ou non (désactivés compris), rangés par thème (Hiver, Volcan, Nocturne…). Pour chacun : son **ID** (`#12`, celui à écrire dans une récompense aléatoire de l’Avent : `"cosmetic_id": 12`), son **nom affiché**, son type, son prix en boutique (💰), son prix dans la boutique de l’Avent (🎄) et le nombre de membres qui l’ont (👥). Message visible par toi seul, avec des pages si le catalogue est long.
 
 ### Identifiants : la convention à garder
 
