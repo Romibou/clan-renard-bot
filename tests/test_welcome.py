@@ -433,3 +433,20 @@ async def test_panel_shows_autorole_buttons_only_for_arrivals() -> None:
     panel.settings = bienvenue.merge_settings(bienvenue.LEAVE, None)
     panel.build()
     assert "Rôles à l'arrivée" not in [getattr(item, "label", None) for item in panel.children]
+
+
+def test_text_effects_render_and_differ() -> None:
+    renders = {
+        effect: render_welcome_card(avatar_bytes=None, title="Bienvenue", subtitle="Test", text="Coucou",
+                                    text_effect=effect, shadow_color="#000000")
+        for effect in ("ombre", "contour", "les deux", "aucun")
+    }
+    assert len(set(renders.values())) == 4
+
+
+def test_merge_settings_clamps_shadow() -> None:
+    settings = bienvenue.merge_settings(
+        bienvenue.JOIN, {"text_effect": "bizarre", "shadow_opacity": 500, "shadow_blur": "x", "shadow_offset": -3}
+    )
+    assert settings["text_effect"] == "ombre"
+    assert settings["shadow_opacity"] == 100 and settings["shadow_blur"] == 4 and settings["shadow_offset"] == 0

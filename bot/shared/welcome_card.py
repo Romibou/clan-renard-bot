@@ -19,6 +19,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 WIDTH, HEIGHT = 1024, 500
 LAYOUTS = ("centre", "gauche", "droite")
 
+# Effet derrière les textes : ombre douce (comme Koya), contour net,
+# les deux, ou rien.
+TEXT_EFFECTS = ("ombre", "contour", "les deux", "aucun")
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Polices épaisses d'abord (Roboto Black est installée dans l'image Docker).
@@ -140,6 +144,24 @@ def circle_avatar(avatar: Image.Image, diameter: int, border: int, border_color:
     return canvas.resize((total, total), Image.LANCZOS)
 
 
+class TextStyle:
+    """Effet appliqué aux textes de la carte (ombre et/ou contour)."""
+
+    def __init__(
+        self,
+        effect: str = "les deux",
+        color: tuple[int, int, int] = (20, 16, 30),
+        opacity: int = 70,
+        blur: int = 5,
+        offset: int = 4,
+    ) -> None:
+        self.effect = effect if effect in TEXT_EFFECTS else "ombre"
+        self.color = color
+        self.opacity = max(0, min(100, int(opacity)))
+        self.blur = max(0, min(20, int(blur)))
+        self.offset = max(0, min(20, int(offset)))
+
+
 def draw_text(
     image: Image.Image,
     position: tuple[float, float],
@@ -148,27 +170,41 @@ def draw_text(
     fill: tuple[int, int, int],
     *,
     anchor: str,
+    style: TextStyle | None = None,
 ) -> None:
-    """Texte avec ombre douce et contour, lisible sur n'importe quel fond."""
-    shadow = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).text(
-        (position[0] + 3, position[1] + 4),
-        text,
-        font=font,
-        fill=(0, 0, 0, 170),
-        anchor=anchor,
-        stroke_width=4,
-        stroke_fill=(0, 0, 0, 170),
-    )
-    image.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(5)))
+    """Texte avec ombre douce et/ou contour, lisible sur n'importe quel fond."""
+    style = style or TextStyle()
+    outline = style.effect in ("contour", "les deux")
+
+    if style.effect in ("ombre", "les deux") and style.opacity:
+        alpha = style.opacity * 255 // 100
+        # Ombre seule : elle épouse les lettres (comme Koya). Avec le
+        # contour, elle est plus large pour ressortir derrière lui.
+        spread = 4 if outline else 1
+        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        ImageDraw.Draw(layer).text(
+            (position[0] + style.offset * 0.6, position[1] + style.offset),
+            text,
+            font=font,
+            fill=(*style.color, alpha),
+            anchor=anchor,
+            stroke_width=spread,
+            stroke_fill=(*style.color, alpha),
+        )
+
+        if style.blur:
+            layer = layer.filter(ImageFilter.GaussianBlur(style.blur))
+
+        image.alpha_composite(layer)
+
     ImageDraw.Draw(image).text(
         position,
         text,
         font=font,
         fill=(*fill, 255),
         anchor=anchor,
-        stroke_width=2,
-        stroke_fill=(20, 16, 30, 255),
+        stroke_width=2 if outline else 0,
+        stroke_fill=(*style.color, 255),
     )
 
 
@@ -185,6 +221,11 @@ def render_welcome_card(
     subtitle_color: str = "#FF9AD5",
     text_color: str = "#FFFFFF",
     border_color: str = "#FFFFFF",
+    text_effect: str = "les deux",
+    shadow_color: str = "#14101E",
+    shadow_opacity: int = 70,
+    shadow_blur: int = 5,
+    shadow_offset: int = 4,
 ) -> bytes:
     """Retourne la carte en PNG."""
     if background_bytes:
@@ -215,6 +256,9 @@ def render_welcome_card(
     subtitle_rgb = parse_hex(subtitle_color, (255, 154, 213))
     text_rgb = parse_hex(text_color, white)
     border_rgb = parse_hex(border_color, white)
+    style = TextStyle(
+        text_effect, parse_hex(shadow_color, (20, 16, 30)), shadow_opacity, shadow_blur, shadow_offset
+    )
     draw = ImageDraw.Draw(image)
     layout = layout if layout in LAYOUTS else "centre"
 
@@ -231,17 +275,17 @@ def render_welcome_card(
 
         if title:
             font = fit_text(draw, title.upper(), 900, 92)
-            draw_text(image, (center, y), title.upper(), font, title_rgb, anchor="mt")
+            draw_text(image, (center, y), title.upper(), font, title_rgb, anchor="mt", style=style)
             y += font.size + 10
 
         if subtitle:
             font = fit_text(draw, subtitle.upper(), 880, 44)
-            draw_text(image, (center, y), subtitle.upper(), font, subtitle_rgb, anchor="mt")
+            draw_text(image, (center, y), subtitle.upper(), font, subtitle_rgb, anchor="mt", style=style)
             y += font.size + 12
 
         if text:
             font = fit_text(draw, text.upper(), 900, 30, heavy=False)
-            draw_text(image, (center, min(y, HEIGHT - 40)), text.upper(), font, text_rgb, anchor="mt")
+            draw_text(image, (center, min(y, HEIGHT - 40)), text.upper(), font, text_rgb, anchor="mt", style=style)
     else:
         diameter, border = 280, 9
         disc = circle_avatar(avatar, diameter, border, border_rgb)
@@ -267,7 +311,7 @@ def render_welcome_card(
         y = (HEIGHT - total) / 2
 
         for content, font, color, gap in lines:
-            draw_text(image, (anchor_x, y), content, font, color, anchor=f"{anchor}t")
+            draw_text(image, (anchor_x, y), content, font, color, anchor=f"{anchor}t", style=style)
             y += font.size + gap
 
     output = io.BytesIO()

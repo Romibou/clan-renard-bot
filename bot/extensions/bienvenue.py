@@ -19,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps
 
-from bot.shared.welcome_card import HEIGHT, LAYOUTS, WIDTH, parse_hex, render_welcome_card
+from bot.shared.welcome_card import HEIGHT, LAYOUTS, TEXT_EFFECTS, WIDTH, parse_hex, render_welcome_card
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +46,12 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "subtitle_color": "#FF9AD5",
         "text_color": "#FFFFFF",
         "border_color": "#FFFFFF",
+        # Effet derrière les textes (comme Koya) : ombre douce par défaut.
+        "text_effect": "ombre",
+        "shadow_color": "#000000",
+        "shadow_opacity": 70,
+        "shadow_blur": 4,
+        "shadow_offset": 4,
         "card": True,
         # Rôles donnés à chaque nouveau membre (gardés ensuite). Vide = aucun.
         "autoroles": [],
@@ -63,6 +69,12 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "subtitle_color": "#9AD1FF",
         "text_color": "#FFFFFF",
         "border_color": "#FFFFFF",
+        # Effet derrière les textes (comme Koya) : ombre douce par défaut.
+        "text_effect": "ombre",
+        "shadow_color": "#000000",
+        "shadow_opacity": 70,
+        "shadow_blur": 4,
+        "shadow_offset": 4,
         "card": True,
     },
 }
@@ -109,6 +121,16 @@ def merge_settings(kind: str, stored: dict[str, Any] | None) -> dict[str, Any]:
         settings["layout"] = "centre"
 
     settings["overlay"] = max(0, min(90, int(settings["overlay"] or 0)))
+
+    if settings["text_effect"] not in TEXT_EFFECTS:
+        settings["text_effect"] = "ombre"
+
+    for key, top in (("shadow_opacity", 100), ("shadow_blur", 20), ("shadow_offset", 20)):
+        try:
+            settings[key] = max(0, min(top, int(settings[key])))
+        except (TypeError, ValueError):
+            settings[key] = DEFAULTS[kind][key]
+
     return settings
 
 
@@ -252,6 +274,67 @@ class StyleModal(PanelModal):
         return None
 
 
+EFFECT_CHOICES = {
+    "ombre": ("Ombre douce", "🌫️", "Ombre floue derrière le texte, comme Koya."),
+    "contour": ("Contour", "✒️", "Bordure nette autour des lettres."),
+    "les deux": ("Ombre + contour", "🔲", "Le plus lisible sur un fond chargé."),
+    "aucun": ("Aucun effet", "🚫", "Texte brut."),
+}
+
+
+def read_number(value: str, name: str, top: int) -> int:
+    cleaned = value.strip().rstrip("%").strip()
+
+    if not cleaned.isdigit() or not 0 <= int(cleaned) <= top:
+        raise ValueError(f"{name} : un nombre entre 0 et {top}.")
+
+    return int(cleaned)
+
+
+class ShadowModal(PanelModal):
+    def __init__(self, panel: WelcomePanel) -> None:
+        super().__init__(panel, "🌫️ Ombre du texte")
+        settings = self.settings
+        self.effect = discord.ui.Select(
+            options=[
+                discord.SelectOption(
+                    label=label, value=value, emoji=emoji, description=description,
+                    default=value == settings["text_effect"],
+                )
+                for value, (label, emoji, description) in EFFECT_CHOICES.items()
+            ]
+        )
+        self.add_item(discord.ui.Label(text="Effet", component=self.effect))
+        self.color = labeled_input(
+            self, "Couleur de l'ombre / du contour", settings["shadow_color"], max_length=9,
+            description="Noir (#000000) le plus souvent. Une couleur vive donne un effet néon.",
+        )
+        self.opacity = labeled_input(
+            self, "Opacité de l'ombre (%)", str(settings["shadow_opacity"]), max_length=4,
+            description="0 = invisible, 100 = ombre pleine.",
+        )
+        self.blur = labeled_input(
+            self, "Flou de l'ombre (0 à 20)", str(settings["shadow_blur"]), max_length=2,
+            description="0 = ombre nette, 4 = douce comme Koya, 10+ = halo.",
+        )
+        self.offset = labeled_input(
+            self, "Décalage de l'ombre (0 à 20)", str(settings["shadow_offset"]), max_length=2,
+            description="Distance vers le bas. 0 = halo tout autour du texte.",
+        )
+
+    async def apply(self, interaction: discord.Interaction) -> str | None:
+        opacity = read_number(self.opacity.value, "Opacité", 100)
+        blur = read_number(self.blur.value, "Flou", 20)
+        offset = read_number(self.offset.value, "Décalage", 20)
+
+        self.settings["text_effect"] = self.effect.values[0] if self.effect.values else self.settings["text_effect"]
+        self.settings["shadow_color"] = normalize_color(self.color.value, "Ombre")
+        self.settings["shadow_opacity"] = opacity
+        self.settings["shadow_blur"] = blur
+        self.settings["shadow_offset"] = offset
+        return None
+
+
 class BackgroundModal(PanelModal):
     def __init__(self, panel: WelcomePanel) -> None:
         super().__init__(panel, "🖼️ Fond de la carte")
@@ -323,6 +406,11 @@ DESIGN_KEYS = (
     "subtitle_color",
     "text_color",
     "border_color",
+    "text_effect",
+    "shadow_color",
+    "shadow_opacity",
+    "shadow_blur",
+    "shadow_offset",
     "card",
 )
 MAX_TEMPLATES = 25
@@ -589,7 +677,8 @@ class WelcomePanel(discord.ui.View):
         lines = [
             f"État : **{'activé ✅' if settings['enabled'] else 'désactivé ❌'}** · Salon : {channel}",
             f"Carte : **{'oui' if settings['card'] else 'non'}** · Disposition : **{settings['layout']}** · "
-            f"Assombrissement : **{settings['overlay']} %**",
+            f"Assombrissement : **{settings['overlay']} %** · "
+            f"Effet du texte : **{EFFECT_CHOICES[settings['text_effect']][0]}**",
             "",
             f"**Message :** {settings['message'] or '*aucun*'}",
         ]
@@ -675,6 +764,8 @@ class WelcomePanel(discord.ui.View):
         self.button("Aperçu réel", "👁️", self.on_preview, row=2)
         self.button("Modèles", "🧩", self.on_templates, row=2)
         self.button("Tester dans le salon", "📨", self.on_test, row=2)
+
+        self.button("Ombre du texte", "🌫️", self.on_shadow, row=3)
 
         if self.kind == JOIN:
             self.button("Rôles à l'arrivée", "🎭", self.on_autoroles, row=3, style=discord.ButtonStyle.primary)
@@ -762,6 +853,9 @@ class WelcomePanel(discord.ui.View):
 
     async def on_style(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(StyleModal(self))
+
+    async def on_shadow(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ShadowModal(self))
 
     async def on_layout(self, interaction: discord.Interaction) -> None:
         current = self.settings["layout"]
@@ -1064,6 +1158,11 @@ class BienvenueCog(commands.Cog):
             subtitle_color=settings["subtitle_color"],
             text_color=settings["text_color"],
             border_color=settings["border_color"],
+            text_effect=settings["text_effect"],
+            shadow_color=settings["shadow_color"],
+            shadow_opacity=settings["shadow_opacity"],
+            shadow_blur=settings["shadow_blur"],
+            shadow_offset=settings["shadow_offset"],
         )
 
     async def send_greeting(
