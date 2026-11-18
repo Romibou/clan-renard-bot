@@ -43,6 +43,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "jeu",
     ),
     "🧰 Outils": (
+        "anniversaire",
         "rappel",
         "aide",
     ),

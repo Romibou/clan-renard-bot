@@ -44,6 +44,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/collections [membre]` | Tableau des collections de cosmétiques |
 | `/donner` | Donne des pièces à un membre |
 | `/rappel` | Programme un rappel personnel |
+| `/anniversaire` | Enregistre ton anniversaire, voir les prochains |
 | `/jeu morpion`, `/jeu puissance4`, `/jeu pfc`, `/jeu pendu` | Mini-jeux contre un membre (avec mise possible), contre l’IA ou en solo |
 | `/jeu classement [jeu] [tri]` | Classement des meilleurs joueurs aux mini-jeux |
 | `/jeu stats [membre]` | Victoires, défaites et gains aux mini-jeux |
@@ -62,6 +63,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/drop` | Gérer le serveur | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
 | `/bingo lancer` / `nombre` / `arreter` | Gérer le serveur | Bingo « trouve le nombre » dans un salon |
+| `/anniversaire-admin` | Gérer le serveur | Souhaits d’anniversaire : salon, heure, message, carte, rôle du jour, cadeau |
 | `/bienvenue-admin` | Gérer le serveur | Messages et cartes de bienvenue et de départ (voir [Bienvenue et départs](#bienvenue-et-départs)) |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
@@ -574,6 +576,39 @@ Si elle n’est pas cochée, le bot ne reste pas hors ligne : il redémarre tout
 - Durées acceptées : `10s`, `10m`, `5mn`, `2h`, `1h30`, `1j12h`, `3sem`, ou un nombre seul en minutes (`45`). De 10 secondes à 90 jours.
 - Destination : dans le salon (y compris le chat d’un salon vocal) ou en message privé. Si l’une n’est pas possible, le rappel part par l’autre.
 - **Relancer le rappel** reprogramme le même rappel avec la même durée.
+
+## Anniversaires
+
+### `/anniversaire` (membres)
+
+Ouvre un panneau visible par le membre seul :
+
+- **🎂 Enregistrer** / **Modifier ma date** : jour, mois et, si on veut, l’année de naissance (seulement pour afficher l’âge). La date peut être modifiée **une fois tous les 30 jours** ; en cas d’erreur, un admin peut la retirer.
+- **🙈 Cacher mon âge** / **🎈 Afficher mon âge** : l’âge n’apparaît dans les souhaits que si le membre a donné son année et l’accepte.
+- **🗑️ Retirer** (deux clics pour confirmer).
+- **📅 Prochains anniversaires** du serveur (jour et mois seulement, jamais l’année ; membres partis masqués).
+- Le panneau indique dans combien de jours tombe l’anniversaire. Né un 29 février : fêté le 28 février les années non bissextiles.
+
+### `/anniversaire-admin`
+
+| Bouton | Rôle |
+|---|---|
+| ▶️ **Activer** / ⏸️ **Désactiver** | Souhaits automatiques |
+| 📍 **Salon et rôle** | Salon des souhaits, et rôle donné pour la journée (retiré automatiquement le lendemain) |
+| ⏰ **Heure et cadeau** | Heure des souhaits (Paris), pièces et XP offertes |
+| ✏️ **Message et carte** | Message, titre (cadre et carte), sous-titre et texte du bas de la carte |
+| 🖼️ **Fond** | Fond de la carte (même style que la carte de bienvenue) |
+| 🎨 **Style** | **Cadre** (par défaut) : la mention du membre, puis un cadre rose aux couleurs du bot avec son avatar, le message, son âge et le cadeau, signé « L’équipe Clan Renard 🦊 ». **Carte image** : le message et la carte, comme la bienvenue. **Cadre + carte** : le cadre avec la carte en grande image |
+| 📨 **Tester dans le salon** | Envoie les souhaits avec ton profil (sans rôle ni cadeau) |
+| 📋 **Liste** | Tous les anniversaires enregistrés, dans l’ordre |
+| 🗑️ **Retirer un membre** | Retire la date d’un membre (date fausse, troll…) |
+
+Variables : `{membre}` (mention), `{nom}`, `{serveur}`, `{age}` (« 21 ans ! » si l’âge est connu et affiché, sinon rien).
+
+- Le jour J, à l’heure choisie, le bot poste les souhaits (avec la carte), donne le rôle et le cadeau. Un membre qui enregistre sa date le jour même, après l’heure, est fêté dans les 5 minutes.
+- **Une seule célébration par membre et par an**, même si la date est changée, retirée puis remise : impossible de récupérer le cadeau plusieurs fois.
+- Le cadeau compte comme de l’argent gagné et peut faire monter de niveau. Les membres partis et les bots ne sont pas fêtés.
+- Le bot doit pouvoir écrire et joindre des fichiers dans le salon, et, pour le rôle, avoir « Gérer les rôles » avec son rôle placé au-dessus du rôle d’anniversaire (le panneau prévient sinon).
 
 ## Rôles à la réaction
 
