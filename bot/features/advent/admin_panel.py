@@ -733,7 +733,7 @@ class ShopConfigureModal(discord.ui.Modal):
             await invoke_command(
                 interaction,
                 "AdventShop",
-                "configure_shop_item",
+                "configure_role_item",
                 str(self.identifier.value).strip(),
                 str(self.name.value).strip(),
                 self.role,
@@ -1213,7 +1213,7 @@ class ShopEditModal(discord.ui.Modal):
             await invoke_command(
                 interaction,
                 "AdventShop",
-                "configure_shop_item",
+                "configure_role_item",
                 str(self.item["identifier"]),
                 str(self.name.value).strip(),
                 role,

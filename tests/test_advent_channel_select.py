@@ -131,7 +131,7 @@ async def test_edit_role_item_prefills_and_saves(monkeypatch) -> None:
     await modal.on_submit(interaction)
 
     assert calls == [(
-        "configure_shop_item",
+        "configure_role_item",
         ("noel-2026", "Renard des neiges", role, 500, 24, "Merci !", "", "🦊", None),
     )]
 
@@ -181,3 +181,28 @@ async def test_view_shows_edit_and_remove_after_selection(monkeypatch) -> None:
     await view.on_select(SimpleNamespace(data={"values": ["noel-2026"]}, response=SimpleNamespace(edit_message=edit_message)))
     labels = [getattr(item, "label", None) for item in view.children]
     assert "Modifier" in labels and any(label and label.startswith("Retirer") for label in labels)
+
+
+def test_every_panel_action_points_to_an_existing_command() -> None:
+    """
+    Bug : le panneau appelait AdventShop.configure_shop_item, qui n'existe
+    pas (la commande s'appelle configure_role_item). « Ajouter un rôle à la
+    boutique » et « Modifier » répondaient « action introuvable ».
+    """
+    import inspect
+    import re
+
+    from bot.extensions import advent_shop
+    from bot.features.advent import admin_commands, admin_rewards_commands
+
+    source = inspect.getsource(admin_panel)
+    calls = set(re.findall(r'invoke_command\(\s*\w+,\s*"(\w+)",\s*"(\w+)"', source))
+    classes = {
+        "AdventShop": advent_shop.AdventShop,
+        "AdventAdminCommands": admin_commands.AdventAdminCommands,
+        "AdventAdminRewardsCommands": admin_rewards_commands.AdventAdminRewardsCommands,
+    }
+
+    assert len(calls) >= 15
+    missing = [f"{cog}.{name}" for cog, name in calls if not hasattr(classes[cog], name)]
+    assert missing == []
