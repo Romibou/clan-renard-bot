@@ -46,6 +46,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
         "anniversaire",
         "anniversaires-liste",
         "rappel",
+        "ping",
         "aide",
     ),
 }

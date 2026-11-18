@@ -44,6 +44,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/collections [membre]` | Tableau des collections de cosmétiques |
 | `/donner` | Donne des pièces à un membre |
 | `/rappel` | Programme un rappel personnel |
+| `/ping` | Vérifie que le bot répond : connexion à Discord, temps de réponse, base de données, durée en ligne |
 | `/anniversaire` | Enregistre ton anniversaire, voir les prochains |
 | `/anniversaires-liste` | Liste publique des prochains anniversaires du serveur |
 | `/jeu morpion`, `/jeu puissance4`, `/jeu pfc`, `/jeu pendu` | Mini-jeux contre un membre (avec mise possible), contre l’IA ou en solo |
