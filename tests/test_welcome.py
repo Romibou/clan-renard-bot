@@ -285,3 +285,18 @@ async def test_real_preview_is_private(monkeypatch) -> None:
     assert sent[0]["ephemeral"] and "Bienvenue <@7> !" in sent[0]["content"]
     assert sent[0]["file"].filename == "apercu.png"
     assert sent[0]["allowed_mentions"].users is False
+
+
+def test_background_limits(monkeypatch) -> None:
+    # Une grosse photo JPEG passe et ressort petite.
+    output = io.BytesIO()
+    Image.new("RGB", (6000, 4000), (10, 120, 200)).save(output, format="JPEG", quality=95)
+    prepared = bienvenue.prepare_background(output.getvalue())
+    assert Image.open(io.BytesIO(prepared)).size == (WIDTH, HEIGHT)
+    assert len(prepared) < 300_000
+
+    # Trop de pixels : refusé proprement (protège la mémoire du serveur).
+    monkeypatch.setattr(bienvenue, "MAX_BACKGROUND_PIXELS", 1000)
+
+    with pytest.raises(ValueError):
+        bienvenue.prepare_background(png_bytes((100, 100)))

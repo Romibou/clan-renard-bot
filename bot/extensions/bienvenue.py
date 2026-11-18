@@ -25,7 +25,11 @@ LOGGER = logging.getLogger(__name__)
 
 JOIN, LEAVE = "join", "leave"
 KIND_NAMES = {JOIN: "👋 Arrivées", LEAVE: "🚪 Départs"}
-MAX_BACKGROUND_BYTES = 8 * 1024 * 1024
+# Le fond est recadré en 1024 x 500 puis compressé (~150 Ko) : le fichier
+# envoyé peut être gros. La vraie limite est souvent celle de Discord
+# pour le compte qui envoie (10 Mo sans Nitro).
+MAX_BACKGROUND_BYTES = 50 * 1024 * 1024
+MAX_BACKGROUND_PIXELS = 50_000_000  # 50 mégapixels, largement assez pour un fond
 
 DEFAULTS: dict[str, dict[str, Any]] = {
     JOIN: {
@@ -108,6 +112,13 @@ def merge_settings(kind: str, stored: dict[str, Any] | None) -> dict[str, Any]:
 def prepare_background(data: bytes) -> bytes:
     """Recadre au format de la carte et compresse (fond plus léger en base)."""
     image = Image.open(io.BytesIO(data))
+
+    if image.width * image.height > MAX_BACKGROUND_PIXELS:
+        raise ValueError("Image trop grande en pixels.")
+
+    # Une grosse photo JPEG est décodée directement en plus petit :
+    # beaucoup moins de mémoire utilisée sur le serveur.
+    image.draft("RGB", (WIDTH * 2, HEIGHT * 2))
     image = ImageOps.exif_transpose(image).convert("RGB")
     image = ImageOps.fit(image, (WIDTH, HEIGHT), Image.LANCZOS)
     output = io.BytesIO()
@@ -245,7 +256,7 @@ class BackgroundModal(PanelModal):
         self.add_item(
             discord.ui.Label(
                 text="Nouvelle image de fond",
-                description="PNG, JPG, GIF ou WEBP, 8 Mo max. Recadrée en 1024 × 500.",
+                description="PNG, JPG, GIF ou WEBP, 50 Mo max. Recadrée en 1024 × 500.",
                 component=self.file,
             )
         )
@@ -270,10 +281,14 @@ class BackgroundModal(PanelModal):
                 raise ValueError(f"« {attachment.filename} » n'est pas une image.")
 
             if attachment.size > MAX_BACKGROUND_BYTES:
-                raise ValueError("Image trop lourde (8 Mo maximum).")
+                raise ValueError("Image trop lourde (50 Mo maximum).")
 
             try:
                 data = await asyncio.to_thread(prepare_background, await attachment.read())
+            except ValueError as error:
+                raise ValueError(
+                    "Image trop grande en pixels (50 mégapixels maximum) : réduis-la un peu."
+                ) from error
             except Exception as error:
                 raise ValueError("Impossible de lire cette image.") from error
 

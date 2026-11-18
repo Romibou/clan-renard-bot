@@ -588,7 +588,7 @@ Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec t
 | ▶️ **Activer** / ⏸️ **Désactiver** | Envoi automatique à chaque arrivée (ou départ) |
 | 📍 **Salon** | Salon où le message est posté |
 | ✏️ **Textes** | Message au-dessus de la carte, titre, sous-titre, texte du bas |
-| 🖼️ **Fond** | Image de fond envoyée depuis ton PC (recadrée en 1024 × 500), ou retour au fond par défaut |
+| 🖼️ **Fond** | Image de fond envoyée depuis ton PC (jusqu’à 50 Mo et 50 mégapixels ; Discord limite à 10 Mo sans Nitro), recadrée en 1024 × 500 et compressée, ou retour au fond par défaut |
 | 🎨 **Couleurs** | Couleur du titre, du sous-titre, du texte et du contour de l’avatar, assombrissement du fond (0 à 90 %) |
 | 📐 **Disposition** | Centre (avatar en haut, comme Koya), gauche ou droite (avatar sur le côté, texte à côté) |
 | 🃏 **Carte : oui / non** | Message seul, sans image |
