@@ -44,6 +44,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     ),
     "🧰 Outils": (
         "anniversaire",
+        "anniversaires",
         "rappel",
         "aide",
     ),

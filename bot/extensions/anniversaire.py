@@ -853,7 +853,7 @@ class BirthdayCog(commands.Cog):
             description += f"\n… et {len(upcoming) - limit} autre(s)."
 
         embed = discord.Embed(title=title, description=description[:4096], color=COLOR)
-        embed.set_footer(text=f"{len(upcoming)} anniversaire(s) enregistré(s) · /anniversaire pour ajouter le tien")
+        embed.set_footer(text=f"{len(upcoming)} anniversaire(s) enregistré(s) · /anniversaire pour ajouter le tien 🎂")
         return embed
 
     # -------- réglages --------
@@ -1097,6 +1097,15 @@ class BirthdayCog(commands.Cog):
         birthday = await self.get_birthday(interaction.guild_id, interaction.user.id)
         panel = MemberPanel(self, interaction.user, birthday)
         await interaction.response.send_message(embed=panel.embed(), view=panel, ephemeral=True)
+
+    @app_commands.command(name="anniversaires", description="Affiche les prochains anniversaires du serveur.")
+    @app_commands.guild_only()
+    async def anniversaires(self, interaction: discord.Interaction) -> None:
+        # Public : tout le salon voit la liste. Les mentions ne notifient personne.
+        await interaction.response.send_message(
+            embed=await self.upcoming_embed(interaction.guild),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @app_commands.command(name="anniversaire-admin", description="Réglages des anniversaires (salon, rôle, cadeau…).")
     @app_commands.default_permissions(manage_guild=True)

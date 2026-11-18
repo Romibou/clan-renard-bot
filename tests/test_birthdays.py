@@ -334,3 +334,21 @@ async def test_send_wishes_styles(monkeypatch, style, has_embed, has_file) -> No
     assert kwargs["content"] == ("<@5>" if has_embed else kwargs["content"])
     if style == "both":
         assert kwargs["embed"].image.url == "attachment://anniversaire.png"
+
+
+async def test_public_list_does_not_ping(monkeypatch) -> None:
+    cog = bday.BirthdayCog(SimpleNamespace())
+    sent: list = []
+
+    async def upcoming(guild, **kwargs):
+        return discord.Embed(description="🎂 <@5> — **25 décembre**")
+
+    async def send_message(**kwargs):
+        sent.append(kwargs)
+
+    monkeypatch.setattr(cog, "upcoming_embed", upcoming)
+    interaction = SimpleNamespace(guild=SimpleNamespace(), response=SimpleNamespace(send_message=send_message))
+    await bday.BirthdayCog.anniversaires.callback(cog, interaction)
+
+    assert "ephemeral" not in sent[0]  # visible par tout le salon
+    assert sent[0]["allowed_mentions"].users is False

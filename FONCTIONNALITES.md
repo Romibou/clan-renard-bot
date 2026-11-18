@@ -45,6 +45,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/donner` | Donne des pièces à un membre |
 | `/rappel` | Programme un rappel personnel |
 | `/anniversaire` | Enregistre ton anniversaire, voir les prochains |
+| `/anniversaires` | Liste publique des prochains anniversaires du serveur |
 | `/jeu morpion`, `/jeu puissance4`, `/jeu pfc`, `/jeu pendu` | Mini-jeux contre un membre (avec mise possible), contre l’IA ou en solo |
 | `/jeu classement [jeu] [tri]` | Classement des meilleurs joueurs aux mini-jeux |
 | `/jeu stats [membre]` | Victoires, défaites et gains aux mini-jeux |
@@ -588,6 +589,10 @@ Ouvre un panneau visible par le membre seul :
 - **🗑️ Retirer** (deux clics pour confirmer).
 - **📅 Prochains anniversaires** du serveur (jour et mois seulement, jamais l’année ; membres partis masqués).
 - Le panneau indique dans combien de jours tombe l’anniversaire. Né un 29 février : fêté le 28 février les années non bissextiles.
+
+### `/anniversaires` (public)
+
+Affiche dans le salon, pour tout le monde, les 10 prochains anniversaires (jour et mois, compte à rebours, « aujourd’hui ! » le jour J). Les mentions de la liste ne notifient personne. N’importe quel membre peut la lancer.
 
 ### `/anniversaire-admin`
 
