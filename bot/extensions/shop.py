@@ -7,6 +7,7 @@ from typing import Any, Literal
 import discord
 from discord import app_commands
 from discord.ext import commands
+from bot.shared.panels import reset_selection, send_panel
 from bot.extensions.progression import level_from_xp
 from bot.shared.pagination import (
     SELECT_PAGE_SIZE,
@@ -668,6 +669,16 @@ class ShopRoleSelect(discord.ui.RoleSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            # Menu remis à zéro : on peut rechoisir la même option.
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         guild = interaction.guild
 
         if guild is None or not self.values:
@@ -812,6 +823,16 @@ class ShopCosmeticSelect(discord.ui.Select):
         interaction: discord.Interaction,
     ) -> None:
         try:
+            await self._run(interaction)
+        finally:
+            # Menu remis à zéro : on peut rechoisir la même option.
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
             cosmetic_id = int(self.values[0])
         except (ValueError, IndexError):
             await interaction.response.send_message(
@@ -947,7 +968,8 @@ class ShopAdminView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=discord.Embed(
                 title="🎭 Ajouter un rôle",
                 description=(
@@ -960,7 +982,6 @@ class ShopAdminView(discord.ui.View):
                 cog=self.cog,
                 owner_id=interaction.user.id,
             ),
-            ephemeral=True,
         )
 
     @discord.ui.button(
@@ -1001,7 +1022,8 @@ class ShopAdminView(discord.ui.View):
             )
             return
 
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=discord.Embed(
                 title="🎨 Ajouter un cosmétique",
                 description=(
@@ -1015,7 +1037,6 @@ class ShopAdminView(discord.ui.View):
                 owner_id=interaction.user.id,
                 cosmetics=cosmetics,
             ),
-            ephemeral=True,
         )
 
     @discord.ui.button(

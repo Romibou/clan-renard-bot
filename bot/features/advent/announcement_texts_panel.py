@@ -26,6 +26,7 @@ from bot.features.advent.announcement_texts import (
     parse_days,
 )
 from bot.shared.embeds import base_embed
+from bot.shared.panels import reset_selection, send_panel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -309,6 +310,7 @@ class TextsPanel(discord.ui.View):
 
     async def on_edit_day(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(DayMessageModal(self, int(interaction.data["values"][0])))
+        await reset_selection(self)
 
     async def on_preview(self, interaction: discord.Interaction) -> None:
         day = int(interaction.data["values"][0])
@@ -324,6 +326,7 @@ class TextsPanel(discord.ui.View):
             allowed_mentions=discord.AllowedMentions.none(),
             ephemeral=True,
         )
+        await reset_selection(self)
 
     async def on_reset(self, interaction: discord.Interaction) -> None:
         if not self.confirm_reset:
@@ -351,4 +354,4 @@ async def open_texts_panel(interaction: discord.Interaction, campaign: Any) -> N
         owner_id=interaction.user.id,
         guild=interaction.guild,
     )
-    await interaction.response.send_message(embed=panel.embed(), view=panel, ephemeral=True)
+    await send_panel(interaction, embed=panel.embed(), view=panel)

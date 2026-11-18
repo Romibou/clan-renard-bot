@@ -11,6 +11,7 @@ from bot.features.advent.constants import (
     CATCHUP_DISABLED,
     CATCHUP_ENABLED,
 )
+from bot.shared.panels import reset_selection, send_panel
 from bot.shared.embeds import (
     base_embed,
     error_embed,
@@ -773,6 +774,15 @@ class AdminChannelSelect(discord.ui.ChannelSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         # Le menu renvoie un salon « partiel » (AppCommandChannel) :
         # on récupère le vrai salon du serveur avant de le vérifier.
         selected = self.values[0]
@@ -829,6 +839,15 @@ class AdminRoleSelect(discord.ui.RoleSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         role = self.values[0]
 
         if not isinstance(role, discord.Role):
@@ -878,6 +897,15 @@ class AdminUserSelect(discord.ui.UserSelect):
         )
 
     async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            await reset_selection(self.view)
+
+    async def _run(
         self,
         interaction: discord.Interaction,
     ) -> None:
@@ -1715,7 +1743,8 @@ class RewardTypeSelect(discord.ui.Select):
         action = self.values[0]
 
         if action == "reward_role":
-            await interaction.response.edit_message(
+            await send_panel(
+                interaction,
                 embed=base_embed(
                     "🎭 Choisir un rôle",
                     "Sélectionne le rôle à donner dans cette case.",
@@ -1727,13 +1756,14 @@ class RewardTypeSelect(discord.ui.Select):
                     ),
                 ),
             )
-            return
-
-        await interaction.response.send_modal(
-            AdminModal(
-                action=action,
+        else:
+            await interaction.response.send_modal(
+                AdminModal(
+                    action=action,
+                )
             )
-        )
+
+        await reset_selection(self.view)
 
 
 class AdminActionSelect(discord.ui.Select):
@@ -1877,6 +1907,16 @@ class AdminActionSelect(discord.ui.Select):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._dispatch(interaction)
+        finally:
+            # Le menu redevient vide : on peut relancer la même action.
+            await reset_selection(self.view)
+
+    async def _dispatch(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         action = self.values[0]
 
         if action == "reset_all":
@@ -1896,7 +1936,8 @@ class AdminActionSelect(discord.ui.Select):
             return
 
         if action == "reward_add":
-            await interaction.response.send_message(
+            await send_panel(
+                interaction,
                 embed=base_embed(
                     "🎁 Type de récompense",
                     (
@@ -1909,7 +1950,6 @@ class AdminActionSelect(discord.ui.Select):
                     owner_id=interaction.user.id,
                     picker=RewardTypeSelect(),
                 ),
-                ephemeral=True,
             )
             return
 
@@ -2060,7 +2100,8 @@ class AdminActionSelect(discord.ui.Select):
 
 
         if action == "shop_role":
-            await interaction.response.send_message(
+            await send_panel(
+                interaction,
                 embed=base_embed(
                     "🎭 Choisir un rôle",
                     (
@@ -2074,7 +2115,6 @@ class AdminActionSelect(discord.ui.Select):
                         action="shop_role",
                     ),
                 ),
-                ephemeral=True,
             )
             return
 
@@ -2127,7 +2167,9 @@ class AdminActionSelect(discord.ui.Select):
             "Effectue ton choix dans le menu ci-dessous.",
         )
 
-        await interaction.response.edit_message(
+        # Nouveau message : le panneau principal reste ouvert.
+        await send_panel(
+            interaction,
             embed=embed,
             view=PickerView(
                 owner_id=interaction.user.id,
@@ -2245,12 +2287,12 @@ class AdventAdminPanel(commands.Cog):
             inline=False,
         )
 
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=embed,
             view=AdventAdminPanelView(
                 owner_id=interaction.user.id,
             ),
-            ephemeral=True,
         )
 
 class ShopCosmeticModal(

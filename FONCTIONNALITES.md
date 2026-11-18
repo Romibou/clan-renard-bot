@@ -73,7 +73,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/lock`, `/unlock` | Gérer les salons | Verrouillage d’un salon |
 | `/moderation-admin` | Gérer le serveur | Journal, contestations, échelle de sanctions, AutoMod |
 
-Les commandes d’administration n’apparaissent pas aux membres qui n’ont pas la permission. Dans `/aide`, les administrateurs voient en plus la liste de ces commandes.
+Les commandes d’administration n’apparaissent pas aux membres qui n’ont pas la permission. Dans les panneaux d’administration, les menus déroulants se vident après chaque action (on peut relancer la même action sans retaper la commande), et les choix de salon, de rôle ou de membre s’ouvrent dans un nouveau message : le panneau reste ouvert. Dans `/aide`, les administrateurs voient en plus la liste de ces commandes.
 
 Les anciennes commandes `/avent-profil`, `/avent-boutique`, `/avent-admin-…` existent encore dans le code mais sont retirées de Discord : tout passe par les boutons de `/avent` et le panneau `/avent-admin`.
 

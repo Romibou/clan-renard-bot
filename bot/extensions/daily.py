@@ -13,6 +13,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from bot.shared.panels import reset_selection, send_panel
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1315,6 +1317,16 @@ class DailyResetMemberSelect(
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            # Menu remis à zéro : on peut rechoisir la même option.
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         if not self.values:
             await interaction.response.send_message(
                 embed=error_embed(
@@ -1664,7 +1676,8 @@ class DailyAdminView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=warning_embed(
                 "Réinitialisation quotidienne",
                 (
@@ -1678,7 +1691,6 @@ class DailyAdminView(
                 owner_id=self.owner_id,
                 guild_id=self.guild_id,
             ),
-            ephemeral=True,
         )
 
     # Réglages de /hebdomadaire et /mensuel (bot/extensions/periodic_rewards.py).

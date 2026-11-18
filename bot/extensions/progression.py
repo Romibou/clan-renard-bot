@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from bot.shared.panels import reset_selection, send_panel
 from bot.shared.members import present_member_ids
 from bot.shared.progression_card import render_progression_card
 
@@ -877,6 +878,16 @@ class ProgressionRuleRoleSelect(discord.ui.RoleSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
+        try:
+            await self._run(interaction)
+        finally:
+            # Menu remis à zéro : on peut rechoisir la même option.
+            await reset_selection(self.view)
+
+    async def _run(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
         if not self.values:
             await interaction.response.send_message(
                 "❌ Aucun rôle sélectionné.",
@@ -1258,7 +1269,8 @@ class ProgressionAdminView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=base_embed(
                 "✨ Multiplicateur d'XP",
                 (
@@ -1272,7 +1284,6 @@ class ProgressionAdminView(discord.ui.View):
                 owner_id=interaction.user.id,
                 action="multiplier",
             ),
-            ephemeral=True,
         )
 
     @discord.ui.button(
@@ -1286,7 +1297,8 @@ class ProgressionAdminView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await interaction.response.send_message(
+        await send_panel(
+            interaction,
             embed=base_embed(
                 "🎭 Rôle de niveau",
                 (
@@ -1300,7 +1312,6 @@ class ProgressionAdminView(discord.ui.View):
                 owner_id=interaction.user.id,
                 action="level-role",
             ),
-            ephemeral=True,
         )
 
     @discord.ui.button(
