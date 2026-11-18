@@ -21,6 +21,8 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     ),
     "🎁 Récompenses": (
         "quotidien",
+        "hebdomadaire",
+        "mensuel",
         "missions",
     ),
     "🛍️ Boutique et profil": (

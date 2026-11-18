@@ -35,6 +35,8 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/stats [membre] [periode]` | Statistiques du jour ou des 7 derniers jours |
 | `/bilan [membre]` | Bilan de l’année (du 31 décembre au 31 janvier) |
 | `/quotidien` | Récompense quotidienne et réglage du rappel |
+| `/hebdomadaire` | Récompense de la semaine |
+| `/mensuel` | Récompense du mois |
 | `/missions` | Missions du jour et de la semaine |
 | `/boutique` | Boutique permanente (rôles et cosmétiques) |
 | `/profil [membre]` | Carte de profil, personnalisation, inventaire, collections |
@@ -51,7 +53,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | Commande | Permission | Description |
 |---|---|---|
 | `/progression-admin` | Gérer le serveur | XP, multiplicateurs, rôles de niveau, XP vocale, bonus d’XP, modifier ou réinitialiser un membre |
-| `/quotidien-admin` | Gérer le serveur | Récompense quotidienne, bonus de série, réinitialiser un membre |
+| `/quotidien-admin` | Gérer le serveur | Récompenses quotidienne, hebdomadaire et mensuelle, bonus de série, réinitialiser un membre |
 | `/missions-admin` | Gérer le serveur | Missions en JSON |
 | `/boutique-admin` | Gérer le serveur | Articles de la boutique permanente |
 | `/profil-admin` | Gérer le serveur | Créer, distribuer et supprimer des cosmétiques |
@@ -148,7 +150,20 @@ Sous la réponse de `/quotidien` :
 
 L’heure par défaut est **09:00**. Le rappel part une seule fois, le jour où la récompense redevient disponible, et n’arrive pas si le membre a fermé ses messages privés.
 
+## `/hebdomadaire` et `/mensuel`
+
+Une récompense par semaine et une par mois, en plus de `/quotidien`.
+
+- **Semaine** : du lundi 00h00 au dimanche 23h59 (heure de Paris). **Mois** : du 1er à 00h00 à la fin du mois.
+- Par défaut : **700 XP et 100 pièces** par semaine, **3 000 XP et 500 pièces** par mois.
+- **Série** : réclamer plusieurs semaines (ou mois) d’affilée ajoute un bonus de **+10 %** par période, jusqu’à **+50 %**. Une période sautée remet la série à 1. Le record est affiché.
+- Si c’est déjà récupéré, le bot indique quand revenir.
+- L’argent compte comme de l’argent gagné (comme `/quotidien`), et l’XP peut faire monter de niveau (rôles de niveau donnés automatiquement).
+- Les réponses ne sont visibles que par le membre, comme `/quotidien`.
+
 ## `/quotidien-admin`
+
+Les boutons **🗓️ Hebdomadaire** et **📅 Mensuel** (en bas du panneau) règlent `/hebdomadaire` et `/mensuel` : XP, pièces, bonus de série par période, bonus maximum, activée ou non. Le panneau affiche leurs réglages actuels.
 
 **Récompense** (XP et pièces de base), **Bonus de série** (JSON), **Activer/désactiver**, **Voir la configuration**, **Exemple JSON** et **Réinitialiser un membre**.
 

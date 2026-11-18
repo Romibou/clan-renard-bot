@@ -1681,6 +1681,52 @@ class DailyAdminView(
             ephemeral=True,
         )
 
+    # Réglages de /hebdomadaire et /mensuel (bot/extensions/periodic_rewards.py).
+    async def open_periodic_settings(
+        self,
+        interaction: discord.Interaction,
+        kind: str,
+    ) -> None:
+        periodic = interaction.client.get_cog("PeriodicRewardsCog")
+
+        if periodic is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Indisponible",
+                    "Le module des récompenses hebdomadaire et mensuelle n'est pas chargé.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await periodic.open_admin(interaction, kind)
+
+    @discord.ui.button(
+        label="Hebdomadaire",
+        emoji="🗓️",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def weekly_settings_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await self.open_periodic_settings(interaction, "weekly")
+
+    @discord.ui.button(
+        label="Mensuel",
+        emoji="📅",
+        style=discord.ButtonStyle.secondary,
+        row=3,
+    )
+    async def monthly_settings_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await self.open_periodic_settings(interaction, "monthly")
+
 
 class DailyReminderToggleView(
     discord.ui.View
@@ -3761,6 +3807,25 @@ class DailyCog(
                 ephemeral=True,
             )
             return
+
+        # Résumé de /hebdomadaire et /mensuel (réglables avec les boutons du bas).
+        periodic = self.bot.get_cog("PeriodicRewardsCog")
+
+        if periodic is not None:
+            from bot.extensions.periodic_rewards import LABELS, describe_settings
+
+            for kind in ("weekly", "monthly"):
+                try:
+                    settings = await periodic.get_settings(guild.id, kind)
+                except Exception:
+                    LOGGER.exception("Réglages %s illisibles", kind)
+                    continue
+
+                embed.add_field(
+                    name=f"{LABELS[kind]['emoji']} {LABELS[kind]['title']}",
+                    value=describe_settings(kind, settings),
+                    inline=False,
+                )
 
         view = DailyAdminView(
             cog=self,
