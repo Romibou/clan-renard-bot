@@ -300,3 +300,136 @@ def test_background_limits(monkeypatch) -> None:
 
     with pytest.raises(ValueError):
         bienvenue.prepare_background(png_bytes((100, 100)))
+
+
+# ---------------------------------------------------------------
+# Rôles à l'arrivée
+# ---------------------------------------------------------------
+
+
+class FakeRole:
+    def __init__(self, role_id: int, position: int = 1, managed: bool = False, default: bool = False) -> None:
+        self.id = role_id
+        self.position = position
+        self.managed = managed
+        self._default = default
+        self.mention = f"<@&{role_id}>"
+
+    def is_default(self) -> bool:
+        return self._default
+
+    def __ge__(self, other) -> bool:
+        return self.position >= other.position
+
+
+def autorole_member(roles=(), pending=False, bot=False):
+    added: list = []
+
+    async def add_roles(*new_roles, reason=None):
+        added.extend(role.id for role in new_roles)
+
+    member = SimpleNamespace(id=5, bot=bot, pending=pending, roles=list(roles), add_roles=add_roles)
+    member.added = added
+    return member
+
+
+def autorole_cog(monkeypatch, role_ids, guild_roles):
+    cog = bienvenue.BienvenueCog(SimpleNamespace())
+
+    async def get_settings(guild_id, kind):
+        return bienvenue.merge_settings(kind, {"autoroles": role_ids}), None
+
+    async def greet(member, kind):
+        return None
+
+    monkeypatch.setattr(cog, "get_settings", get_settings)
+    monkeypatch.setattr(cog, "greet", greet)
+    guild = SimpleNamespace(id=1, get_role=lambda role_id: guild_roles.get(role_id))
+    return cog, guild
+
+
+async def test_new_member_gets_roles(monkeypatch) -> None:
+    membre = FakeRole(10)
+    cog, guild = autorole_cog(monkeypatch, [10], {10: membre})
+    member = autorole_member()
+    member.guild = guild
+
+    await cog.on_member_join(member)
+    assert member.added == [10]
+
+    # Un bot n'est pas concerné, et un rôle déjà possédé n'est pas redonné.
+    bot_member = autorole_member(bot=True)
+    bot_member.guild = guild
+    await cog.on_member_join(bot_member)
+    assert bot_member.added == []
+
+    already = autorole_member(roles=[membre])
+    already.guild = guild
+    await cog.on_member_join(already)
+    assert already.added == []
+
+
+async def test_waits_for_rules_acceptance(monkeypatch) -> None:
+    cog, guild = autorole_cog(monkeypatch, [10], {10: FakeRole(10)})
+    member = autorole_member(pending=True)
+    member.guild = guild
+
+    await cog.on_member_join(member)
+    assert member.added == []  # règlement pas encore accepté
+
+    after = autorole_member(pending=False)
+    after.guild = guild
+    await cog.on_member_update(SimpleNamespace(pending=True), after)
+    assert after.added == [10]
+
+
+def test_autorole_problems() -> None:
+    me = SimpleNamespace(guild_permissions=SimpleNamespace(manage_roles=True), top_role=FakeRole(1, position=5))
+    roles = {10: FakeRole(10, position=2), 11: FakeRole(11, position=9), 12: FakeRole(12, managed=True)}
+    guild = SimpleNamespace(me=me, get_role=lambda role_id: roles.get(role_id))
+
+    assert bienvenue.autorole_problems(guild, [10]) == []
+    problems = bienvenue.autorole_problems(guild, [11, 12, 99])
+    assert len(problems) == 3 and "au-dessus" in problems[0]
+
+    me.guild_permissions.manage_roles = False
+    assert "Gérer les rôles" in bienvenue.autorole_problems(guild, [10])[0]
+
+
+async def test_backfill(monkeypatch) -> None:
+    monkeypatch.setattr(bienvenue.asyncio, "sleep", lambda _s: _noop())
+    role = FakeRole(10)
+    guild = SimpleNamespace(get_role=lambda _id: role)
+    members = [autorole_member() for _ in range(3)]
+
+    for member in members:
+        member.guild = guild
+
+    given, failed = await bienvenue.BienvenueCog(SimpleNamespace()).backfill(members, [10])
+    assert (given, failed) == (3, 0) and all(m.added == [10] for m in members)
+
+
+async def _noop():
+    return None
+
+
+async def test_panel_shows_autorole_buttons_only_for_arrivals() -> None:
+    guild = SimpleNamespace(id=1, get_channel=lambda _id: None, get_role=lambda _id: None)
+    interaction = SimpleNamespace(user=SimpleNamespace(id=7), guild=guild)
+    panel = bienvenue.WelcomePanel(SimpleNamespace(), interaction, bienvenue.JOIN)
+    panel.settings = bienvenue.merge_settings(bienvenue.JOIN, {"autoroles": [10]})
+    panel.build()
+    labels = [getattr(item, "label", None) for item in panel.children]
+    assert "Rôles à l'arrivée" in labels and "Donner aux membres actuels" in labels
+    assert "<@&10>" in panel.embed().description
+
+    rows: dict[int, int] = {}
+    for item in panel.children:
+        rows[item.row] = rows.get(item.row, 0) + 1
+    assert all(count <= 5 for count in rows.values())
+    check_modal(bienvenue.AutoroleModal(panel))
+
+    panel.kind = bienvenue.LEAVE
+    panel.settings = bienvenue.merge_settings(bienvenue.LEAVE, None)
+    panel.build()
+    assert "Rôles à l'arrivée" not in [getattr(item, "label", None) for item in panel.children]

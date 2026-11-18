@@ -29,6 +29,7 @@ KIND_NAMES = {JOIN: "👋 Arrivées", LEAVE: "🚪 Départs"}
 # envoyé peut être gros. La vraie limite est souvent celle de Discord
 # pour le compte qui envoie (10 Mo sans Nitro).
 MAX_BACKGROUND_BYTES = 50 * 1024 * 1024
+MAX_AUTOROLES = 3
 MAX_BACKGROUND_PIXELS = 50_000_000  # 50 mégapixels, largement assez pour un fond
 
 DEFAULTS: dict[str, dict[str, Any]] = {
@@ -46,6 +47,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "text_color": "#FFFFFF",
         "border_color": "#FFFFFF",
         "card": True,
+        # Rôles donnés à chaque nouveau membre (gardés ensuite). Vide = aucun.
+        "autoroles": [],
     },
     LEAVE: {
         "enabled": False,
@@ -434,6 +437,111 @@ class TemplatesView(discord.ui.View):
 
 
 # ============================================================
+# RÔLES À L'ARRIVÉE
+# ============================================================
+
+
+def autorole_problems(guild: discord.Guild, role_ids: list[int]) -> list[str]:
+    """Ce qui empêcherait le bot de donner ces rôles."""
+    me = guild.me
+    problems = []
+
+    if me is not None and not me.guild_permissions.manage_roles:
+        problems.append("il me manque la permission « Gérer les rôles »")
+
+    for role_id in role_ids:
+        role = guild.get_role(int(role_id))
+
+        if role is None:
+            problems.append(f"le rôle <@&{role_id}> n'existe plus")
+        elif role.managed or role.is_default():
+            problems.append(f"{role.mention} ne peut pas être donné (rôle géré par Discord ou une intégration)")
+        elif me is not None and role >= me.top_role:
+            problems.append(f"mon rôle doit être placé au-dessus de {role.mention} dans la liste des rôles")
+
+    return problems
+
+
+class AutoroleModal(PanelModal):
+    def __init__(self, panel: WelcomePanel) -> None:
+        super().__init__(panel, "🎭 Rôles à l'arrivée")
+        current = [panel.guild.get_role(int(role_id)) for role_id in self.settings.get("autoroles", [])]
+        self.roles = discord.ui.RoleSelect(
+            default_values=[role for role in current if role is not None],
+            required=False,
+            min_values=0,
+            max_values=MAX_AUTOROLES,
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Rôles donnés à chaque nouveau membre",
+                description=f"{MAX_AUTOROLES} maximum, gardés ensuite. Aucun rôle = désactivé.",
+                component=self.roles,
+            )
+        )
+
+    async def apply(self, interaction: discord.Interaction) -> str | None:
+        self.settings["autoroles"] = [role.id for role in self.roles.values]
+
+        if not self.settings["autoroles"]:
+            return "🎭 Plus aucun rôle donné à l'arrivée."
+
+        problems = autorole_problems(interaction.guild, self.settings["autoroles"])
+        names = ", ".join(f"<@&{role_id}>" for role_id in self.settings["autoroles"])
+
+        if problems:
+            return f"🎭 Rôles à l'arrivée : {names}.\n⚠️ Attention : " + " ; ".join(problems) + "."
+
+        return (
+            f"🎭 Chaque nouveau membre recevra {names}. "
+            "Pense à désactiver le rôle automatique de DraftBot pour éviter les doublons."
+        )
+
+
+class BackfillView(discord.ui.View):
+    """Confirmation avant de donner les rôles d'arrivée aux membres actuels."""
+
+    def __init__(self, cog: BienvenueCog, owner_id: int, role_ids: list[int], missing: list[discord.Member]) -> None:
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.role_ids = role_ids
+        self.missing = missing
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="Oui, donner les rôles", emoji="✅", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"⏳ Attribution en cours à **{len(self.missing)}** membre(s)… "
+                "Je te préviens ici quand c'est fini.",
+                color=COLOR,
+            ),
+            view=None,
+        )
+        given, failed = await self.cog.backfill(self.missing, self.role_ids)
+        text = f"✅ Rôles donnés à **{given}** membre(s)."
+
+        if failed:
+            text += f"\n⚠️ Échec pour {failed} membre(s) (permissions ou rôle trop haut)."
+
+        try:
+            await interaction.edit_original_response(embed=discord.Embed(description=text, color=SUCCESS_COLOR))
+        except discord.HTTPException:
+            await interaction.followup.send(text, ephemeral=True)
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(
+            embed=discord.Embed(description="Annulé, rien n'a changé.", color=COLOR), view=None
+        )
+
+
+# ============================================================
 # PANNEAU
 # ============================================================
 
@@ -485,6 +593,15 @@ class WelcomePanel(discord.ui.View):
             "",
             f"**Message :** {settings['message'] or '*aucun*'}",
         ]
+
+        if self.kind == JOIN:
+            roles = settings.get("autoroles") or []
+            lines.insert(
+                2,
+                "🎭 Rôles à l'arrivée : "
+                + (", ".join(f"<@&{role_id}>" for role_id in roles) if roles else "*aucun*")
+                + " (donnés même si le message est désactivé)",
+            )
 
         if notice:
             lines += ["", f"> {notice}"]
@@ -559,7 +676,59 @@ class WelcomePanel(discord.ui.View):
         self.button("Modèles", "🧩", self.on_templates, row=2)
         self.button("Tester dans le salon", "📨", self.on_test, row=2)
 
+        if self.kind == JOIN:
+            self.button("Rôles à l'arrivée", "🎭", self.on_autoroles, row=3, style=discord.ButtonStyle.primary)
+            self.button("Donner aux membres actuels", "👥", self.on_backfill, row=3)
+
     # -------- actions --------
+
+    async def on_autoroles(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(AutoroleModal(self))
+
+    async def on_backfill(self, interaction: discord.Interaction) -> None:
+        role_ids = [int(role_id) for role_id in self.settings.get("autoroles") or []]
+
+        if not role_ids:
+            await interaction.response.send_message(
+                embed=error_embed("Choisis d'abord les rôles avec 🎭 **Rôles à l'arrivée**."), ephemeral=True
+            )
+            return
+
+        problems = autorole_problems(self.guild, role_ids)
+
+        if problems:
+            await interaction.response.send_message(
+                embed=error_embed("Impossible pour l'instant : " + " ; ".join(problems) + "."), ephemeral=True
+            )
+            return
+
+        roles = [self.guild.get_role(role_id) for role_id in role_ids]
+        missing = [
+            member
+            for member in self.guild.members
+            if not member.bot and any(role not in member.roles for role in roles)
+        ]
+
+        if not missing:
+            await interaction.response.send_message(
+                embed=discord.Embed(description="✅ Tous les membres ont déjà ces rôles.", color=SUCCESS_COLOR),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="👥 Donner les rôles aux membres actuels ?",
+                description=(
+                    f"**{len(missing)}** membre(s) n'ont pas encore "
+                    + ", ".join(role.mention for role in roles)
+                    + ".\nCela peut prendre un peu de temps (Discord limite la vitesse)."
+                ),
+                color=COLOR,
+            ),
+            view=BackfillView(self.cog, self.owner_id, role_ids, missing),
+            ephemeral=True,
+        )
 
     async def on_kind(self, interaction: discord.Interaction) -> None:
         self.kind = interaction.data["values"][0]
@@ -935,7 +1104,53 @@ class BienvenueCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        # Si le serveur demande d'accepter le règlement, on attend qu'il soit accepté.
+        if not getattr(member, "pending", False):
+            await self.give_autoroles(member)
+
         await self.greet(member, JOIN)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if getattr(before, "pending", False) and not getattr(after, "pending", False):
+            await self.give_autoroles(after)
+
+    async def give_autoroles(self, member: discord.Member) -> None:
+        if member.bot:
+            return
+
+        try:
+            settings, _ = await self.get_settings(member.guild.id, JOIN)
+            roles = [member.guild.get_role(int(role_id)) for role_id in settings.get("autoroles") or []]
+            roles = [role for role in roles if role is not None and role not in member.roles]
+
+            if roles:
+                await member.add_roles(*roles, reason="Rôle à l'arrivée")
+        except discord.HTTPException:
+            LOGGER.warning("Rôles d'arrivée non donnés à %s (permissions ?)", member.id)
+        except Exception:
+            LOGGER.exception("Rôles d'arrivée non donnés à %s", member.id)
+
+    async def backfill(self, members: list[discord.Member], role_ids: list[int]) -> tuple[int, int]:
+        """Donne les rôles d'arrivée aux membres déjà présents qui ne les ont pas."""
+        given = failed = 0
+
+        for member in members:
+            roles = [member.guild.get_role(role_id) for role_id in role_ids]
+            roles = [role for role in roles if role is not None and role not in member.roles]
+
+            if not roles:
+                continue
+
+            try:
+                await member.add_roles(*roles, reason="Rôle à l'arrivée (membres déjà présents)")
+                given += 1
+            except discord.HTTPException:
+                failed += 1
+
+            await asyncio.sleep(0.3)  # reste sous les limites de Discord
+
+        return given, failed
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:

@@ -651,6 +651,8 @@ Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec t
 | 👁️ **Aperçu réel** | Le message complet (texte et carte) exactement comme les membres le verront, visible par toi seul |
 | 🧩 **Modèles** | Enregistrer l’apparence actuelle sous un nom, charger un modèle (l’aperçu se met à jour), supprimer |
 | 📨 **Tester dans le salon** | Envoie un vrai message avec ton profil, pour voir le rendu final |
+| 🎭 **Rôles à l’arrivée** *(arrivées)* | Jusqu’à 3 rôles donnés à chaque nouveau membre dès son arrivée, et gardés ensuite (comme le rôle « Membre » de DraftBot). Aucun rôle = désactivé |
+| 👥 **Donner aux membres actuels** *(arrivées)* | Donne ces rôles aux membres déjà présents qui ne les ont pas (après confirmation) |
 
 Chaque changement est enregistré tout de suite (si l’envoi automatique est activé, il s’applique dès la prochaine arrivée).
 
@@ -661,6 +663,7 @@ Chaque changement est enregistré tout de suite (si l’envoi automatique est ac
 Par défaut : « Bienvenue {membre} ! » avec la carte **BIENVENUE / {nom} / Nous sommes {nombre} à présent !**, et pour les départs « **{nom}** nous a quittés. » avec la carte **AU REVOIR**. Les deux sont désactivés tant que tu ne les actives pas.
 
 - Les bots qui rejoignent le serveur ne sont pas accueillis.
+- **Rôles à l’arrivée** : donnés même si le message de bienvenue est désactivé, jamais aux bots. Si le serveur demande d’accepter le règlement avant d’entrer, le rôle est donné juste après l’acceptation. Le bot doit avoir « Gérer les rôles » et son rôle doit être au-dessus de ceux qu’il donne (le panneau prévient sinon). Pense à désactiver le rôle automatique de DraftBot.
 - Au départ, le nom du membre n’est pas une mention qui notifie.
 - Le bot doit pouvoir **voir le salon, y écrire et joindre des fichiers** : le panneau prévient s’il manque quelque chose.
 - La police épaisse des titres (Roboto Black) est installée sur Render.
