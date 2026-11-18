@@ -773,7 +773,14 @@ class AdminChannelSelect(discord.ui.ChannelSelect):
         self,
         interaction: discord.Interaction,
     ) -> None:
-        channel = self.values[0]
+        # Le menu renvoie un salon « partiel » (AppCommandChannel) :
+        # on récupère le vrai salon du serveur avant de le vérifier.
+        selected = self.values[0]
+        channel = (
+            interaction.guild.get_channel(selected.id)
+            if interaction.guild is not None
+            else None
+        )
 
         if not isinstance(
             channel,
