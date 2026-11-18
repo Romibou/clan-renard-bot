@@ -52,8 +52,11 @@ def format_number(value: int) -> str:
 
 
 def item_line(item: CatalogueItem) -> str:
-    """« `#12` 🖼️ **Fond d'hiver** · 💰 500 · 🎄 175 pts · 👥 3 »."""
-    parts = [f"`#{item.id}` {TYPE_EMOJIS.get(item.cosmetic_type, '🎨')} **{item.name}**"]
+    """« `#12` 🖼️ **Fond d'hiver** · `background-snow-2026` · 💰 500 · 🎄 175 pts · 👥 3 »."""
+    parts = [
+        f"`#{item.id}` {TYPE_EMOJIS.get(item.cosmetic_type, '🎨')} **{item.name}**",
+        f"`{item.identifier}`",
+    ]
 
     if item.shop_price is not None:
         parts.append(f"💰 {format_number(item.shop_price)}")
@@ -106,7 +109,8 @@ def theme_fields(theme: Theme) -> list[tuple[str, str]]:
 
 
 LEGEND = (
-    "`#ID` à utiliser dans les récompenses aléatoires de l'Avent (`\"cosmetic_id\": 12`).\n"
+    "`#ID` : pour les récompenses aléatoires de l'Avent (`\"cosmetic_id\": 12`).\n"
+    "`identifiant` : pour les boutiques et la distribution (ex. `frame-volcan-2026`).\n"
     "🖼️ fond · 🔲 cadre · 🏅 badge · ✨ effet · 🏷️ titre\n"
     "💰 prix en boutique · 🎄 prix dans la boutique de l'Avent · 👥 membres qui l'ont"
 )

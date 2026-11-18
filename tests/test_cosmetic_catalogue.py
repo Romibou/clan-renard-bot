@@ -16,7 +16,7 @@ def item(id_, identifier, name, kind="background", **extra) -> CatalogueItem:
 
 def test_item_line_shows_id_name_and_sales() -> None:
     line = item_line(item(12, "background-snow-2026", "Fond d'hiver", shop_price=500, advent_price=175, owners=3))
-    assert line == "`#12` 🖼️ **Fond d'hiver** · 💰 500 · 🎄 175 pts · 👥 3"
+    assert line == "`#12` 🖼️ **Fond d'hiver** · `background-snow-2026` · 💰 500 · 🎄 175 pts · 👥 3"
     assert "🚫 désactivé" in item_line(item(3, "badge-x", "Vieux", "badge", enabled=False))
 
 
