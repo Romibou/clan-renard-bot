@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+from functools import lru_cache
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -915,16 +916,26 @@ def add_subtle_texture(
     """
     Ajoute un grain très léger pour éviter un fond trop plat.
 
-    Le seed fixe garantit le même rendu à chaque génération.
+    Le seed fixe garantit le même rendu à chaque génération : le grain
+    est donc calculé une seule fois puis réutilisé.
     """
+    image.alpha_composite(_cached_texture(image.size, seed, opacity))
+
+
+@lru_cache(maxsize=16)
+def _cached_texture(
+    size: tuple[int, int],
+    seed: int,
+    opacity: int,
+) -> Image.Image:
     randomizer = random.Random(seed)
     texture = Image.new(
         "RGBA",
-        image.size,
+        size,
         (0, 0, 0, 0),
     )
     pixels = texture.load()
-    width, height = image.size
+    width, height = size
 
     for _ in range((width * height) // 30):
         x = randomizer.randrange(width)
@@ -937,4 +948,4 @@ def add_subtle_texture(
             randomizer.randint(1, opacity),
         )
 
-    image.alpha_composite(texture)
+    return texture

@@ -174,7 +174,7 @@ def render_recap_card(
     )
 
     output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG", optimize=True)
+    image.convert("RGB").save(output, format="PNG", compress_level=3)
     output.seek(0)
 
     return output

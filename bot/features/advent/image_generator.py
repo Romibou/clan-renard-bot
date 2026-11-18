@@ -378,7 +378,7 @@ class AdventCalendarRenderer:
             cls._draw_cell(image, draw, day, state, box)
 
         buffer = BytesIO()
-        image.save(buffer, format="PNG", optimize=True, compress_level=4)
+        image.save(buffer, format="PNG", compress_level=3)
         payload = buffer.getvalue()
 
         cls._store_in_cache(cache_key, payload)

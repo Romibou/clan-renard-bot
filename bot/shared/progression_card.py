@@ -67,51 +67,26 @@ def format_number(value: int) -> str:
 
 
 def create_vertical_gradient() -> Image.Image:
-    image = Image.new(
-        "RGBA",
-        (CARD_WIDTH, CARD_HEIGHT),
-    )
+    """Dégradé du fond, calculé une fois puis réutilisé (avant : pixel par pixel)."""
+    return _cached_vertical_gradient().copy()
 
-    pixels = image.load()
+
+@lru_cache(maxsize=1)
+def _cached_vertical_gradient() -> Image.Image:
+    column = Image.new("RGBA", (1, CARD_HEIGHT))
 
     for y in range(CARD_HEIGHT):
         ratio = y / max(1, CARD_HEIGHT - 1)
-
-        red = round(
-            BACKGROUND_TOP[0]
-            + (
-                BACKGROUND_BOTTOM[0]
-                - BACKGROUND_TOP[0]
+        column.putpixel(
+            (0, y),
+            tuple(
+                round(BACKGROUND_TOP[i] + (BACKGROUND_BOTTOM[i] - BACKGROUND_TOP[i]) * ratio)
+                for i in range(3)
             )
-            * ratio
-        )
-        green = round(
-            BACKGROUND_TOP[1]
-            + (
-                BACKGROUND_BOTTOM[1]
-                - BACKGROUND_TOP[1]
-            )
-            * ratio
-        )
-        blue = round(
-            BACKGROUND_TOP[2]
-            + (
-                BACKGROUND_BOTTOM[2]
-                - BACKGROUND_TOP[2]
-            )
-            * ratio
+            + (255,),
         )
 
-        for x in range(CARD_WIDTH):
-            pixels[x, y] = (
-                red,
-                green,
-                blue,
-                255,
-            )
-
-    return image
-
+    return column.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.NEAREST)
 
 def add_glows(
     image: Image.Image,
@@ -688,7 +663,7 @@ def render_progression_card(
     image.convert("RGB").save(
         output,
         format="PNG",
-        optimize=True,
+        compress_level=3,
     )
 
     output.seek(0)

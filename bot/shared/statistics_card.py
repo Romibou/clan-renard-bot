@@ -927,7 +927,7 @@ def render_statistics_card(
     ).save(
         output,
         format="PNG",
-        optimize=True,
+        compress_level=3,
     )
 
     output.seek(0)

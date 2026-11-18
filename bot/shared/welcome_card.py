@@ -271,5 +271,5 @@ def render_welcome_card(
             y += font.size + gap
 
     output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG", optimize=True)
+    image.convert("RGB").save(output, format="PNG", compress_level=3)
     return output.getvalue()

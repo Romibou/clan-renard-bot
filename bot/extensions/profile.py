@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from functools import lru_cache
 import logging
 import re
 import textwrap
@@ -366,64 +367,51 @@ def load_rgba_asset(
 def create_gradient(
     color: tuple[int, int, int],
 ) -> Image.Image:
-    image = Image.new(
-        "RGBA",
-        (
-            PROFILE_WIDTH,
-            PROFILE_HEIGHT,
-        ),
-    )
+    """
+    Dégradé du fond par défaut (couleur choisie en haut, plus sombre en
+    bas, légèrement plus sombre vers la droite). Calculé une seule fois par
+    couleur puis réutilisé : avant, il était recalculé pixel par pixel à
+    chaque /profil (600 000 pixels), ce qui ralentissait beaucoup la carte.
+    """
+    return _cached_gradient(tuple(int(value) for value in color)).copy()
 
-    pixels = image.load()
 
+@lru_cache(maxsize=32)
+def _cached_gradient(
+    color: tuple[int, int, int],
+) -> Image.Image:
     secondary = (
         max(10, color[0] // 3),
         max(10, color[1] // 3),
         max(20, color[2] // 3),
     )
 
+    # Une colonne avec le dégradé vertical, étirée sur toute la largeur.
+    column = Image.new("RGB", (1, PROFILE_HEIGHT))
+
     for y in range(PROFILE_HEIGHT):
-        ratio = (
-            y
-            / max(
-                1,
-                PROFILE_HEIGHT - 1,
-            )
+        ratio = y / max(1, PROFILE_HEIGHT - 1)
+        column.putpixel(
+            (0, y),
+            tuple(
+                int(color[i] * (1 - ratio) + secondary[i] * ratio)
+                for i in range(3)
+            ),
         )
 
-        red = int(
-            color[0] * (1 - ratio)
-            + secondary[0] * ratio
-        )
+    vertical = column.resize((PROFILE_WIDTH, PROFILE_HEIGHT), Image.Resampling.NEAREST)
 
-        green = int(
-            color[1] * (1 - ratio)
-            + secondary[1] * ratio
-        )
+    # Une ligne avec l'assombrissement horizontal (0 à gauche, 19 à droite).
+    row = Image.new("L", (PROFILE_WIDTH, 1))
+    row.putdata([int(20 * (x / PROFILE_WIDTH)) for x in range(PROFILE_WIDTH)])
+    darken = Image.merge(
+        "RGB",
+        [row.resize((PROFILE_WIDTH, PROFILE_HEIGHT), Image.Resampling.NEAREST)] * 3,
+    )
 
-        blue = int(
-            color[2] * (1 - ratio)
-            + secondary[2] * ratio
-        )
-
-        for x in range(PROFILE_WIDTH):
-            horizontal = (
-                x / PROFILE_WIDTH
-            )
-
-            modifier = int(
-                20 * horizontal
-            )
-
-            pixels[x, y] = (
-                max(0, red - modifier),
-                max(0, green - modifier),
-                max(0, blue - modifier),
-                255,
-            )
-
+    # subtract s'arrête à 0, comme le max(0, …) de l'ancien calcul.
+    image = ImageChops.subtract(vertical, darken).convert("RGBA")
     return image
-
 
 def apply_snow_effect(
     image: Image.Image,
@@ -2992,7 +2980,7 @@ class ProfileCog(commands.Cog):
         ).save(
             output,
             format="PNG",
-            optimize=True,
+            compress_level=3,
         )
 
         output.seek(0)
