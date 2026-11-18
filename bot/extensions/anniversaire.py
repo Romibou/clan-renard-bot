@@ -1098,7 +1098,7 @@ class BirthdayCog(commands.Cog):
         panel = MemberPanel(self, interaction.user, birthday)
         await interaction.response.send_message(embed=panel.embed(), view=panel, ephemeral=True)
 
-    @app_commands.command(name="anniversaires", description="Affiche les prochains anniversaires du serveur.")
+    @app_commands.command(name="anniversaires-liste", description="Affiche les prochains anniversaires du serveur.")
     @app_commands.guild_only()
     async def anniversaires(self, interaction: discord.Interaction) -> None:
         # Public : tout le salon voit la liste. Les mentions ne notifient personne.
