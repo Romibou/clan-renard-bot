@@ -39,3 +39,6 @@ logs/
 
 # Sauvegardes de la base (scripts/sauvegarder_base.py) : données des membres
 sauvegardes/
+
+# Images de cosmétiques envoyées depuis Discord (gardées en base de données)
+assets/profile/uploaded/

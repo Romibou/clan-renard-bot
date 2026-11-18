@@ -1414,10 +1414,58 @@ class ProfileAdminView(
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        await interaction.response.send_modal(
-            CreateCosmeticModal(
-                cog=self.cog,
-            )
+        # Création avec image envoyée depuis Discord (bot/features/cosmetics_studio.py).
+        from bot.features.cosmetics_studio import CreateCosmeticModal as StudioCreateModal
+
+        await interaction.response.send_modal(StudioCreateModal(self.cog))
+
+    @discord.ui.button(
+        label="Créer une collection",
+        emoji="📦",
+        style=discord.ButtonStyle.primary,
+    )
+    async def create_collection_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        from bot.features.cosmetics_studio import CollectionModal
+
+        await interaction.response.send_modal(CollectionModal(self.cog))
+
+    @discord.ui.button(
+        label="Changer l'image",
+        emoji="🔁",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def replace_image_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        from bot.features.cosmetics_studio import ReplaceImageModal
+
+        await interaction.response.send_modal(ReplaceImageModal(self.cog))
+
+    @discord.ui.button(
+        label="Guide des images",
+        emoji="❔",
+        style=discord.ButtonStyle.secondary,
+    )
+    async def guide_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        from bot.features.cosmetics_studio import GUIDE
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="❔ Quelles images pour quels cosmétiques ?",
+                description=GUIDE,
+                color=PROFILE_COLOR,
+            ),
+            ephemeral=True,
         )
 
     @discord.ui.button(
@@ -3128,6 +3176,19 @@ async def setup(
     cog = ProfileCog(bot)
 
     await cog.initialize_database()
+
+    # Images de cosmétiques envoyées depuis Discord : gardées en base,
+    # remises sur le disque à chaque démarrage (Render efface les fichiers).
+    try:
+        from bot.features.cosmetics_studio import restore_images
+
+        restored = await restore_images(cog)
+
+        if restored:
+            LOGGER.info("%s image(s) de cosmétique restaurée(s)", restored)
+    except Exception:
+        LOGGER.exception("Images de cosmétiques non restaurées")
+
     await bot.add_cog(cog)
 
     LOGGER.info(

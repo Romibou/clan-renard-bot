@@ -306,21 +306,71 @@ Les images sont rangées dans `assets/profile/` (`badges/`, `backgrounds/`, `fra
 
 ## `/profil-admin`
 
-- **Créer un cosmétique** : identifiant, type, nom affiché, chemin de l’image (relatif à `assets/profile/`, vide pour un titre) et valeur facultative (texte d’un titre, nom d’un effet).
-- **Distribuer** : donner un cosmétique à un membre. Au-delà de 25 cosmétiques, le choix se répartit sur plusieurs menus.
-- **Supprimer un cosmétique** : retire définitivement le cosmétique du catalogue. Retire-le d’abord des boutiques.
-- **📚 Catalogue** : tous les cosmétiques du bot, vendus ou non (désactivés compris), rangés par thème (Hiver, Volcan, Nocturne…). Pour chacun : son **ID** (`#12`, celui à écrire dans une récompense aléatoire de l’Avent : `"cosmetic_id": 12`), son **nom affiché**, son **identifiant** (`frame-volcan-2026`, celui à taper dans **Ajouter un cosmétique à la boutique** de `/avent-admin`), son type, son prix en boutique (💰), son prix dans la boutique de l’Avent (🎄) et le nombre de membres qui l’ont (👥). Présenté en tableaux alignés, un par thème (colonnes ID, Type, Nom affiché, Identifiant, Prix, Avent, Nb), dans un message visible par toi seul et en pleine largeur, avec des pages si le catalogue est long. Sur téléphone, les lignes peuvent passer à la ligne.
+| Bouton | Rôle |
+|---|---|
+| 🆕 **Créer un cosmétique** | Un cosmétique avec son image envoyée depuis ton PC, aperçu sur ta carte |
+| 📦 **Créer une collection** | Fond, cadre, badge et effet d’un même thème en une fois (+ un titre), avec aperçu et confirmation |
+| 🔁 **Changer l’image** | Remplace l’image d’un cosmétique existant |
+| ❔ **Guide des images** | Rappel des formats attendus pour chaque type |
+| 🎁 **Distribuer** | Donne un cosmétique à un membre (plusieurs menus au-delà de 25 cosmétiques) |
+| 📚 **Catalogue** | Tous les cosmétiques par thème, avec ID, nom affiché, identifiant, prix et nombre de membres qui l’ont |
+| 🗑️ **Supprimer un cosmétique** | Le retire définitivement (retire-le d’abord des boutiques) |
 
-### Identifiants : la convention à garder
+### Les 5 types et leurs images
 
-Écris les identifiants sous la forme **`type-thème-année`** : `background-volcan-2026`, `frame-volcan-2026`, `badge-volcan-2026`, `effect-volcan-2026`. C’est ce qui forme les collections. L’identifiant ne doit plus changer après la création.
+| Type | Ce que c’est | Image à envoyer | Ce que fait le bot |
+|---|---|---|---|
+| 🖼️ **Fond** (`background`) | L’arrière-plan de la carte de profil | Toute image, idéalement **1200 × 500** (2,4 fois plus large que haute), pas besoin de transparence | Recadrée au centre en 1200 × 500. Prévient si l’image est petite (flou) ou d’un format très différent |
+| 🔲 **Cadre** (`frame`) | Le contour posé par-dessus la carte | **PNG 1200 × 500 avec le centre transparent** et le contour opaque | Redimensionné en 1200 × 500. La carte est découpée selon la forme du cadre (coins arrondis compris). **Refusé** si le centre n’est pas transparent (il cacherait toute la carte) |
+| 🏅 **Badge** (`badge`) | La petite icône en haut à droite | **PNG carré, idéalement 256 × 256, fond transparent** | Mis dans un carré 256 × 256 sans déformation. Prévient s’il n’est pas carré ou sans transparence |
+| ✨ **Effet** (`effect`) | Un calque par-dessus tout (neige, paillettes, lumière…) | **PNG 1200 × 500 surtout transparent** | Redimensionné en 1200 × 500. **Refusé** s’il n’est pas assez transparent. Avec la valeur `snow` (ou « snow » / « neige » dans le thème), le bot ajoute en plus une neige dessinée par-dessus |
+| 🏷️ **Titre** (`title`) | Un texte affiché sous le pseudo | Pas d’image : juste le texte | — |
+
+Formats acceptés : PNG, JPG, WEBP, GIF (première image), 25 Mo et 50 mégapixels maximum. **Pour un cadre, un badge ou un effet, utilise un PNG** : le JPG n’a pas de transparence.
+
+### 🆕 Créer un cosmétique
+
+Le formulaire demande :
+
+1. **Type** : fond, cadre, badge, effet ou titre.
+2. **Thème** : par exemple `volcan-2026`. L’identifiant est construit tout seul : **`type-thème`**, donc `frame-volcan-2026`. Les accents et espaces sont convertis (`Hiver Éternel` → `hiver-eternel`).
+3. **Nom affiché** : ce que voient les membres, par exemple « Cadre volcan ».
+4. **Image** : envoyée depuis ton PC (sauf pour un titre).
+5. **Texte du titre / valeur d’effet** : le texte d’un titre (obligatoire pour un titre), ou `snow` pour un effet neige.
+
+Le bot prépare l’image, crée le cosmétique, puis t’envoie un **aperçu de ta carte de profil avec ce cosmétique** (rien n’est équipé pour de vrai), son **ID** et les étapes suivantes. Un identifiant qui existe déjà est refusé : pour modifier un cosmétique, utilise 🔁 **Changer l’image**.
+
+### 📦 Créer une collection
+
+Le formulaire demande :
+
+1. **Thème** : `volcan-2026`.
+2. **Nom de la collection** : `Volcan` → les noms affichés seront « Fond Volcan », « Cadre Volcan », « Badge Volcan », « Effet Volcan ».
+3. **Images** : 1 à 4 fichiers d’un coup.
+4. **Titre de la collection** (facultatif) : crée aussi un titre `title-volcan-2026` avec ce texte (« Titre Volcan »).
+
+**Comment le bot sait quelle image est quoi** : d’abord grâce au **nom du fichier** (`fond`, `background`, `bg` · `cadre`, `frame` · `badge`, `icone`, `logo` · `effet`, `effect`, `fx`, par exemple `volcan-cadre.png`). Sinon, il regarde l’image : carrée → badge ; opaque → fond ; centre transparent et contour plein → cadre ; sinon → effet. Testé sur tous les cosmétiques actuels : chacun est reconnu correctement.
+
+Avant de créer quoi que ce soit, il affiche **la liste de ce qu’il a compris** (type, nom, identifiant, fichier d’origine, avertissements) et **l’aperçu de ta carte avec toute la collection équipée**. Tu confirmes avec ✅ **Créer la collection** ou tu annules. Deux images reconnues comme le même type, ou un identifiant déjà pris, sont refusés avec une explication.
+
+La collection apparaît dans `/collections` dès qu’elle a au moins 2 objets.
+
+### 🔁 Changer l’image
+
+Identifiant du cosmétique (visible dans 📚 Catalogue) + nouvelle image. L’image est préparée selon le type du cosmétique et remplace l’ancienne tout de suite : **les membres qui l’ont gardent le cosmétique** et voient la nouvelle image. Fonctionne aussi pour les anciens cosmétiques dont l’image est un fichier du projet.
+
+### Où sont gardées les images ?
+
+Render **efface les fichiers à chaque redéploiement**. Les images envoyées depuis Discord sont donc enregistrées **dans la base de données** (Supabase), puis réécrites dans `assets/profile/uploaded/` à chaque démarrage du bot. Rien n’est perdu, et ce dossier n’est pas envoyé sur GitHub. Les anciens cosmétiques (fichiers du projet) continuent de fonctionner comme avant.
 
 ### Parcours complet d’un cosmétique
 
-1. Déposer l’image dans `assets/profile/…` (sauf pour un titre), puis pousser sur GitHub.
-2. `/profil-admin` → **Créer un cosmétique**.
-3. Le tester avec **Distribuer** sur ton propre compte.
-4. Le mettre en vente : `/boutique-admin` → **Ajouter un cosmétique**, ou dans la boutique de l’Avent, ou comme récompense de case, de mission ou de giveaway.
+1. `/profil-admin` → 🆕 **Créer un cosmétique** (ou 📦 **Créer une collection**) et vérifier l’aperçu.
+2. Le tester pour de vrai : 🎁 **Distribuer** sur ton propre compte, puis `/profil` → Personnaliser.
+3. Le proposer aux membres :
+   - en boutique : `/boutique-admin` → **Ajouter un cosmétique** (choisi dans une liste) ;
+   - dans la boutique de l’Avent : `/avent-admin` → **Ajouter un cosmétique à la boutique** avec son **identifiant** ;
+   - en récompense d’une case de l’Avent (type Cosmétique, ou `"cosmetic_id": ID` dans une case mystère), d’une mission ou d’un giveaway.
 
 ## Collections
 
