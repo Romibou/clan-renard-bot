@@ -180,7 +180,7 @@ async def test_preview_cleans_temporary_files(tmp_path: Path) -> None:
 # ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("modal_class", [studio.CreateCosmeticModal, studio.CollectionModal, studio.ReplaceImageModal])
+@pytest.mark.parametrize("modal_class", [studio.CreateCosmeticModal, studio.CollectionModal])
 def test_modals_respect_discord_limits(modal_class) -> None:
     modal = modal_class(SimpleNamespace())
     assert len(modal.title) <= 45 and len(modal.children) <= 5
@@ -197,7 +197,170 @@ def test_guide_and_admin_panel_buttons() -> None:
     view = ProfileAdminView(cog=SimpleNamespace(), guild_id=1)
     labels = [item.label for item in view.children]
 
-    for label in ("Créer un cosmétique", "Créer une collection", "Changer l'image", "Guide des images", "Catalogue"):
+    for label in ("Créer un cosmétique", "Créer une collection", "Modifier un cosmétique", "Guide des images", "Catalogue"):
         assert label in labels
 
     assert len(view.children) <= 25
+
+
+# ---------------------------------------------------------------
+# ✏️ Modifier un cosmétique
+# ---------------------------------------------------------------
+
+from bot.shared.cosmetic_catalogue import CatalogueItem, group_by_theme  # noqa: E402
+
+
+def halloween_themes():
+    return group_by_theme(
+        [
+            CatalogueItem(30, "background-halloween-2026", "Fond Halloween", "background", shop_price=500),
+            CatalogueItem(31, "frame-halloween-2026", "Cadre Halloween", "frame", owners=3),
+            CatalogueItem(32, "title-halloween-2026", "Titre Halloween", "title"),
+            CatalogueItem(12, "background-volcan-2026", "Fond Volcan", "background"),
+        ]
+    )
+
+
+class BrowserPool:
+    def __init__(self) -> None:
+        self.updates: list = []
+
+    async def fetchrow(self, query, guild_id, identifier):
+        kind = identifier.split("-")[0]
+        return {"id": 31, "identifier": identifier, "cosmetic_type": kind, "display_name": "Cadre Halloween",
+                "value": "Citrouille" if kind == "title" else None, "asset_path": None, "enabled": True}
+
+    async def execute(self, query, *args):
+        self.updates.append((query, args))
+
+    async def fetch(self, query, *args):
+        return []
+
+
+class BrowserInteraction:
+    def __init__(self, values=None) -> None:
+        self.guild_id = 1
+        self.user = SimpleNamespace(id=7)
+        self.data = {"values": values or []}
+        self.edits: list = []
+        self.response = SimpleNamespace(defer=self._defer, edit_message=self._edit, send_modal=self._modal)
+        self.modals: list = []
+        self.followup = SimpleNamespace(send=self._followup)
+        self.followups: list = []
+
+    async def _defer(self, **kwargs):
+        return None
+
+    async def _edit(self, **kwargs):
+        self.edits.append(kwargs)
+
+    async def _modal(self, modal):
+        self.modals.append(modal)
+
+    async def _followup(self, **kwargs):
+        self.followups.append(kwargs)
+
+    async def edit_original_response(self, **kwargs):
+        self.edits.append(kwargs)
+
+
+def make_browser(monkeypatch):
+    pool = BrowserPool()
+    cog = SimpleNamespace(get_pool=lambda: pool, assets_root=Path("."))
+
+    async def no_preview(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(studio, "render_existing_preview", no_preview)
+    return studio.CosmeticBrowser(cog, 7, halloween_themes()), pool
+
+
+async def test_browser_theme_then_cosmetic(monkeypatch) -> None:
+    browser, _ = make_browser(monkeypatch)
+    assert len(browser.children) == 1  # d'abord le thème
+
+    theme_key = next(t.key for t in browser.themes if "halloween" in t.key)
+    await browser.on_theme(BrowserInteraction([theme_key]))
+    assert len(browser.children) == 2
+    names = [option.label for option in browser.children[1].options]
+    assert names == ["Fond Halloween", "Cadre Halloween", "Titre Halloween"]
+
+    pick = BrowserInteraction(["frame-halloween-2026"])
+    await browser.on_item(pick)
+    labels = [getattr(item, "label", None) for item in browser.children]
+    assert labels[-3:] == ["Changer l'image", "Renommer", "Aperçu"]
+    card = pick.edits[-1]["embed"].description
+    assert "`frame-halloween-2026`" in card and "#31" in card and "3 membre(s)" in card
+
+    title = BrowserInteraction(["title-halloween-2026"])
+    await browser.on_item(title)
+    change = next(item for item in browser.children if getattr(item, "label", None) == "Changer l'image")
+    assert change.disabled  # un titre n'a pas d'image
+
+
+async def test_browser_change_image(monkeypatch, tmp_path) -> None:
+    browser, pool = make_browser(monkeypatch)
+    browser.cog.assets_root = tmp_path
+    browser.theme_key = next(t.key for t in browser.themes if "halloween" in t.key)
+    browser.selected, browser.selected_type = "frame-halloween-2026", "frame"
+
+    modal = studio.ChangeImageModal(browser)
+    attachment = SimpleNamespace(filename="cadre.png", size=1000, content_type="image/png")
+
+    async def read():
+        return png((1200, 500), hole=True)
+
+    attachment.read = read
+    modal.file._values = [attachment]
+    monkeypatch.setattr(type(modal.file), "values", property(lambda self: self._values))
+    interaction = BrowserInteraction()
+    await modal.on_submit(interaction)
+
+    assert any("asset_path" in query for query, _ in pool.updates)
+    assert (tmp_path / "uploaded/1/frame-halloween-2026.png").exists()
+    assert "Image remplacée" in interaction.edits[-1]["embed"].description
+
+    # Une image opaque pour un cadre est refusée, rien n'est changé.
+    pool.updates.clear()
+
+    async def read_bad():
+        return png((1200, 500))
+
+    attachment.read = read_bad
+    bad = BrowserInteraction()
+    await modal.on_submit(bad)
+    assert pool.updates == [] and "centre transparent" in bad.followups[0]["embed"].description
+
+
+async def test_browser_rename(monkeypatch) -> None:
+    browser, pool = make_browser(monkeypatch)
+    browser.theme_key = next(t.key for t in browser.themes if "halloween" in t.key)
+    browser.selected, browser.selected_type = "title-halloween-2026", "title"
+
+    async def reload(guild_id):
+        return None
+
+    monkeypatch.setattr(browser, "reload_items", reload)
+    record = await pool.fetchrow("", 1, "title-halloween-2026")
+    modal = studio.RenameModal(browser, record)
+    assert modal.value is not None and modal.value.default == "Citrouille"
+
+    modal.name._value = "Titre Citrouille"
+    modal.value._value = "Roi des citrouilles"
+    await modal.on_submit(BrowserInteraction())
+    query, args = pool.updates[-1]
+    assert "display_name" in query and args[2:] == ("Titre Citrouille", "Roi des citrouilles")
+
+
+def test_browser_modals_limits(monkeypatch) -> None:
+    browser, _ = make_browser(monkeypatch)
+    browser.selected, browser.selected_type = "frame-halloween-2026", "frame"
+
+    for modal in (
+        studio.ChangeImageModal(browser),
+        studio.RenameModal(browser, {"display_name": "X", "cosmetic_type": "effect", "value": None}),
+    ):
+        assert len(modal.title) <= 45 and len(modal.children) <= 5
+        for item in modal.children:
+            assert len(item.text) <= 45
+            assert item.description is None or len(item.description) <= 100

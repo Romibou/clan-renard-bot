@@ -5,7 +5,8 @@ Création de cosmétiques depuis Discord (/profil-admin).
   (ou texte pour un titre) ; aperçu sur ta carte de profil.
 - 📦 Créer une collection : fond, cadre, badge et effet d'un même thème
   en une fois (jusqu'à 4 images + un titre), avec aperçu et confirmation.
-- 🔁 Changer l'image d'un cosmétique existant.
+- ✏️ Modifier un cosmétique : thème → cosmétique → fiche (changer l'image,
+  renommer, aperçu).
 
 Les images envoyées sont préparées au bon format (fond 1200 × 500,
 cadre et effet 1200 × 500 transparents, badge 256 × 256) et stockées
@@ -428,7 +429,7 @@ class CreateCosmeticModal(discord.ui.Modal):
             if await existing_identifiers(self.cog, interaction.guild_id, [identifier]):
                 raise ValueError(
                     f"`{identifier}` existe déjà. Choisis un autre thème, ou utilise "
-                    "🔁 **Changer l'image** pour le modifier."
+                    "✏️ **Modifier un cosmétique** pour le changer."
                 )
 
             files = list(self.file.values)
@@ -538,7 +539,7 @@ class CollectionModal(discord.ui.Modal):
             if taken:
                 raise ValueError(
                     "Ces identifiants existent déjà : " + ", ".join(f"`{i}`" for i in sorted(taken))
-                    + ". Choisis un autre thème, ou modifie-les avec 🔁 **Changer l'image**."
+                    + ". Choisis un autre thème, ou modifie-les avec ✏️ **Modifier un cosmétique**."
                 )
         except ValueError as error:
             await interaction.followup.send(embed=error_embed(str(error)), ephemeral=True)
@@ -611,70 +612,6 @@ class ConfirmCollectionView(discord.ui.View):
         )
 
 
-class ReplaceImageModal(discord.ui.Modal):
-    def __init__(self, cog: Any) -> None:
-        super().__init__(title="🔁 Changer l'image", timeout=900)
-        self.cog = cog
-        self.identifier = labeled(
-            self, "Identifiant du cosmétique", placeholder="frame-volcan-2026", max_length=50,
-            description="Visible dans 📚 Catalogue. Les membres qui l'ont gardent le cosmétique.",
-        )
-        self.file = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
-        self.add_item(discord.ui.Label(text="Nouvelle image", component=self.file))
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        identifier = self.identifier.value.strip().lower()
-        record = await self.cog.get_pool().fetchrow(
-            """
-            SELECT id, identifier, cosmetic_type, display_name, value, description
-            FROM profile_cosmetics WHERE guild_id = $1 AND identifier = $2
-            """,
-            interaction.guild_id,
-            identifier,
-        )
-
-        try:
-            if record is None:
-                raise ValueError(f"Aucun cosmétique `{identifier}` (regarde 📚 **Catalogue**).")
-            if record["cosmetic_type"] == "title":
-                raise ValueError("Un titre n'a pas d'image.")
-
-            attachment = list(self.file.values)[0]
-            image, warnings = await asyncio.to_thread(
-                prepare_image, await read_attachment(attachment), str(record["cosmetic_type"])
-            )
-        except ValueError as error:
-            await interaction.followup.send(embed=error_embed(str(error)), ephemeral=True)
-            return
-
-        asset_path = await save_image(self.cog, interaction.guild_id, identifier, image)
-        await self.cog.get_pool().execute(
-            "UPDATE profile_cosmetics SET asset_path = $3, updated_at = NOW() WHERE guild_id = $1 AND identifier = $2",
-            interaction.guild_id,
-            identifier,
-            asset_path,
-        )
-        planned = PlannedCosmetic(
-            str(record["cosmetic_type"]), identifier, str(record["display_name"]),
-            image=image, value=record["value"], source=attachment.filename, warnings=warnings,
-        )
-        preview = await render_preview(self.cog, interaction, [planned])
-        embed = discord.Embed(
-            title="🔁 Image remplacée",
-            description="\n".join(plan_lines([planned]))
-            + "\nLes membres qui l'ont équipé voient la nouvelle image tout de suite.",
-            color=SUCCESS_COLOR,
-        )
-        kwargs: dict[str, Any] = {"embed": embed, "ephemeral": True}
-
-        if preview is not None:
-            embed.set_image(url="attachment://apercu-cosmetique.png")
-            kwargs["file"] = preview
-
-        await interaction.followup.send(**kwargs)
-
-
 GUIDE = """\
 **🖼️ Fond** — l'arrière-plan de la carte. Idéal : **1200 × 500** (2,4 fois plus large que haut), \
 recadré au centre si besoin. Pas besoin de transparence.
@@ -695,3 +632,309 @@ thème forment une **collection** dans `/collections` (à partir de 2).
 **Images** : envoyées depuis ton PC (25 Mo max), redimensionnées automatiquement et gardées dans la base \
 de données (elles survivent aux redéploiements de Render).\
 """
+
+
+# ============================================================
+# ✏️ MODIFIER UN COSMÉTIQUE (navigation thème → cosmétique → fiche)
+# ============================================================
+
+GUIDE_SHORT = {
+    "background": "Idéalement 1200 × 500, recadrée au centre.",
+    "frame": "PNG 1200 × 500 avec le centre transparent.",
+    "badge": "PNG carré, idéalement 256 × 256, fond transparent.",
+    "effect": "PNG 1200 × 500, surtout transparent.",
+}
+
+
+async def fetch_cosmetic(cog: Any, guild_id: int, identifier: str) -> Any:
+    return await cog.get_pool().fetchrow(
+        """
+        SELECT id, identifier, cosmetic_type, display_name, value, asset_path, enabled
+        FROM profile_cosmetics WHERE guild_id = $1 AND identifier = $2
+        """,
+        guild_id,
+        identifier,
+    )
+
+
+class ChangeImageModal(discord.ui.Modal):
+    def __init__(self, browser: CosmeticBrowser) -> None:
+        super().__init__(title="🔁 Nouvelle image", timeout=900)
+        self.browser = browser
+        label, _ = TYPE_LABELS[browser.selected_type]
+        self.file = discord.ui.FileUpload(required=True, min_values=1, max_values=1)
+        self.add_item(
+            discord.ui.Label(
+                text=f"Nouvelle image ({label.lower()})",
+                description=GUIDE_SHORT.get(browser.selected_type),
+                component=self.file,
+            )
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        browser = self.browser
+        attachment = list(self.file.values)[0]
+
+        try:
+            image, warnings = await asyncio.to_thread(
+                prepare_image, await read_attachment(attachment), browser.selected_type
+            )
+        except ValueError as error:
+            await interaction.followup.send(embed=error_embed(str(error)), ephemeral=True)
+            return
+
+        asset_path = await save_image(browser.cog, interaction.guild_id, browser.selected, image)
+        await browser.cog.get_pool().execute(
+            "UPDATE profile_cosmetics SET asset_path = $3, updated_at = NOW() WHERE guild_id = $1 AND identifier = $2",
+            interaction.guild_id,
+            browser.selected,
+            asset_path,
+        )
+        notice = "🔁 Image remplacée : les membres qui l'ont voient la nouvelle tout de suite."
+
+        if warnings:
+            notice += "\n" + "\n".join(f"⚠️ {warning}" for warning in warnings)
+
+        await browser.show(interaction, notice=notice)
+
+
+class RenameModal(discord.ui.Modal):
+    def __init__(self, browser: CosmeticBrowser, record: Any) -> None:
+        super().__init__(title="✏️ Renommer", timeout=900)
+        self.browser = browser
+        self.name = labeled(self, "Nom affiché", default=str(record["display_name"]), max_length=100)
+        self.value = None
+
+        if record["cosmetic_type"] == "title":
+            self.value = labeled(self, "Texte du titre", default=str(record["value"] or ""), max_length=100)
+        elif record["cosmetic_type"] == "effect":
+            self.value = labeled(
+                self, "Valeur de l'effet (facultatif)", default=str(record["value"] or ""), required=False,
+                max_length=100, description="« snow » ajoute la neige dessinée par le bot.",
+            )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        browser = self.browser
+        name = self.name.value.strip()
+        value = self.value.value.strip() if self.value is not None else None
+
+        if not name or (browser.selected_type == "title" and not value):
+            await interaction.followup.send(
+                embed=error_embed("Le nom (et le texte d'un titre) ne peut pas être vide."), ephemeral=True
+            )
+            return
+
+        if self.value is not None:
+            await browser.cog.get_pool().execute(
+                """
+                UPDATE profile_cosmetics SET display_name = $3, value = $4, updated_at = NOW()
+                WHERE guild_id = $1 AND identifier = $2
+                """,
+                interaction.guild_id, browser.selected, name, value or None,
+            )
+        else:
+            await browser.cog.get_pool().execute(
+                "UPDATE profile_cosmetics SET display_name = $3, updated_at = NOW() WHERE guild_id = $1 AND identifier = $2",
+                interaction.guild_id, browser.selected, name,
+            )
+
+        await browser.reload_items(interaction.guild_id)
+        await browser.show(interaction, notice=f"✏️ Renommé en **{name}**.")
+
+
+class CosmeticBrowser(discord.ui.View):
+    """✏️ Modifier un cosmétique : thème → cosmétique → fiche avec ses boutons."""
+
+    def __init__(self, cog: Any, owner_id: int, themes: list[Any]) -> None:
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.themes = themes
+        self.theme_key: str | None = themes[0].key if len(themes) == 1 else None
+        self.selected: str | None = None
+        self.selected_type: str = ""
+        self.build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @property
+    def theme(self) -> Any:
+        return next((theme for theme in self.themes if theme.key == self.theme_key), None)
+
+    async def reload_items(self, guild_id: int) -> None:
+        from bot.shared.cosmetic_catalogue import group_by_theme, load_items
+
+        self.themes = group_by_theme(await load_items(self.cog.get_pool(), guild_id))
+
+    def build(self) -> None:
+        self.clear_items()
+        theme_select = discord.ui.Select(
+            placeholder="1. Choisis un thème…",
+            options=[
+                discord.SelectOption(
+                    label=theme.label[:100],
+                    value=theme.key[:100],
+                    description=f"{len(theme.items)} cosmétique(s)",
+                    default=theme.key == self.theme_key,
+                )
+                for theme in self.themes[:25]
+            ],
+            row=0,
+        )
+        theme_select.callback = self.on_theme
+        self.add_item(theme_select)
+
+        theme = self.theme
+
+        if theme is not None:
+            item_select = discord.ui.Select(
+                placeholder="2. Choisis le cosmétique…",
+                options=[
+                    discord.SelectOption(
+                        label=item.name[:100],
+                        value=item.identifier[:100],
+                        emoji=TYPE_LABELS.get(item.cosmetic_type, ("", "🎨"))[1],
+                        description=f"{item.identifier} · #{item.id}"[:100],
+                        default=item.identifier == self.selected,
+                    )
+                    for item in theme.items[:25]
+                ],
+                row=1,
+            )
+            item_select.callback = self.on_item
+            self.add_item(item_select)
+
+        if self.selected:
+            def button(label: str, emoji: str, callback, *, style=discord.ButtonStyle.secondary, disabled=False):
+                item = discord.ui.Button(label=label, emoji=emoji, style=style, row=2, disabled=disabled)
+                item.callback = callback
+                self.add_item(item)
+
+            button("Changer l'image", "🔁", self.on_change_image, style=discord.ButtonStyle.primary,
+                   disabled=self.selected_type == "title")
+            button("Renommer", "✏️", self.on_rename)
+            button("Aperçu", "👁️", self.on_preview)
+
+    def overview(self, notice: str | None = None) -> discord.Embed:
+        lines = ["Choisis un thème, puis le cosmétique à modifier."]
+
+        if len(self.themes) > 25:
+            lines.append("-# Seuls les 25 premiers thèmes sont dans le menu.")
+
+        if notice:
+            lines += ["", f"> {notice}"]
+
+        return discord.Embed(title="✏️ Modifier un cosmétique", description="\n".join(lines), color=COLOR)
+
+    def card(self, notice: str | None = None) -> discord.Embed:
+        theme = self.theme
+        item = next((i for i in theme.items if i.identifier == self.selected), None) if theme else None
+        label, emoji = TYPE_LABELS.get(self.selected_type, ("", "🎨"))
+        lines = []
+
+        if item is not None:
+            shop = f"{item.shop_price} pièces" if item.shop_price is not None else "pas en vente"
+            advent = f"{item.advent_price} pts" if item.advent_price is not None else "pas en vente"
+            lines += [
+                f"{emoji} **{item.name}** · {label}",
+                f"Identifiant : `{item.identifier}` · ID : `#{item.id}`",
+                f"Thème : {theme.label}",
+                f"💰 Boutique : {shop} · 🎄 Avent : {advent} · 👥 {item.owners} membre(s)",
+            ]
+
+            if not item.enabled:
+                lines.append("🚫 Désactivé")
+
+        if notice:
+            lines += ["", f"> {notice}"]
+
+        embed = discord.Embed(title="✏️ Modifier un cosmétique", description="\n".join(lines), color=COLOR)
+        embed.set_footer(text="Aperçu sur ta carte de profil (rien n'est équipé)")
+        return embed
+
+    async def show(self, interaction: discord.Interaction, *, notice: str | None = None) -> None:
+        """Met à jour le message (la réponse doit déjà être différée)."""
+        self.build()
+
+        if not self.selected:
+            await interaction.edit_original_response(embed=self.overview(notice), view=self, attachments=[])
+            return
+
+        embed = self.card(notice)
+        files = []
+        record = await fetch_cosmetic(self.cog, interaction.guild_id, self.selected)
+
+        if record is not None:
+            file = await render_existing_preview(self.cog, interaction, record)
+
+            if file is not None:
+                embed.set_image(url="attachment://apercu-cosmetique.png")
+                files.append(file)
+
+        await interaction.edit_original_response(embed=embed, view=self, attachments=files)
+
+    async def on_theme(self, interaction: discord.Interaction) -> None:
+        self.theme_key = interaction.data["values"][0]
+        self.selected = None
+        self.build()
+        await interaction.response.edit_message(embed=self.overview(), view=self, attachments=[])
+
+    async def on_item(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        self.selected = interaction.data["values"][0]
+        item = next((i for i in self.theme.items if i.identifier == self.selected), None)
+        self.selected_type = item.cosmetic_type if item else ""
+        await self.show(interaction)
+
+    async def on_change_image(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ChangeImageModal(self))
+
+    async def on_rename(self, interaction: discord.Interaction) -> None:
+        record = await fetch_cosmetic(self.cog, interaction.guild_id, self.selected)
+
+        if record is None:
+            await interaction.response.send_message(embed=error_embed("Ce cosmétique n'existe plus."), ephemeral=True)
+            return
+
+        await interaction.response.send_modal(RenameModal(self, record))
+
+    async def on_preview(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        await self.show(interaction)
+
+
+async def render_existing_preview(cog: Any, interaction: discord.Interaction, record: Any) -> discord.File | None:
+    """Aperçu d'un cosmétique existant (son image actuelle) sur la carte de l'admin."""
+    image = None
+    asset_path = record["asset_path"]
+
+    if asset_path:
+        path = cog.assets_root / str(asset_path)
+
+        if path.is_file():
+            image = await asyncio.to_thread(path.read_bytes)
+
+    planned = PlannedCosmetic(
+        str(record["cosmetic_type"]), str(record["identifier"]), str(record["display_name"]),
+        image=image, value=record["value"],
+    )
+    return await render_preview(cog, interaction, [planned])
+
+
+async def open_browser(cog: Any, interaction: discord.Interaction) -> None:
+    from bot.shared.cosmetic_catalogue import group_by_theme, load_items
+    from bot.shared.panels import send_panel
+
+    themes = group_by_theme(await load_items(cog.get_pool(), interaction.guild_id))
+
+    if not themes:
+        await interaction.response.send_message(
+            embed=error_embed("Aucun cosmétique pour l'instant : crée-en un avec 🆕."), ephemeral=True
+        )
+        return
+
+    browser = CosmeticBrowser(cog, interaction.user.id, themes)
+    await send_panel(interaction, embed=browser.overview(), view=browser)

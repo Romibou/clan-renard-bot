@@ -310,7 +310,7 @@ Les images sont rangées dans `assets/profile/` (`badges/`, `backgrounds/`, `fra
 |---|---|
 | 🆕 **Créer un cosmétique** | Un cosmétique avec son image envoyée depuis ton PC, aperçu sur ta carte |
 | 📦 **Créer une collection** | Fond, cadre, badge et effet d’un même thème en une fois (+ un titre), avec aperçu et confirmation |
-| 🔁 **Changer l’image** | Remplace l’image d’un cosmétique existant |
+| ✏️ **Modifier un cosmétique** | Choisir un thème puis un cosmétique, voir sa fiche et son aperçu, changer son image ou le renommer |
 | ❔ **Guide des images** | Rappel des formats attendus pour chaque type |
 | 🎁 **Distribuer** | Donne un cosmétique à un membre (plusieurs menus au-delà de 25 cosmétiques) |
 | 📚 **Catalogue** | Tous les cosmétiques par thème, avec ID, nom affiché, identifiant, prix et nombre de membres qui l’ont |
@@ -338,7 +338,7 @@ Le formulaire demande :
 4. **Image** : envoyée depuis ton PC (sauf pour un titre).
 5. **Texte du titre / valeur d’effet** : le texte d’un titre (obligatoire pour un titre), ou `snow` pour un effet neige.
 
-Le bot prépare l’image, crée le cosmétique, puis t’envoie un **aperçu de ta carte de profil avec ce cosmétique** (rien n’est équipé pour de vrai), son **ID** et les étapes suivantes. Un identifiant qui existe déjà est refusé : pour modifier un cosmétique, utilise 🔁 **Changer l’image**.
+Le bot prépare l’image, crée le cosmétique, puis t’envoie un **aperçu de ta carte de profil avec ce cosmétique** (rien n’est équipé pour de vrai), son **ID** et les étapes suivantes. Un identifiant qui existe déjà est refusé : pour modifier un cosmétique, utilise ✏️ **Modifier un cosmétique**.
 
 ### 📦 Créer une collection
 
@@ -355,9 +355,18 @@ Avant de créer quoi que ce soit, il affiche **la liste de ce qu’il a compris*
 
 La collection apparaît dans `/collections` dès qu’elle a au moins 2 objets.
 
-### 🔁 Changer l’image
+### ✏️ Modifier un cosmétique
 
-Identifiant du cosmétique (visible dans 📚 Catalogue) + nouvelle image. L’image est préparée selon le type du cosmétique et remplace l’ancienne tout de suite : **les membres qui l’ont gardent le cosmétique** et voient la nouvelle image. Fonctionne aussi pour les anciens cosmétiques dont l’image est un fichier du projet.
+Rien à taper : tout se fait avec des menus.
+
+1. **Choisis le thème** (🎃 Halloween 2026, 🌋 Volcan 2026…).
+2. **Choisis le cosmétique** de ce thème (Fond, Cadre, Badge, Effet, Titre).
+3. Sa **fiche** s’affiche : nom, type, identifiant, ID, thème, prix en boutique et dans la boutique de l’Avent, nombre de membres qui l’ont, et **l’aperçu sur ta carte de profil**. Avec trois boutons :
+   - **🔁 Changer l’image** : envoie juste le nouveau fichier. Il est préparé selon le type du cosmétique (mêmes règles qu’à la création) et remplace l’ancien tout de suite : **les membres qui l’ont gardent le cosmétique** et voient la nouvelle image. Grisé pour un titre ;
+   - **✏️ Renommer** : le nom affiché, et aussi le texte pour un titre ou la valeur d’un effet (`snow`) ;
+   - **👁️ Aperçu** : revoir le rendu.
+
+La fiche se met à jour après chaque changement. Fonctionne aussi pour les anciens cosmétiques dont l’image est un fichier du projet (la nouvelle image est alors gardée dans la base de données).
 
 ### Où sont gardées les images ?
 

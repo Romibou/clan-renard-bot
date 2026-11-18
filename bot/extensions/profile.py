@@ -1434,18 +1434,19 @@ class ProfileAdminView(
         await interaction.response.send_modal(CollectionModal(self.cog))
 
     @discord.ui.button(
-        label="Changer l'image",
-        emoji="🔁",
+        label="Modifier un cosmétique",
+        emoji="✏️",
         style=discord.ButtonStyle.secondary,
     )
-    async def replace_image_button(
+    async def edit_cosmetic_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        from bot.features.cosmetics_studio import ReplaceImageModal
+        # Thème → cosmétique → fiche (changer l'image, renommer, aperçu).
+        from bot.features.cosmetics_studio import open_browser
 
-        await interaction.response.send_modal(ReplaceImageModal(self.cog))
+        await open_browser(self.cog, interaction)
 
     @discord.ui.button(
         label="Guide des images",
