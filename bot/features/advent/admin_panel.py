@@ -1143,6 +1143,39 @@ async def open_catchup_days_modal(
     )
 
 
+async def open_announcement_texts(
+    interaction: discord.Interaction,
+) -> None:
+    """Panneau des textes personnalisés des annonces quotidiennes."""
+    from bot.features.advent.announcement_texts_panel import open_texts_panel
+
+    cog = get_cog(
+        interaction,
+        "AdventAdminCommands",
+    )
+
+    if cog is None or interaction.guild_id is None:
+        await send_error(
+            interaction,
+            "Le module administratif est indisponible.",
+        )
+        return
+
+    try:
+        campaign = await cog._campaign(
+            interaction.guild_id,
+            None,
+        )
+    except Exception as error:
+        await send_error(
+            interaction,
+            str(error),
+        )
+        return
+
+    await open_texts_panel(interaction, campaign)
+
+
 RESET_ALL_CONFIRMATION_WORD = "REINITIALISER"
 
 
@@ -1514,6 +1547,12 @@ class AdminActionSelect(discord.ui.Select):
                 emoji="🔕",
             ),
             discord.SelectOption(
+                label="Textes des annonces",
+                value="announcement_texts",
+                emoji="📝",
+                description="Titre, message, messages par jour, @everyone, aperçu.",
+            ),
+            discord.SelectOption(
                 label="Liste des récompenses",
                 value="reward_list",
                 emoji="🎁",
@@ -1595,6 +1634,10 @@ class AdminActionSelect(discord.ui.Select):
 
         if action == "reset_all":
             await start_reset_all(interaction)
+            return
+
+        if action == "announcement_texts":
+            await open_announcement_texts(interaction)
             return
 
         if action == "catchup_days":

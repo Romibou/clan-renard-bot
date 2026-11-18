@@ -5,13 +5,17 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from bot.features.advent.announcement_texts import (
+    AnnouncementTexts,
+    AnnouncementTextsRepository,
+    build_announcement,
+)
 from bot.features.advent.models import AdventCampaign
 from bot.features.advent.service import AdventService
 from bot.features.advent.transaction_repository import (
     AdventTransactionRepository,
 )
 from bot.features.advent.views import AdventView
-from bot.shared.embeds import base_embed
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +40,9 @@ class AdventAnnouncementTasks(commands.Cog):
         self.bot = bot
         self.service = service
         self.transactions = transactions
+        self.texts = AnnouncementTextsRepository(
+            lambda: bot.database.require_pool()
+        )
 
         self.check_announcements.start()
 
@@ -145,54 +152,25 @@ class AdventAnnouncementTasks(commands.Cog):
                 campaign.announcement_role_id
             )
 
-        mention = (
-            role.mention
-            if role is not None
-            else None
-        )
+        # Textes réglés dans /avent-admin (texte d'origine par défaut).
+        try:
+            texts = await self.texts.get(campaign.id)
+        except Exception:
+            logger.exception("Textes d'annonce illisibles : texte d'origine utilisé")
+            texts = AnnouncementTexts()
 
-        description = (
-            f"La case **n°{current_day}** du calendrier "
-            f"de **Clan Renard** est maintenant disponible !\n\n"
-            "Clique sur le bouton ci-dessous pour ouvrir ta case "
-            "personnelle et découvrir ta récompense."
-        )
-
-        if current_day == 24:
-            description = (
-                "La grande case **n°24** est enfin disponible ! 🎉\n\n"
-                "Clique sur le bouton ci-dessous pour découvrir "
-                "la dernière surprise du calendrier de Clan Renard."
-            )
-
-        embed = base_embed(
-            (
-                f"🎄 Jour {current_day} — "
-                f"{campaign.title}"
-            ),
-            description,
-        )
-        embed.add_field(
-            name="Ouverture",
-            value=(
-                f"Disponible depuis "
-                f"**{campaign.opening_hour:02d}:00** "
-                f"dans le fuseau `{campaign.timezone}`."
-            ),
-            inline=False,
+        announcement = build_announcement(
+            campaign=campaign,
+            day=current_day,
+            texts=texts,
+            guild_name=guild.name,
+            role=role,
         )
 
         try:
             message = await channel.send(
-                content=mention,
-                embed=embed,
+                **announcement,
                 view=AdventView(),
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False,
-                    users=False,
-                    roles=role is not None,
-                    replied_user=False,
-                ),
             )
         except discord.HTTPException:
             await self.transactions.cancel_announcement_reservation(

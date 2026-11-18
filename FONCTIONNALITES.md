@@ -431,6 +431,18 @@ Conditions : campagne activée, annonces activées (**Activer les annonces**, av
 
 **Publier le panneau public** poste un panneau fixe avec les mêmes boutons, par exemple à épingler.
 
+### Textes personnalisés (« 📝 Textes des annonces »)
+
+Dans le menu de `/avent-admin`, **Textes des annonces** ouvre un panneau pour écrire les annonces sans toucher au code. Sans réglage, le texte d’origine est utilisé.
+
+- **✏️ Texte par défaut** : le titre et le message de chaque jour, le message de la dernière case (24), et l’encart « Ouverture » affiché ou masqué. Un champ vidé reprend le texte d’origine.
+- **📅 Message spécial d’un jour** : choisis un jour dans le menu et écris son message (par exemple « Bonne Saint-Nicolas ! 🎅 » le 6). Il remplace le message par défaut ce jour-là ; vide = message par défaut. Les jours concernés sont marqués ✏️.
+- **📢 Jours @everyone** : par exemple `1, 24`. Ces jours-là, l’annonce mentionne @everyone au lieu du rôle habituel. Le bot doit avoir la permission « Mentionner @everyone » (le panneau prévient sinon).
+- **👁️ Aperçu d’un jour** : l’annonce exacte de ce jour (titre, message, mention), visible par toi seul et sans notifier personne.
+- **🔄 Textes d’origine** : tout remettre comme au départ (deux clics pour confirmer).
+
+Variables : `{jour}`, `{jours_restants}` (jours avant la case 24), `{titre}` (titre de la campagne), `{serveur}`, `{heure}` (heure d’ouverture). Les textes sont propres à chaque campagne (année).
+
 ## `/avent-admin` : toutes les actions
 
 - **Campagne** : Configuration, Initialiser une campagne, Activer ou désactiver, Modifier le canal, Modifier le fuseau, Modifier l’heure d’ouverture.
