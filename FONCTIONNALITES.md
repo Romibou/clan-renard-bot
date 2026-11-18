@@ -257,6 +257,7 @@ Vend des **rôles Discord** et des **cosmétiques de profil** contre des pièces
 - Au-delà de 25 articles, des boutons **◀ Page 1/3 ▶** apparaissent (250 articles au maximum).
 - Un rôle acheté puis retiré peut être récupéré gratuitement avec **Restaurer le rôle**.
 - Un cosmétique acheté arrive dans l’inventaire de `/profil`.
+- **👁️ Essayer** (cosmétiques) : montre au membre **sa propre carte de profil avec le cosmétique**, en privé, avant d’acheter. Rien n’est acheté ni équipé, et ça marche même sans assez de pièces. Aussi dans la boutique de l’Avent.
 
 ## `/boutique-admin`
 
@@ -483,7 +484,7 @@ Si un rôle, des pièces, de l’XP ou un cosmétique ne peuvent pas être vers�
 
 - Les **points de l’Avent** sont propres à la campagne et se dépensent dans la boutique de l’Avent. Le calendrier affiche les points gagnés ; la boutique affiche le solde restant.
 - Le **classement** de l’Avent range les membres par cases ouvertes, puis par points. Les membres partis sont masqués.
-- La **boutique de l’Avent** vend des rôles et des cosmétiques contre des points, avec éventuellement un nombre minimum de cases ouvertes. Elle a des pages au-delà de 25 articles. Un rôle acheté puis retiré peut être restauré gratuitement.
+- La **boutique de l’Avent** (avec le bouton **👁️ Essayer** pour les cosmétiques) vend des rôles et des cosmétiques contre des points, avec éventuellement un nombre minimum de cases ouvertes. Elle a des pages au-delà de 25 articles. Un rôle acheté puis retiré peut être restauré gratuitement.
 - Articles : `/avent-admin` → **Ajouter un rôle à la boutique**, **Ajouter un cosmétique à la boutique**, **Gérer les articles de la boutique**.
 - **Gérer les articles de la boutique** affiche la liste des articles avec leur **identifiant**, leur prix, leur type et leurs cases minimum. Choisis un article dans le menu, puis :
   - **✏️ Modifier** : formulaire prérempli (nom affiché pour un rôle, prix, cases minimum, emoji, message après l’achat) ;

@@ -134,6 +134,29 @@ class ShopBuyButton(discord.ui.Button):
         await self.shop_view.buy(interaction)
 
 
+class ShopTryButton(discord.ui.Button):
+    """👁️ Essayer : le cosmétique sur la carte du membre, avant d'acheter."""
+
+    def __init__(self, shop_view) -> None:
+        self.shop_view = shop_view
+
+        super().__init__(
+            label="Essayer",
+            emoji="👁️",
+            style=discord.ButtonStyle.primary,
+            row=1,
+            disabled=True,
+        )
+
+    async def callback(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        from bot.features.cosmetics_studio import try_cosmetic
+
+        await try_cosmetic(interaction, self.shop_view.selected_cosmetic_id)
+
+
 class ShopRefreshButton(discord.ui.Button):
     def __init__(self, shop_view: AdventShopView) -> None:
         self.shop_view = shop_view
@@ -169,10 +192,13 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
 
         self.product_select = ShopProductSelect(self)
         self.buy_button = ShopBuyButton(self)
+        self.try_button = ShopTryButton(self)
         self.refresh_button = ShopRefreshButton(self)
+        self.selected_cosmetic_id: int | None = None
 
         self.add_item(self.product_select)
         self.add_item(self.buy_button)
+        self.add_item(self.try_button)
         self.add_item(self.refresh_button)
 
         self.setup_pagination(row=2)
@@ -214,6 +240,7 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
                 )
             ]
             self.product_select.disabled = True
+            self.try_button.disabled = True
             self.buy_button.disabled = True
             return
 
@@ -270,6 +297,15 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
             ),
             None,
         )
+
+        # 👁️ Essayer : seulement pour un cosmétique.
+        self.selected_cosmetic_id = (
+            int(selected_item["cosmetic_id"])
+            if selected_item is not None
+            and selected_item.get("cosmetic_id") is not None
+            else None
+        )
+        self.try_button.disabled = self.selected_cosmetic_id is None
 
         if selected_item is None:
             self.buy_button.disabled = True

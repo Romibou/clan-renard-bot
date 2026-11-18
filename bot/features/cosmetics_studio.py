@@ -938,3 +938,49 @@ async def open_browser(cog: Any, interaction: discord.Interaction) -> None:
 
     browser = CosmeticBrowser(cog, interaction.user.id, themes)
     await send_panel(interaction, embed=browser.overview(), view=browser)
+
+
+
+# ============================================================
+# 👁️ ESSAYER AVANT D'ACHETER (boutiques)
+# ============================================================
+
+
+async def try_cosmetic(interaction: discord.Interaction, cosmetic_id: int | None) -> None:
+    """Montre au membre SA carte de profil avec le cosmétique, sans rien acheter ni équiper."""
+    profile = interaction.client.get_cog("ProfileCog")
+
+    if profile is None or cosmetic_id is None:
+        await interaction.response.send_message(
+            embed=error_embed("L'essai n'est pas disponible pour cet article."), ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    record = await profile.get_pool().fetchrow(
+        """
+        SELECT id, identifier, cosmetic_type, display_name, value, asset_path, enabled
+        FROM profile_cosmetics WHERE guild_id = $1 AND id = $2
+        """,
+        interaction.guild_id,
+        int(cosmetic_id),
+    )
+
+    if record is None:
+        await interaction.followup.send(embed=error_embed("Ce cosmétique n'existe plus."), ephemeral=True)
+        return
+
+    preview = await render_existing_preview(profile, interaction, record)
+
+    if preview is None:
+        await interaction.followup.send(embed=error_embed("L'aperçu n'a pas pu être créé, réessaie."), ephemeral=True)
+        return
+
+    label, emoji = TYPE_LABELS.get(str(record["cosmetic_type"]), ("Cosmétique", "🎨"))
+    embed = discord.Embed(
+        title=f"👁️ Essai : {record['display_name']}",
+        description=f"{emoji} {label} sur **ta** carte de profil.\n-# Rien n'est acheté ni équipé : c'est juste pour voir.",
+        color=COLOR,
+    )
+    embed.set_image(url="attachment://apercu-cosmetique.png")
+    await interaction.followup.send(embed=embed, file=preview, ephemeral=True)
