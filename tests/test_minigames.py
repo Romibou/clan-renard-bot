@@ -317,7 +317,8 @@ def bingo_record(**changes):
 
 def test_bingo_embed_hides_secret_until_end() -> None:
     running = bingo_module.build_bingo_embed(bingo_record(), guesses=12, players=4)
-    assert "77" not in running.description
+    # Le nombre secret ne doit pas apparaître (l'heure de fin peut contenir « 77 »).
+    assert "**77**" not in running.description
     assert "Manche **2/3**" in running.description
     assert "<@10>" in running.description and "**42**" in running.description
 

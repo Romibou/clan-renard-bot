@@ -59,3 +59,42 @@ async def test_channel_menu_refuses_unknown_channel(monkeypatch) -> None:
 
     await select.callback(SimpleNamespace(guild=SimpleNamespace(get_channel=lambda _id: None)))
     assert errors == ["Choisis un salon textuel classique."]
+
+
+def shop_item(identifier, name, price, role_id=None, min_openings=0, emoji="🎁"):
+    return {
+        "identifier": identifier,
+        "display_name": name,
+        "emoji": emoji,
+        "price": price,
+        "min_openings": min_openings,
+        "role_id": role_id,
+    }
+
+
+def test_shop_item_line_shows_identifier() -> None:
+    line = admin_panel.shop_item_line(shop_item("role-noel-2026", "Renard des neiges", 200, role_id=5, min_openings=24))
+    assert line == "`role-noel-2026` · 🎁 **Renard des neiges** · 200 pts · rôle · 24 cases min."
+    assert "cosmétique" in admin_panel.shop_item_line(shop_item("badge-snow", "Badge", 125))
+
+
+async def test_shop_delete_needs_selection_then_confirmation(monkeypatch) -> None:
+    calls: list = []
+
+    async def fake_invoke(interaction, cog, name, *args):
+        calls.append((cog, name, args))
+
+    monkeypatch.setattr(admin_panel, "invoke_command", fake_invoke)
+    view = admin_panel.ShopDeleteView([shop_item("role-noel-2026", "Renard", 200, role_id=5)], owner_id=1)
+    assert len(view.children) == 1  # pas de bouton tant que rien n'est choisi
+
+    edits: list = []
+
+    async def edit_message(**kwargs):
+        edits.append(kwargs)
+
+    await view.on_select(SimpleNamespace(data={"values": ["role-noel-2026"]}, response=SimpleNamespace(edit_message=edit_message)))
+    assert len(view.children) == 2 and calls == []
+
+    await view.on_confirm(SimpleNamespace())
+    assert calls == [("AdventShop", "delete_shop_item", ("role-noel-2026", None))]

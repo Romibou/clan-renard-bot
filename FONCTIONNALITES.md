@@ -423,6 +423,7 @@ Si un rôle, des pièces, de l’XP ou un cosmétique ne peuvent pas être vers�
 - Le **classement** de l’Avent range les membres par cases ouvertes, puis par points. Les membres partis sont masqués.
 - La **boutique de l’Avent** vend des rôles et des cosmétiques contre des points, avec éventuellement un nombre minimum de cases ouvertes. Elle a des pages au-delà de 25 articles. Un rôle acheté puis retiré peut être restauré gratuitement.
 - Articles : `/avent-admin` → **Ajouter un rôle à la boutique**, **Ajouter un cosmétique à la boutique**, **Supprimer un article de la boutique**.
+- **Supprimer un article de la boutique** affiche d’abord la liste des articles avec leur **identifiant** (utile si tu l’as oublié : reconfigurer un article avec le même identifiant le remplace), puis on choisit l’article à retirer dans un menu et on confirme.
 
 ## Annonces quotidiennes
 

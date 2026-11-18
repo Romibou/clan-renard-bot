@@ -1143,6 +1143,152 @@ async def open_catchup_days_modal(
     )
 
 
+def shop_item_line(item: Any) -> str:
+    """« `role-noel-2026` · 🦊 Renard des neiges · 200 pts · rôle · 24 cases min. »"""
+    kind = "rôle" if item["role_id"] else "cosmétique"
+    parts = [
+        f"`{item['identifier']}`",
+        f"{item['emoji'] or ''} **{item['display_name']}**".strip(),
+        f"{item['price']} pts",
+        kind,
+    ]
+
+    if item["min_openings"]:
+        parts.append(f"{item['min_openings']} cases min.")
+
+    return " · ".join(parts)
+
+
+class ShopDeleteView(discord.ui.View):
+    """Choisir l'article à retirer dans la liste, puis confirmer."""
+
+    def __init__(self, items: list[Any], owner_id: int) -> None:
+        super().__init__(timeout=300)
+        self.items = {str(item["identifier"]): item for item in items}
+        self.owner_id = owner_id
+        self.selected: str | None = None
+        self.build()
+
+    def build(self) -> None:
+        self.clear_items()
+        select = discord.ui.Select(
+            placeholder="Choisis l'article à retirer…",
+            options=[
+                discord.SelectOption(
+                    label=str(item["display_name"])[:100],
+                    value=identifier[:100],
+                    description=f"{identifier} · {item['price']} pts"[:100],
+                    default=identifier == self.selected,
+                )
+                for identifier, item in list(self.items.items())[:25]
+            ],
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+
+        if self.selected:
+            confirm = discord.ui.Button(
+                label=f"Retirer « {self.items[self.selected]['display_name']} »"[:80],
+                emoji="🗑️",
+                style=discord.ButtonStyle.danger,
+            )
+            confirm.callback = self.on_confirm
+            self.add_item(confirm)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    async def on_select(self, interaction: discord.Interaction) -> None:
+        self.selected = interaction.data["values"][0]
+        self.build()
+        await interaction.response.edit_message(view=self)
+
+    async def on_confirm(self, interaction: discord.Interaction) -> None:
+        if self.selected is None:
+            return
+
+        self.stop()
+        await invoke_command(
+            interaction,
+            "AdventShop",
+            "delete_shop_item",
+            self.selected,
+            None,
+        )
+
+
+async def open_shop_delete(
+    interaction: discord.Interaction,
+) -> None:
+    """Liste les articles de la boutique de l'Avent avec leur identifiant."""
+    shop = get_cog(
+        interaction,
+        "AdventShop",
+    )
+
+    if shop is None or interaction.guild_id is None:
+        await send_error(
+            interaction,
+            "La boutique de l'Avent est indisponible.",
+        )
+        return
+
+    campaign = await shop.get_campaign(guild_id=interaction.guild_id)
+
+    if campaign is None:
+        await send_error(
+            interaction,
+            "Crée d'abord une campagne du calendrier de l'Avent.",
+        )
+        return
+
+    items = list(
+        await shop.get_pool().fetch(
+            """
+            SELECT identifier, display_name, emoji, price, min_openings, role_id
+            FROM advent_shop_items_v2
+            WHERE campaign_id = $1
+              AND enabled = TRUE
+            ORDER BY price DESC, identifier
+            """,
+            int(campaign["id"]),
+        )
+    )
+
+    if not items:
+        await send_error(
+            interaction,
+            "La boutique de l'Avent est vide.",
+        )
+        return
+
+    lines = [shop_item_line(item) for item in items]
+    description = "\n".join(lines)
+
+    if len(description) > 3800:
+        description = description[:3800] + "\n…"
+
+    embed = discord.Embed(
+        title=f"🛍️ Articles de la boutique de l'Avent {campaign['year']}",
+        description=(
+            f"{description}\n\n"
+            "L'identifiant (`role-noel-2026`…) sert à modifier un article : "
+            "le reconfigurer avec le même identifiant le remplace.\n"
+            "Pour en retirer un, choisis-le ci-dessous puis confirme."
+        ),
+        color=discord.Color.from_rgb(226, 104, 161),
+    )
+
+    if len(items) > 25:
+        embed.set_footer(text="Seuls les 25 premiers articles sont dans le menu.")
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=ShopDeleteView(items, interaction.user.id),
+        ephemeral=True,
+    )
+
+
 async def open_announcement_texts(
     interaction: discord.Interaction,
 ) -> None:
@@ -1640,6 +1786,10 @@ class AdminActionSelect(discord.ui.Select):
             await open_announcement_texts(interaction)
             return
 
+        if action == "shop_delete":
+            await open_shop_delete(interaction)
+            return
+
         if action == "catchup_days":
             await open_catchup_days_modal(interaction)
             return
@@ -1797,7 +1947,6 @@ class AdminActionSelect(discord.ui.Select):
             "reward_points",
             "reward_random",
             "reward_delete",
-            "shop_delete",
         }
 
         if action in modal_actions:
