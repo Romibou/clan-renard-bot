@@ -592,7 +592,13 @@ Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec t
 | 🎨 **Couleurs** | Couleur du titre, du sous-titre, du texte et du contour de l’avatar, assombrissement du fond (0 à 90 %) |
 | 📐 **Disposition** | Centre (avatar en haut, comme Koya), gauche ou droite (avatar sur le côté, texte à côté) |
 | 🃏 **Carte : oui / non** | Message seul, sans image |
+| 👁️ **Aperçu réel** | Le message complet (texte et carte) exactement comme les membres le verront, visible par toi seul |
+| 🧩 **Modèles** | Enregistrer l’apparence actuelle sous un nom, charger un modèle (l’aperçu se met à jour), supprimer |
 | 📨 **Tester dans le salon** | Envoie un vrai message avec ton profil, pour voir le rendu final |
+
+Chaque changement est enregistré tout de suite (si l’envoi automatique est activé, il s’applique dès la prochaine arrivée).
+
+**Modèles** : un modèle garde l’apparence (message, textes, couleurs, disposition, assombrissement, carte oui/non et fond), pas le salon ni l’activation. Un admin crée la carte et l’enregistre, un autre la charge depuis 🧩 Modèles et regarde l’aperçu. Un modèle s’applique aux arrivées ou aux départs, selon le menu du haut. 25 modèles maximum.
 
 **Variables** (message et carte) : `{membre}` (mention dans le message, nom sur la carte), `{nom}` (nom affiché), `{pseudo}` (nom d’utilisateur), `{serveur}`, `{nombre}` (nombre de membres).
 

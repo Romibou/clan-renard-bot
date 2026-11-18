@@ -182,3 +182,106 @@ async def test_send_greeting(monkeypatch) -> None:
     monkeypatch.setattr(cog, "send_greeting", fake_send)
     await cog.greet(bot_member, bienvenue.JOIN)
     assert calls == []  # les bots ne sont pas accueillis
+
+
+# ---------------------------------------------------------------
+# Modèles et aperçu
+# ---------------------------------------------------------------
+
+
+def test_design_keeps_look_not_channel() -> None:
+    settings = bienvenue.merge_settings(bienvenue.JOIN, {"channel_id": 3, "enabled": True, "title": "Yo"})
+    design = bienvenue.design_of(settings)
+
+    assert design["title"] == "Yo" and "channel_id" not in design and "enabled" not in design
+    assert set(design) == set(bienvenue.DESIGN_KEYS)
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.edits: list = []
+        self.sent: list = []
+
+    def is_done(self) -> bool:
+        return False
+
+    async def edit_message(self, **kwargs):
+        self.edits.append(kwargs)
+
+    async def send_message(self, *args, **kwargs):
+        self.sent.append(kwargs)
+
+    async def send_modal(self, modal):
+        self.sent.append(modal)
+
+
+async def test_load_template_applies_design_and_refreshes() -> None:
+    saved: list = []
+
+    class Cog:
+        async def get_template(self, guild_id, template_id):
+            return {
+                "name": "Noël",
+                "settings": {"title": "Joyeux Noël", "layout": "gauche", "channel_id": 999},
+                "background": b"fond",
+            }
+
+        async def save_settings(self, *args, **kwargs):
+            saved.append(kwargs)
+
+    guild = SimpleNamespace(id=1, get_channel=lambda _id: None)
+    origin = SimpleNamespace(user=SimpleNamespace(id=7), guild=guild)
+    panel = bienvenue.WelcomePanel(Cog(), origin, bienvenue.JOIN)
+    panel.settings = bienvenue.merge_settings(bienvenue.JOIN, {"channel_id": 3, "enabled": True})
+    refreshed: list = []
+
+    async def fake_refresh(interaction, notice=None):
+        refreshed.append(notice)
+
+    panel.refresh = fake_refresh
+    view = bienvenue.TemplatesView(panel, [{"id": 4, "name": "Noël", "author": "Romi"}])
+    assert len(view.children) == 3
+
+    interaction = SimpleNamespace(guild_id=1, data={"values": ["4"]}, response=FakeResponse())
+    await view.load(interaction)
+
+    assert panel.settings["title"] == "Joyeux Noël" and panel.settings["layout"] == "gauche"
+    assert panel.settings["channel_id"] == 3 and panel.settings["enabled"]  # salon gardé
+    assert panel.background == b"fond" and saved[0]["update_background"] is True
+    assert refreshed == ["📂 Modèle chargé : Noël"]
+
+
+def test_template_modal_and_empty_view() -> None:
+    panel = SimpleNamespace(kind=bienvenue.LEAVE, owner_id=7, settings={}, background=None)
+    view = bienvenue.TemplatesView(panel, [])
+    assert len(view.children) == 1  # juste « Enregistrer »
+    check_modal(bienvenue.TemplateNameModal(panel))
+
+
+async def test_real_preview_is_private(monkeypatch) -> None:
+    class Cog:
+        async def render_for(self, member, settings, background):
+            return png_bytes((10, 10))
+
+    guild = SimpleNamespace(id=1, name="Clan Renard", member_count=10, members=[], get_channel=lambda _id: None)
+    user = SimpleNamespace(id=7, mention="<@7>", display_name="Romi", name="romi", guild=guild)
+    panel = bienvenue.WelcomePanel(Cog(), SimpleNamespace(user=user, guild=guild), bienvenue.JOIN)
+    panel.settings = bienvenue.merge_settings(bienvenue.JOIN, None)
+    sent: list = []
+
+    async def defer(**kwargs):
+        return None
+
+    async def followup_send(**kwargs):
+        sent.append(kwargs)
+
+    interaction = SimpleNamespace(
+        user=user,
+        response=SimpleNamespace(defer=defer),
+        followup=SimpleNamespace(send=followup_send),
+    )
+    await panel.on_preview(interaction)
+
+    assert sent[0]["ephemeral"] and "Bienvenue <@7> !" in sent[0]["content"]
+    assert sent[0]["file"].filename == "apercu.png"
+    assert sent[0]["allowed_mentions"].users is False

@@ -290,6 +290,135 @@ class BackgroundModal(PanelModal):
 
 
 # ============================================================
+# MODÈLES
+# ============================================================
+
+# Ce qu'un modèle garde : l'apparence, pas le salon ni l'activation.
+DESIGN_KEYS = (
+    "message",
+    "title",
+    "subtitle",
+    "text",
+    "layout",
+    "overlay",
+    "title_color",
+    "subtitle_color",
+    "text_color",
+    "border_color",
+    "card",
+)
+MAX_TEMPLATES = 25
+
+
+def design_of(settings: dict[str, Any]) -> dict[str, Any]:
+    return {key: settings[key] for key in DESIGN_KEYS if key in settings}
+
+
+class TemplateNameModal(discord.ui.Modal, title="💾 Enregistrer comme modèle"):
+    def __init__(self, panel: WelcomePanel) -> None:
+        super().__init__(timeout=600)
+        self.panel = panel
+        self.name = labeled_input(
+            self, "Nom du modèle", "", required=True, max_length=60,
+            description="Un modèle du même nom est remplacé.",
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        name = self.name.value.strip()
+        cog = self.panel.cog
+        existing = {template["name"] for template in await cog.list_templates(interaction.guild_id)}
+
+        if name not in existing and len(existing) >= MAX_TEMPLATES:
+            await interaction.response.send_message(
+                embed=error_embed(f"{MAX_TEMPLATES} modèles maximum : supprimes-en un d'abord."), ephemeral=True
+            )
+            return
+
+        await cog.save_template(
+            interaction.guild_id, name, design_of(self.panel.settings), self.panel.background, interaction.user.id
+        )
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"💾 Modèle **{name}** enregistré (textes, couleurs, disposition et fond). "
+                "Un autre admin peut le charger depuis 🧩 **Modèles**.",
+                color=SUCCESS_COLOR,
+            ),
+            view=None,
+        )
+
+
+class TemplatesView(discord.ui.View):
+    def __init__(self, panel: WelcomePanel, templates: list[dict[str, Any]]) -> None:
+        super().__init__(timeout=300)
+        self.panel = panel
+
+        if templates:
+            def options(emoji: str) -> list[discord.SelectOption]:
+                return [
+                    discord.SelectOption(
+                        label=template["name"][:100],
+                        value=str(template["id"]),
+                        emoji=emoji,
+                        description=f"Par {template['author']}"[:100] if template.get("author") else None,
+                    )
+                    for template in templates
+                ]
+
+            load = discord.ui.Select(placeholder="📂 Charger un modèle (avec aperçu)…", options=options("📄"))
+            load.callback = self.load
+            self.add_item(load)
+
+            delete = discord.ui.Select(placeholder="🗑️ Supprimer un modèle…", options=options("🗑️"))
+            delete.callback = self.delete
+            self.add_item(delete)
+
+        save = discord.ui.Button(
+            label=f"Enregistrer l'apparence actuelle ({KIND_NAMES[panel.kind]})",
+            emoji="💾",
+            style=discord.ButtonStyle.success,
+        )
+        save.callback = self.save
+        self.add_item(save)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.panel.owner_id
+
+    async def load(self, interaction: discord.Interaction) -> None:
+        template = await self.panel.cog.get_template(interaction.guild_id, int(interaction.data["values"][0]))
+
+        if template is None:
+            await interaction.response.edit_message(embed=error_embed("Ce modèle n'existe plus."), view=None)
+            return
+
+        self.panel.settings.update(design_of(template["settings"]))
+        self.panel.background = template["background"]
+        self.panel.background_changed = True
+        await self.panel.save()
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"📂 Modèle **{template['name']}** appliqué aux {KIND_NAMES[self.panel.kind]}. "
+                "Regarde l'aperçu dans le panneau.",
+                color=SUCCESS_COLOR,
+            ),
+            view=None,
+        )
+        await self.panel.refresh(None, notice=f"📂 Modèle chargé : {template['name']}")
+
+    async def delete(self, interaction: discord.Interaction) -> None:
+        name = await self.panel.cog.delete_template(interaction.guild_id, int(interaction.data["values"][0]))
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                description=f"🗑️ Modèle **{name}** supprimé." if name else "Ce modèle n'existait plus.",
+                color=SUCCESS_COLOR,
+            ),
+            view=None,
+        )
+
+    async def save(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(TemplateNameModal(self.panel))
+
+
+# ============================================================
 # PANNEAU
 # ============================================================
 
@@ -298,6 +427,7 @@ class WelcomePanel(discord.ui.View):
     def __init__(self, cog: BienvenueCog, interaction: discord.Interaction, kind: str) -> None:
         super().__init__(timeout=600)
         self.cog = cog
+        self.origin = interaction
         self.owner_id = interaction.user.id
         self.guild: discord.Guild = interaction.guild
         self.kind = kind
@@ -357,17 +487,24 @@ class WelcomePanel(discord.ui.View):
 
         return embed
 
-    async def refresh(self, interaction: discord.Interaction, *, notice: str | None = None) -> None:
+    async def refresh(self, interaction: discord.Interaction | None, *, notice: str | None = None) -> None:
+        """interaction None : mise à jour depuis un autre message (modèles)."""
         self.build()
         files = []
+        user = (interaction or self.origin).user
 
         if self.settings["card"]:
-            png = await self.cog.render_for(interaction.user, self.settings, self.background)
+            png = await self.cog.render_for(user, self.settings, self.background)
             files.append(discord.File(io.BytesIO(png), filename="apercu.png"))
 
         kwargs = {"embed": self.embed(notice), "attachments": files, "view": self}
 
-        if interaction.response.is_done():
+        if interaction is None:
+            try:
+                await self.origin.edit_original_response(**kwargs)
+            except discord.HTTPException:
+                LOGGER.warning("Panneau de bienvenue expiré : relance /bienvenue-admin")
+        elif interaction.response.is_done():
             await interaction.edit_original_response(**kwargs)
         else:
             await interaction.response.edit_message(**kwargs)
@@ -403,6 +540,8 @@ class WelcomePanel(discord.ui.View):
         self.button("Couleurs", "🎨", self.on_style, row=1)
         self.button(f"Disposition : {self.settings.get('layout', 'centre')}", "📐", self.on_layout, row=2)
         self.button(f"Carte : {'oui' if self.settings.get('card', True) else 'non'}", "🃏", self.on_card, row=2)
+        self.button("Aperçu réel", "👁️", self.on_preview, row=2)
+        self.button("Modèles", "🧩", self.on_templates, row=2)
         self.button("Tester dans le salon", "📨", self.on_test, row=2)
 
     # -------- actions --------
@@ -457,6 +596,39 @@ class WelcomePanel(discord.ui.View):
         self.settings["card"] = not self.settings["card"]
         await self.save()
         await self.refresh(interaction)
+
+    async def on_preview(self, interaction: discord.Interaction) -> None:
+        """Le message exactement comme les membres le verront, visible par toi seul."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        content = fill_variables(self.settings["message"], interaction.user)[:2000]
+        kwargs: dict[str, Any] = {
+            "content": f"-# 👁️ Aperçu ({KIND_NAMES[self.kind]}), visible par toi seul\n{content}",
+            "allowed_mentions": discord.AllowedMentions.none(),
+            "ephemeral": True,
+        }
+
+        if self.settings["card"]:
+            png = await self.cog.render_for(interaction.user, self.settings, self.background)
+            kwargs["file"] = discord.File(io.BytesIO(png), filename="apercu.png")
+
+        await interaction.followup.send(**kwargs)
+
+    async def on_templates(self, interaction: discord.Interaction) -> None:
+        templates = await self.cog.list_templates(interaction.guild_id)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="🧩 Modèles de carte",
+                description=(
+                    "Un modèle garde l'apparence : textes, couleurs, disposition, assombrissement et fond "
+                    "(pas le salon ni l'activation). Charger un modèle l'applique aux "
+                    f"**{KIND_NAMES[self.kind]}** et met l'aperçu à jour."
+                    + ("" if templates else "\n\nAucun modèle pour l'instant.")
+                ),
+                color=COLOR,
+            ),
+            view=TemplatesView(self, templates),
+            ephemeral=True,
+        )
 
     async def on_test(self, interaction: discord.Interaction) -> None:
         if not self.settings["channel_id"]:
@@ -513,6 +685,20 @@ class BienvenueCog(commands.Cog):
                 background BYTEA,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (guild_id, kind)
+            )
+            """
+        )
+        await self.get_pool().execute(
+            """
+            CREATE TABLE IF NOT EXISTS welcome_templates (
+                id BIGSERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                name VARCHAR(60) NOT NULL,
+                settings JSONB NOT NULL,
+                background BYTEA,
+                created_by BIGINT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (guild_id, name)
             )
             """
         )
@@ -581,6 +767,76 @@ class BienvenueCog(commands.Cog):
             )
 
         self.cache.pop((guild_id, kind), None)
+
+    # -------- modèles --------
+
+    async def list_templates(self, guild_id: int) -> list[dict[str, Any]]:
+        records = await self.get_pool().fetch(
+            """
+            SELECT id, name, created_by
+            FROM welcome_templates
+            WHERE guild_id = $1
+            ORDER BY LOWER(name)
+            LIMIT 25
+            """,
+            guild_id,
+        )
+        guild = self.bot.get_guild(guild_id) if hasattr(self.bot, "get_guild") else None
+        result = []
+
+        for record in records:
+            member = guild.get_member(int(record["created_by"])) if guild else None
+            result.append(
+                {
+                    "id": int(record["id"]),
+                    "name": record["name"],
+                    "author": member.display_name if member else None,
+                }
+            )
+
+        return result
+
+    async def get_template(self, guild_id: int, template_id: int) -> dict[str, Any] | None:
+        record = await self.get_pool().fetchrow(
+            "SELECT name, settings, background FROM welcome_templates WHERE guild_id = $1 AND id = $2",
+            guild_id,
+            template_id,
+        )
+
+        if record is None:
+            return None
+
+        settings = record["settings"]
+        return {
+            "name": record["name"],
+            "settings": json.loads(settings) if isinstance(settings, str) else dict(settings),
+            "background": bytes(record["background"]) if record["background"] else None,
+        }
+
+    async def save_template(
+        self, guild_id: int, name: str, design: dict[str, Any], background: bytes | None, user_id: int
+    ) -> None:
+        await self.get_pool().execute(
+            """
+            INSERT INTO welcome_templates (guild_id, name, settings, background, created_by)
+            VALUES ($1, $2, $3::jsonb, $4, $5)
+            ON CONFLICT (guild_id, name)
+            DO UPDATE SET settings = EXCLUDED.settings, background = EXCLUDED.background,
+                          created_by = EXCLUDED.created_by, updated_at = NOW()
+            """,
+            guild_id,
+            name,
+            json.dumps(design, ensure_ascii=False),
+            background,
+            user_id,
+        )
+
+    async def delete_template(self, guild_id: int, template_id: int) -> str | None:
+        return await self.get_pool().fetchval(
+            "DELETE FROM welcome_templates WHERE guild_id = $1 AND id = $2 RETURNING name",
+            guild_id,
+            template_id,
+        )
 
     def permission_warning(self, guild: discord.Guild, channel_id: int | None) -> str | None:
         channel = guild.get_channel(channel_id or 0)
