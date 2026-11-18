@@ -209,7 +209,7 @@ def test_bought_role_can_be_restored_from_the_advent_shop() -> None:
         openings=0,
     )
     assert view.buy_button.disabled
-    assert view.buy_button.label == "Déjà acheté"
+    assert view.buy_button.label == "Déjà possédé"
 
 
 # ---------- Calendrier désactivé dans /avent-admin ----------

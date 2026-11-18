@@ -99,3 +99,37 @@ async def test_try_cosmetic_sends_private_preview(monkeypatch) -> None:
     no_profile = SimpleNamespace(client=SimpleNamespace(get_cog=lambda name: None), response=FakeResponse())
     await studio.try_cosmetic(no_profile, 7)
     assert no_profile.response.sent and no_profile.response.sent[0]["ephemeral"]
+
+
+# ---------------------------------------------------------------
+# Cosmétique déjà possédé (giveaway, distribution…) : affiché comme possédé
+# ---------------------------------------------------------------
+
+
+def test_owned_cosmetics_count_as_owned_in_shops() -> None:
+    items = [
+        permanent_item("frame-volcan-2026", "cosmetic", 20),
+        permanent_item("badge-volcan-2026", "cosmetic", 21),
+        permanent_item("role-vip", "role"),
+    ]
+    owned = shop.owned_cosmetic_item_ids(items, {20, 99})
+    assert owned == {items[0]["id"]}
+
+    view = shop.PermanentShopView(cog=SimpleNamespace(), owner_id=1, guild_id=1)
+    view.selected_identifier = "frame-volcan-2026"
+    view.update_components(items=items, purchased_item_ids=owned, wallet=10_000, level=50)
+    assert view.buy_button.disabled and view.buy_button.label == "Déjà possédé"
+    assert not view.try_button.disabled  # on peut toujours le regarder
+    statuses = [option.description for option in view.item_select.options]
+    assert "✅ Possédé" in statuses[0] and "Disponible" in statuses[1]
+
+
+async def test_fetch_owned_cosmetic_ids_is_safe() -> None:
+    async def fetch(query, guild_id, user_id):
+        return [{"cosmetic_id": 20}, {"cosmetic_id": 21}]
+
+    async def broken(*args):
+        raise RuntimeError("table absente")
+
+    assert await shop.fetch_owned_cosmetic_ids(SimpleNamespace(fetch=fetch), 1, 5) == {20, 21}
+    assert await shop.fetch_owned_cosmetic_ids(SimpleNamespace(fetch=broken), 1, 5) == set()

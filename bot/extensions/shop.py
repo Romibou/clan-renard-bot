@@ -98,6 +98,28 @@ async def send_ephemeral(
 # ============================================================
 
 
+def owned_cosmetic_item_ids(items: list, owned_cosmetic_ids: set[int]) -> set[int]:
+    """Articles cosmétiques dont le membre a déjà le cosmétique (giveaway, distribution, Avent…)."""
+    return {
+        int(item["id"])
+        for item in items
+        if item["cosmetic_id"] is not None and int(item["cosmetic_id"]) in owned_cosmetic_ids
+    }
+
+
+async def fetch_owned_cosmetic_ids(pool, guild_id: int, user_id: int) -> set[int]:
+    try:
+        records = await pool.fetch(
+            "SELECT cosmetic_id FROM profile_inventory WHERE guild_id = $1 AND user_id = $2",
+            guild_id,
+            user_id,
+        )
+    except Exception:
+        return set()
+
+    return {int(record["cosmetic_id"]) for record in records}
+
+
 class ShopItemSelect(discord.ui.Select):
     def __init__(self, shop_view: PermanentShopView) -> None:
         self.shop_view = shop_view
@@ -312,7 +334,7 @@ class PermanentShopView(PaginatedSelectMixin, discord.ui.View):
             minimum_level = int(item["minimum_level"])
 
             if item_id in purchased_item_ids:
-                status = "✅ Acheté"
+                status = "✅ Possédé"
             elif level < minimum_level:
                 status = f"🔒 Niveau {minimum_level} requis"
             elif wallet < price:
@@ -391,7 +413,7 @@ class PermanentShopView(PaginatedSelectMixin, discord.ui.View):
                 self.buy_button.emoji = "♻️"
             else:
                 self.buy_button.disabled = True
-                self.buy_button.label = "Déjà acheté"
+                self.buy_button.label = "Déjà possédé"
                 self.buy_button.emoji = "✅"
 
         elif not enough_level:
@@ -1383,6 +1405,14 @@ class PermanentShop(commands.Cog):
             guild_id=guild_id,
             user_id=user_id,
         )
+        purchase_count = len(purchased_item_ids)
+
+        # Un cosmétique déjà possédé (giveaway, distribution, Avent…) compte
+        # comme possédé : plus de « Disponible » suivi d'un refus à l'achat.
+        purchased_item_ids |= owned_cosmetic_item_ids(
+            items,
+            await fetch_owned_cosmetic_ids(self.get_pool(), guild_id, user_id),
+        )
 
         level, wallet = await self.get_member_progression(
             guild_id=guild_id,
@@ -1428,7 +1458,7 @@ class PermanentShop(commands.Cog):
         )
         embed.add_field(
             name="🛒 Achats",
-            value=f"**{len(purchased_item_ids)}**",
+            value=f"**{purchase_count}**",
             inline=True,
         )
 

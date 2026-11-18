@@ -94,6 +94,9 @@ def make_select_option(
         return discord.SelectOption(**kwargs)
 
 
+from bot.extensions.shop import fetch_owned_cosmetic_ids, owned_cosmetic_item_ids  # noqa: E402
+
+
 class ShopProductSelect(discord.ui.Select):
     def __init__(self, shop_view: AdventShopView) -> None:
         self.shop_view = shop_view
@@ -259,7 +262,7 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
             minimum = int(item["min_openings"])
 
             if item_id in purchased_item_ids:
-                status = "✅ Acheté"
+                status = "✅ Possédé"
             elif openings < minimum:
                 status = f"🔒 {minimum} cases requises"
             elif balance < price:
@@ -338,7 +341,7 @@ class AdventShopView(PaginatedSelectMixin, discord.ui.View):
             self.buy_button.label = "Restaurer le rôle"
             self.buy_button.emoji = "♻️"
         elif already_purchased:
-            self.buy_button.label = "Déjà acheté"
+            self.buy_button.label = "Déjà possédé"
             self.buy_button.emoji = "✅"
         elif not enough_openings:
             self.buy_button.label = "Cases insuffisantes"
@@ -848,6 +851,12 @@ class AdventShop(commands.Cog):
         purchased_item_ids = await self.get_purchased_item_ids(
             campaign_id=campaign_id,
             user_id=user_id,
+        )
+
+        # Cosmétique déjà possédé (gagné ailleurs) : affiché comme possédé.
+        purchased_item_ids |= owned_cosmetic_item_ids(
+            items,
+            await fetch_owned_cosmetic_ids(self.get_pool(), guild.id, user_id),
         )
 
         openings, total_points, balance = (

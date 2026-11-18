@@ -253,7 +253,7 @@ Seuls `lot` et `duree` sont obligatoires (durée de 1 minute à 30 jours).
 
 Vend des **rôles Discord** et des **cosmétiques de profil** contre des pièces. Un article peut exiger un niveau minimum.
 
-- Le menu indique pour chaque article : acheté, niveau requis, solde insuffisant ou disponible.
+- Le menu indique pour chaque article : possédé, niveau requis, solde insuffisant ou disponible. Un cosmétique **déjà possédé** autrement (distribué, gagné à un giveaway, dans une case de l’Avent…) apparaît aussi comme **✅ Possédé**, dans les deux boutiques : on ne peut pas le racheter.
 - Au-delà de 25 articles, des boutons **◀ Page 1/3 ▶** apparaissent (250 articles au maximum).
 - Un rôle acheté puis retiré peut être récupéré gratuitement avec **Restaurer le rôle**.
 - Un cosmétique acheté arrive dans l’inventaire de `/profil`.
