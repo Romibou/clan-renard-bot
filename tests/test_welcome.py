@@ -450,3 +450,10 @@ def test_merge_settings_clamps_shadow() -> None:
     )
     assert settings["text_effect"] == "ombre"
     assert settings["shadow_opacity"] == 100 and settings["shadow_blur"] == 4 and settings["shadow_offset"] == 0
+
+
+def test_font_choice_changes_render_and_falls_back() -> None:
+    common = dict(avatar_bytes=None, title="Bienvenue", subtitle="Test", text="Coucou")
+    assert render_welcome_card(font="poppins", **common) != render_welcome_card(font="roboto", **common)
+    assert render_welcome_card(font="inconnue", **common) == render_welcome_card(font="roboto", **common)
+    assert bienvenue.merge_settings(bienvenue.JOIN, {"font": "comic"})["font"] == "roboto"

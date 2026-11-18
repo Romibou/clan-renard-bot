@@ -19,7 +19,15 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps
 
-from bot.shared.welcome_card import HEIGHT, LAYOUTS, TEXT_EFFECTS, WIDTH, parse_hex, render_welcome_card
+from bot.shared.welcome_card import (
+    FONT_NAMES,
+    HEIGHT,
+    LAYOUTS,
+    TEXT_EFFECTS,
+    WIDTH,
+    parse_hex,
+    render_welcome_card,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +60,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "shadow_opacity": 70,
         "shadow_blur": 4,
         "shadow_offset": 4,
+        "font": "roboto",
         "card": True,
         # Rôles donnés à chaque nouveau membre (gardés ensuite). Vide = aucun.
         "autoroles": [],
@@ -75,6 +84,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "shadow_opacity": 70,
         "shadow_blur": 4,
         "shadow_offset": 4,
+        "font": "roboto",
         "card": True,
     },
 }
@@ -121,6 +131,9 @@ def merge_settings(kind: str, stored: dict[str, Any] | None) -> dict[str, Any]:
         settings["layout"] = "centre"
 
     settings["overlay"] = max(0, min(90, int(settings["overlay"] or 0)))
+
+    if settings["font"] not in FONT_NAMES:
+        settings["font"] = "roboto"
 
     if settings["text_effect"] not in TEXT_EFFECTS:
         settings["text_effect"] = "ombre"
@@ -411,6 +424,7 @@ DESIGN_KEYS = (
     "shadow_opacity",
     "shadow_blur",
     "shadow_offset",
+    "font",
     "card",
 )
 MAX_TEMPLATES = 25
@@ -766,6 +780,7 @@ class WelcomePanel(discord.ui.View):
         self.button("Tester dans le salon", "📨", self.on_test, row=2)
 
         self.button("Ombre du texte", "🌫️", self.on_shadow, row=3)
+        self.button(f"Police : {FONT_NAMES[self.settings.get('font', 'roboto')]}", "🔤", self.on_font, row=3)
 
         if self.kind == JOIN:
             self.button("Rôles à l'arrivée", "🎭", self.on_autoroles, row=3, style=discord.ButtonStyle.primary)
@@ -856,6 +871,12 @@ class WelcomePanel(discord.ui.View):
 
     async def on_shadow(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(ShadowModal(self))
+
+    async def on_font(self, interaction: discord.Interaction) -> None:
+        fonts = list(FONT_NAMES)
+        self.settings["font"] = fonts[(fonts.index(self.settings["font"]) + 1) % len(fonts)]
+        await self.save()
+        await self.refresh(interaction)
 
     async def on_layout(self, interaction: discord.Interaction) -> None:
         current = self.settings["layout"]
@@ -1163,6 +1184,7 @@ class BienvenueCog(commands.Cog):
             shadow_opacity=settings["shadow_opacity"],
             shadow_blur=settings["shadow_blur"],
             shadow_offset=settings["shadow_offset"],
+            font=settings["font"],
         )
 
     async def send_greeting(

@@ -708,6 +708,7 @@ Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec t
 | 🖼️ **Fond** | Image de fond envoyée depuis ton PC (jusqu’à 50 Mo et 50 mégapixels ; Discord limite à 10 Mo sans Nitro), recadrée en 1024 × 500 et compressée, ou retour au fond par défaut |
 | 🎨 **Couleurs** | Couleur du titre, du sous-titre, du texte et du contour de l’avatar, assombrissement du fond (0 à 90 %) |
 | 🌫️ **Ombre du texte** | Effet derrière les textes : ombre douce (par défaut, comme Koya), contour, les deux ou aucun ; couleur, opacité, flou et décalage réglables (décalage 0 + flou fort = halo néon) |
+| 🔤 **Police** | Roboto (par défaut) ou Poppins (ronde, proche de Koya) ; le bouton passe de l’une à l’autre |
 | 📐 **Disposition** | Centre (avatar en haut, comme Koya), gauche ou droite (avatar sur le côté, texte à côté) |
 | 🃏 **Carte : oui / non** | Message seul, sans image |
 | 👁️ **Aperçu réel** | Le message complet (texte et carte) exactement comme les membres le verront, visible par toi seul |

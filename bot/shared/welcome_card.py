@@ -43,6 +43,14 @@ BOLD_FONTS = (
     "arialbd.ttf",
 )
 
+# Polices au choix : (fichiers du titre, fichiers du texte), essayés dans
+# l'ordre. Poppins est fournie dans assets/fonts (licence OFL).
+FONTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "roboto": (HEAVY_FONTS, BOLD_FONTS),
+    "poppins": (("Poppins-ExtraBold.ttf", *HEAVY_FONTS), ("Poppins-Bold.ttf", *BOLD_FONTS)),
+}
+FONT_NAMES = {"roboto": "Roboto", "poppins": "Poppins"}
+
 
 @lru_cache(maxsize=1)
 def _font_index() -> dict[str, str]:
@@ -62,10 +70,13 @@ def _font_index() -> dict[str, str]:
 
 
 @lru_cache(maxsize=64)
-def load_font(size: int, heavy: bool = True) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def load_font(
+    size: int, heavy: bool = True, family: str = "roboto"
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     index = _font_index()
+    heavy_files, bold_files = FONTS.get(family, FONTS["roboto"])
 
-    for name in HEAVY_FONTS if heavy else BOLD_FONTS:
+    for name in heavy_files if heavy else bold_files:
         path = index.get(name, name)
 
         try:
@@ -117,16 +128,17 @@ def fit_text(
     *,
     heavy: bool = True,
     minimum: int = 14,
+    family: str = "roboto",
 ) -> ImageFont.ImageFont:
     while size > minimum:
-        font = load_font(size, heavy)
+        font = load_font(size, heavy, family)
 
         if draw.textlength(text, font=font) <= max_width:
             return font
 
         size -= 2
 
-    return load_font(minimum, heavy)
+    return load_font(minimum, heavy, family)
 
 
 def circle_avatar(avatar: Image.Image, diameter: int, border: int, border_color: tuple[int, int, int]) -> Image.Image:
@@ -226,6 +238,7 @@ def render_welcome_card(
     shadow_opacity: int = 70,
     shadow_blur: int = 5,
     shadow_offset: int = 4,
+    font: str = "roboto",
 ) -> bytes:
     """Retourne la carte en PNG."""
     if background_bytes:
@@ -259,6 +272,7 @@ def render_welcome_card(
     style = TextStyle(
         text_effect, parse_hex(shadow_color, (20, 16, 30)), shadow_opacity, shadow_blur, shadow_offset
     )
+    family = font if font in FONTS else "roboto"
     draw = ImageDraw.Draw(image)
     layout = layout if layout in LAYOUTS else "centre"
 
@@ -274,17 +288,17 @@ def render_welcome_card(
         y = 40 + disc.height + 18
 
         if title:
-            font = fit_text(draw, title.upper(), 900, 92)
+            font = fit_text(draw, title.upper(), 900, 92, family=family)
             draw_text(image, (center, y), title.upper(), font, title_rgb, anchor="mt", style=style)
             y += font.size + 10
 
         if subtitle:
-            font = fit_text(draw, subtitle.upper(), 880, 44)
+            font = fit_text(draw, subtitle.upper(), 880, 44, family=family)
             draw_text(image, (center, y), subtitle.upper(), font, subtitle_rgb, anchor="mt", style=style)
             y += font.size + 12
 
         if text:
-            font = fit_text(draw, text.upper(), 900, 30, heavy=False)
+            font = fit_text(draw, text.upper(), 900, 30, heavy=False, family=family)
             draw_text(image, (center, min(y, HEIGHT - 40)), text.upper(), font, text_rgb, anchor="mt", style=style)
     else:
         diameter, border = 280, 9
@@ -301,11 +315,11 @@ def render_welcome_card(
         lines = []
 
         if title:
-            lines.append((title.upper(), fit_text(draw, title.upper(), width, 84), title_rgb, 12))
+            lines.append((title.upper(), fit_text(draw, title.upper(), width, 84, family=family), title_rgb, 12))
         if subtitle:
-            lines.append((subtitle.upper(), fit_text(draw, subtitle.upper(), width, 42), subtitle_rgb, 14))
+            lines.append((subtitle.upper(), fit_text(draw, subtitle.upper(), width, 42, family=family), subtitle_rgb, 14))
         if text:
-            lines.append((text.upper(), fit_text(draw, text.upper(), width, 28, heavy=False), text_rgb, 0))
+            lines.append((text.upper(), fit_text(draw, text.upper(), width, 28, heavy=False, family=family), text_rgb, 0))
 
         total = sum(font.size + gap for _, font, _, gap in lines)
         y = (HEIGHT - total) / 2
