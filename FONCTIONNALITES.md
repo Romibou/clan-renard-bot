@@ -422,8 +422,10 @@ Si un rôle, des pièces, de l’XP ou un cosmétique ne peuvent pas être vers�
 - Les **points de l’Avent** sont propres à la campagne et se dépensent dans la boutique de l’Avent. Le calendrier affiche les points gagnés ; la boutique affiche le solde restant.
 - Le **classement** de l’Avent range les membres par cases ouvertes, puis par points. Les membres partis sont masqués.
 - La **boutique de l’Avent** vend des rôles et des cosmétiques contre des points, avec éventuellement un nombre minimum de cases ouvertes. Elle a des pages au-delà de 25 articles. Un rôle acheté puis retiré peut être restauré gratuitement.
-- Articles : `/avent-admin` → **Ajouter un rôle à la boutique**, **Ajouter un cosmétique à la boutique**, **Supprimer un article de la boutique**.
-- **Supprimer un article de la boutique** affiche d’abord la liste des articles avec leur **identifiant** (utile si tu l’as oublié : reconfigurer un article avec le même identifiant le remplace), puis on choisit l’article à retirer dans un menu et on confirme.
+- Articles : `/avent-admin` → **Ajouter un rôle à la boutique**, **Ajouter un cosmétique à la boutique**, **Gérer les articles de la boutique**.
+- **Gérer les articles de la boutique** affiche la liste des articles avec leur **identifiant**, leur prix, leur type et leurs cases minimum. Choisis un article dans le menu, puis :
+  - **✏️ Modifier** : formulaire prérempli (nom affiché pour un rôle, prix, cases minimum, emoji, message après l’achat) ;
+  - **🗑️ Retirer** : le retire de la boutique (confirmation par ce bouton).
 
 ## Annonces quotidiennes
 
@@ -452,7 +454,7 @@ Variables : `{jour}`, `{jours_restants}` (jours avant la case 24), `{titre}` (ti
 - **Annonces** : Activer les annonces, Désactiver les annonces, Publier le panneau public.
 - **Récompenses** : Liste des récompenses, Ajouter ou modifier une récompense, Supprimer une récompense, Aperçu du calendrier.
 - **Membres** : Consulter un membre, Réinitialiser un membre, Réinitialiser TOUT LE MONDE.
-- **Boutique de l’Avent** : ajouter un rôle, ajouter un cosmétique, supprimer un article.
+- **Boutique de l’Avent** : ajouter un rôle, ajouter un cosmétique, gérer les articles (modifier ou retirer).
 
 ## Réinitialisations
 

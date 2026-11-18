@@ -1159,8 +1159,97 @@ def shop_item_line(item: Any) -> str:
     return " · ".join(parts)
 
 
+class ShopEditModal(discord.ui.Modal):
+    """Modifier un article déjà en vente, champs préremplis."""
+
+    def __init__(self, item: Any) -> None:
+        is_role = bool(item["role_id"])
+        super().__init__(title=f"✏️ {str(item['display_name'])[:40]}", timeout=600)
+        self.item = item
+        self.is_role = is_role
+
+        def field(label: str, value: Any, *, paragraph: bool = False, max_length: int = 100,
+                  required: bool = True) -> discord.ui.TextInput:
+            component = discord.ui.TextInput(
+                default=str(value if value is not None else "")[:max_length] or None,
+                style=discord.TextStyle.paragraph if paragraph else discord.TextStyle.short,
+                max_length=max_length,
+                required=required,
+            )
+            self.add_item(discord.ui.Label(text=label, component=component))
+            return component
+
+        self.name = field("Nom affiché", item["display_name"]) if is_role else None
+        self.price = field("Prix en points", item["price"], max_length=7)
+        self.minimum = field("Cases minimum (0 à 24)", item["min_openings"], max_length=2)
+        self.emoji = field("Emoji", item["emoji"], max_length=100, required=False)
+        self.message = field(
+            "Message après l'achat", item["success_message"], paragraph=True, max_length=1000, required=False
+        )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            price = required_int(str(self.price.value), minimum=0, maximum=1_000_000, field_name="Le prix")
+            minimum = required_int(
+                str(self.minimum.value), minimum=0, maximum=24, field_name="Le minimum de cases"
+            )
+        except ValueError as error:
+            await send_error(interaction, str(error))
+            return
+
+        emoji = str(self.emoji.value).strip()
+        message = str(self.message.value).strip()
+
+        if self.is_role:
+            role = interaction.guild.get_role(int(self.item["role_id"])) if interaction.guild else None
+
+            if role is None:
+                await send_error(
+                    interaction,
+                    "Le rôle de cet article n'existe plus sur le serveur : retire l'article et recrée-le.",
+                )
+                return
+
+            await invoke_command(
+                interaction,
+                "AdventShop",
+                "configure_shop_item",
+                str(self.item["identifier"]),
+                str(self.name.value).strip(),
+                role,
+                price,
+                minimum,
+                message,
+                str(self.item["description"] or ""),
+                emoji or "🎁",
+                None,
+            )
+            return
+
+        cosmetic_identifier = self.item["cosmetic_identifier"]
+
+        if not cosmetic_identifier:
+            await send_error(
+                interaction,
+                "Le cosmétique de cet article n'existe plus : retire l'article.",
+            )
+            return
+
+        await invoke_command(
+            interaction,
+            "AdventShop",
+            "configure_cosmetic_item",
+            str(cosmetic_identifier),
+            price,
+            minimum,
+            message,
+            emoji or "✨",
+            None,
+        )
+
+
 class ShopDeleteView(discord.ui.View):
-    """Choisir l'article à retirer dans la liste, puis confirmer."""
+    """Choisir un article dans la liste, puis le modifier ou le retirer (avec confirmation)."""
 
     def __init__(self, items: list[Any], owner_id: int) -> None:
         super().__init__(timeout=300)
@@ -1172,7 +1261,7 @@ class ShopDeleteView(discord.ui.View):
     def build(self) -> None:
         self.clear_items()
         select = discord.ui.Select(
-            placeholder="Choisis l'article à retirer…",
+            placeholder="Choisis un article à modifier ou retirer…",
             options=[
                 discord.SelectOption(
                     label=str(item["display_name"])[:100],
@@ -1187,6 +1276,10 @@ class ShopDeleteView(discord.ui.View):
         self.add_item(select)
 
         if self.selected:
+            edit = discord.ui.Button(label="Modifier", emoji="✏️", style=discord.ButtonStyle.primary)
+            edit.callback = self.on_edit
+            self.add_item(edit)
+
             confirm = discord.ui.Button(
                 label=f"Retirer « {self.items[self.selected]['display_name']} »"[:80],
                 emoji="🗑️",
@@ -1202,6 +1295,12 @@ class ShopDeleteView(discord.ui.View):
         self.selected = interaction.data["values"][0]
         self.build()
         await interaction.response.edit_message(view=self)
+
+    async def on_edit(self, interaction: discord.Interaction) -> None:
+        if self.selected is None:
+            return
+
+        await interaction.response.send_modal(ShopEditModal(self.items[self.selected]))
 
     async def on_confirm(self, interaction: discord.Interaction) -> None:
         if self.selected is None:
@@ -1245,11 +1344,14 @@ async def open_shop_delete(
     items = list(
         await shop.get_pool().fetch(
             """
-            SELECT identifier, display_name, emoji, price, min_openings, role_id
-            FROM advent_shop_items_v2
-            WHERE campaign_id = $1
-              AND enabled = TRUE
-            ORDER BY price DESC, identifier
+            SELECT item.identifier, item.display_name, item.emoji, item.price,
+                   item.min_openings, item.role_id, item.description,
+                   item.success_message, cosmetic.identifier AS cosmetic_identifier
+            FROM advent_shop_items_v2 AS item
+            LEFT JOIN profile_cosmetics AS cosmetic ON cosmetic.id = item.cosmetic_id
+            WHERE item.campaign_id = $1
+              AND item.enabled = TRUE
+            ORDER BY item.price DESC, item.identifier
             """,
             int(campaign["id"]),
         )
@@ -1272,9 +1374,8 @@ async def open_shop_delete(
         title=f"🛍️ Articles de la boutique de l'Avent {campaign['year']}",
         description=(
             f"{description}\n\n"
-            "L'identifiant (`role-noel-2026`…) sert à modifier un article : "
-            "le reconfigurer avec le même identifiant le remplace.\n"
-            "Pour en retirer un, choisis-le ci-dessous puis confirme."
+            "Choisis un article ci-dessous, puis ✏️ **Modifier** (prix, cases minimum, "
+            "emoji, message…) ou 🗑️ **Retirer**."
         ),
         color=discord.Color.from_rgb(226, 104, 161),
     )
@@ -1759,7 +1860,7 @@ class AdminActionSelect(discord.ui.Select):
                 description="Vend un cosmétique du profil contre des points.",
             ),
             discord.SelectOption(
-                label="Supprimer un article de la boutique",
+                label="Gérer les articles de la boutique",
                 value="shop_delete",
                 emoji="🚫",
             ),
