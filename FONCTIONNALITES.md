@@ -17,9 +17,10 @@ Pour l’installation et le déploiement, voir `README.md`.
 9. [Calendrier de l’Avent](#calendrier-de-lavent)
 10. [Mini-jeux et bingo](#mini-jeux-et-bingo)
 11. [Outils : rappels, rôles à la réaction, aide](#outils--rappels-rôles-à-la-réaction-aide)
-12. [Annonces](#annonces)
-13. [Modération](#modération)
-14. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
+12. [Bienvenue et départs](#bienvenue-et-départs)
+13. [Annonces](#annonces)
+14. [Modération](#modération)
+15. [Maintenance : sauvegardes, import, permissions](#maintenance--sauvegardes-import-permissions)
 
 ---
 
@@ -61,6 +62,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/drop` | Gérer le serveur | Fait apparaître un drop d’XP ou de pièces |
 | `/giveaway lancer` / `terminer` / `retirer` | Gérer le serveur | Giveaways |
 | `/bingo lancer` / `nombre` / `arreter` | Gérer le serveur | Bingo « trouve le nombre » dans un salon |
+| `/bienvenue-admin` | Gérer le serveur | Messages et cartes de bienvenue et de départ (voir [Bienvenue et départs](#bienvenue-et-départs)) |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
@@ -570,6 +572,36 @@ Réagir donne le rôle, retirer sa réaction l’enlève. Les émojis personnali
 ## `/aide`
 
 Liste les commandes membres, classées par thème. La liste se construit automatiquement : une nouvelle commande y apparaît sans rien modifier. Les administrateurs voient aussi les commandes d’administration.
+
+---
+
+# Bienvenue et départs
+
+Quand un membre arrive (ou part), le bot poste un message avec une **carte image**, dans l’esprit de Koya : le fond de ton choix, l’avatar du membre dans un cercle, un grand titre, un sous-titre en couleur et une ligne de texte.
+
+## `/bienvenue-admin`
+
+Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec ton profil), mis à jour à chaque changement. Le menu du haut passe des **👋 Arrivées** aux **🚪 Départs** : chacun a ses propres réglages.
+
+| Bouton | Rôle |
+|---|---|
+| ▶️ **Activer** / ⏸️ **Désactiver** | Envoi automatique à chaque arrivée (ou départ) |
+| 📍 **Salon** | Salon où le message est posté |
+| ✏️ **Textes** | Message au-dessus de la carte, titre, sous-titre, texte du bas |
+| 🖼️ **Fond** | Image de fond envoyée depuis ton PC (recadrée en 1024 × 500), ou retour au fond par défaut |
+| 🎨 **Couleurs** | Couleur du titre, du sous-titre, du texte et du contour de l’avatar, assombrissement du fond (0 à 90 %) |
+| 📐 **Disposition** | Centre (avatar en haut, comme Koya), gauche ou droite (avatar sur le côté, texte à côté) |
+| 🃏 **Carte : oui / non** | Message seul, sans image |
+| 📨 **Tester dans le salon** | Envoie un vrai message avec ton profil, pour voir le rendu final |
+
+**Variables** (message et carte) : `{membre}` (mention dans le message, nom sur la carte), `{nom}` (nom affiché), `{pseudo}` (nom d’utilisateur), `{serveur}`, `{nombre}` (nombre de membres).
+
+Par défaut : « Bienvenue {membre} ! » avec la carte **BIENVENUE / {nom} / Nous sommes {nombre} à présent !**, et pour les départs « **{nom}** nous a quittés. » avec la carte **AU REVOIR**. Les deux sont désactivés tant que tu ne les actives pas.
+
+- Les bots qui rejoignent le serveur ne sont pas accueillis.
+- Au départ, le nom du membre n’est pas une mention qui notifie.
+- Le bot doit pouvoir **voir le salon, y écrire et joindre des fichiers** : le panneau prévient s’il manque quelque chose.
+- La police épaisse des titres (Roboto Black) est installée sur Render.
 
 ---
 

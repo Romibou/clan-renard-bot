@@ -7,7 +7,7 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-roboto-unhinted \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
