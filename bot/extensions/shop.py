@@ -243,6 +243,126 @@ class ShopRefreshButton(discord.ui.Button):
         await self.shop_view.refresh(interaction)
 
 
+# ============================================================
+# HISTORIQUE D'ACHATS
+# ============================================================
+
+HISTORY_PER_PAGE = 12
+HISTORY_NAME_WIDTH = 22
+HISTORY_PREFIXES = ("Achat boutique : ", "Remboursement boutique : ")
+
+
+def history_item_name(reason: str) -> str:
+    for prefix in HISTORY_PREFIXES:
+        if reason.startswith(prefix):
+            return reason[len(prefix):]
+
+    return reason
+
+
+def history_table(rows: list[Any], start: int = 0) -> str:
+    """Tableau aligné et compact : date, article, montant (− achat, + remboursement)."""
+    if not rows:
+        return "Aucun achat pour l'instant."
+
+    entries = []
+
+    for row in rows[start:start + HISTORY_PER_PAGE]:
+        name = history_item_name(str(row["reason"]))
+
+        if len(name) > HISTORY_NAME_WIDTH:
+            name = name[: HISTORY_NAME_WIDTH - 1] + "…"
+
+        amount = int(row["amount"])
+        refund = row["transaction_type"] == "shop_refund"
+        label = f"{'+' if amount > 0 else '−'}{format_coins(abs(amount))}"
+        entries.append((row["created_at"].strftime("%d/%m/%Y"), name, label, " ↩" if refund else ""))
+
+    name_width = max(7, max(len(entry[1]) for entry in entries))
+    amount_width = max(len("Pièces"), max(len(entry[2]) for entry in entries))
+    # Colonne « ↩ » seulement s'il y a un remboursement sur la page.
+    mark_width = 2 if any(entry[3] for entry in entries) else 0
+    lines = [f"{'Date':<10} {'Article':<{name_width}} {'Pièces':>{amount_width}}{'':<{mark_width}}"]
+    lines.append("─" * (10 + 1 + name_width + 1 + amount_width + mark_width))
+    lines += [
+        f"{date:<10} {name:<{name_width}} {label:>{amount_width}}{mark:<{mark_width}}"
+        for date, name, label, mark in entries
+    ]
+    return "\n".join(lines)
+
+
+class ShopHistoryView(discord.ui.View):
+    """Historique des achats d'un membre dans la boutique du serveur, avec pages."""
+
+    def __init__(self, owner_id: int, rows: list[Any]) -> None:
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        self.rows = rows
+        self.page = 0
+        self.pages = max(1, -(-len(rows) // HISTORY_PER_PAGE))
+        self.update_buttons()
+
+    def update_buttons(self) -> None:
+        self.previous_page.disabled = self.page == 0
+        self.next_page.disabled = self.page >= self.pages - 1
+
+        if self.pages == 1:
+            self.clear_items()
+
+    def embed(self) -> discord.Embed:
+        purchases = [row for row in self.rows if row["transaction_type"] == "shop_purchase"]
+        spent = -sum(int(row["amount"]) for row in self.rows)
+        summary = (
+            f"**{len(purchases)}** achat(s) · **{format_coins(max(0, spent))} pièces** dépensées au total"
+            if self.rows
+            else "Tu n'as encore rien acheté dans la boutique du serveur."
+        )
+        embed = discord.Embed(
+            title="📜 Historique d'achats",
+            description=f"{summary}\n```\n{history_table(self.rows, self.page * HISTORY_PER_PAGE)}\n```",
+            color=SHOP_COLOR,
+        )
+        footer = "Du plus récent au plus ancien · ↩ = remboursé (achat échoué)"
+
+        if self.pages > 1:
+            footer = f"Page {self.page + 1}/{self.pages} · " + footer
+
+        embed.set_footer(text=footer)
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.page = max(0, self.page - 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.page = min(self.pages - 1, self.page + 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+
+class ShopHistoryButton(discord.ui.Button):
+    def __init__(self, shop_view: PermanentShopView) -> None:
+        self.shop_view = shop_view
+
+        super().__init__(
+            label="Historique",
+            emoji="📜",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        rows = await self.shop_view.cog.fetch_purchase_history(interaction.guild_id, interaction.user.id)
+        view = ShopHistoryView(interaction.user.id, rows)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
+
 class PermanentShopView(PaginatedSelectMixin, discord.ui.View):
     def __init__(
         self,
@@ -263,11 +383,13 @@ class PermanentShopView(PaginatedSelectMixin, discord.ui.View):
         self.buy_button = ShopBuyButton(self)
         self.try_button = ShopTryButton(self)
         self.refresh_button = ShopRefreshButton(self)
+        self.history_button = ShopHistoryButton(self)
         self.selected_cosmetic_id: int | None = None
 
         self.add_item(self.item_select)
         self.add_item(self.buy_button)
         self.add_item(self.try_button)
+        self.add_item(self.history_button)
         self.add_item(self.refresh_button)
 
         self.setup_pagination(row=2)
@@ -1150,6 +1272,24 @@ class PermanentShop(commands.Cog):
         bot: commands.Bot,
     ) -> None:
         self.bot = bot
+
+    async def fetch_purchase_history(self, guild_id: int, user_id: int) -> list[Any]:
+        """Achats (et remboursements) dans la boutique du serveur, du plus récent au plus ancien."""
+        return list(
+            await self.get_pool().fetch(
+                """
+                SELECT amount, transaction_type, reason, created_at
+                FROM progression_transactions
+                WHERE guild_id = $1
+                  AND user_id = $2
+                  AND transaction_type IN ('shop_purchase', 'shop_refund')
+                ORDER BY created_at DESC, id DESC
+                LIMIT 500
+                """,
+                guild_id,
+                user_id,
+            )
+        )
 
     def get_pool(self):
         database = getattr(

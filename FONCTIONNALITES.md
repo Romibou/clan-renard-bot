@@ -260,6 +260,7 @@ Vend des **rôles Discord** et des **cosmétiques de profil** contre des pièces
 - Un rôle acheté puis retiré peut être récupéré gratuitement avec **Restaurer le rôle**.
 - Un cosmétique acheté arrive dans l’inventaire de `/profil`.
 - **👁️ Essayer** (cosmétiques) : montre au membre **sa propre carte de profil avec le cosmétique**, en privé, avant d’acheter. Rien n’est acheté ni équipé, et ça marche même sans assez de pièces. Aussi dans la boutique de l’Avent.
+- **📜 Historique** (boutique du serveur seulement) : la liste privée de **tes** achats, du plus récent au plus ancien, en tableau aligné (date, article, pièces), avec le nombre d’achats et le total dépensé. Les remboursements (achat de rôle échoué) apparaissent avec **↩**. 12 lignes par page avec ◀️ ▶️.
 
 ## `/boutique-admin`
 
