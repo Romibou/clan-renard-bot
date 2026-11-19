@@ -51,6 +51,8 @@ GAME_NAMES = {
 
 MAX_STAKE = 100_000
 CHALLENGE_TIMEOUT = timedelta(minutes=3)
+# Le bouton 🔁 Revanche reste disponible ce temps-là après la fin d'une partie.
+REMATCH_WINDOW = timedelta(minutes=10)
 MOVE_TIMEOUT = timedelta(minutes=2)
 RPS_ROUND_TIMEOUT = timedelta(seconds=60)
 
@@ -360,6 +362,10 @@ class GameView(discord.ui.View):
         self.result_text = ""
         self.lock = asyncio.Lock()
         self.watchdog: asyncio.Task | None = None
+        self.options = dict(options)
+        self.rematch_button: discord.ui.Button | None = None
+        self.rematch_closed = False
+        self.rematch_timer: asyncio.TimerHandle | None = None
 
     # -------- outils --------
 
@@ -429,6 +435,7 @@ class GameView(discord.ui.View):
             pass
 
     async def refresh(self, interaction: discord.Interaction | None = None) -> None:
+        self.ensure_rematch_button()
         kwargs = {"embed": self.embed(), "view": self}
 
         if interaction is not None and not interaction.response.is_done():
@@ -454,7 +461,7 @@ class GameView(discord.ui.View):
 
         self.over = True
         self.disable_all()
-        self.stop()
+        self.schedule_rematch_expiry()
         winner = self.players[winner_index - 1] if winner_index else None
         loser = self.players[2 - winner_index] if winner_index else None
 
@@ -476,6 +483,67 @@ class GameView(discord.ui.View):
             LOGGER.exception("Fin de partie : enregistrement impossible")
 
         self.cog.release(self.guild_id, self.humans())
+
+    # -------- revanche --------
+
+    def ensure_rematch_button(self) -> None:
+        """Après la fin : ajoute 🔁 Revanche (même si la vue a reconstruit ses boutons)."""
+        if not self.over or self.rematch_closed:
+            return
+
+        if self.rematch_button is None:
+            self.rematch_button = discord.ui.Button(
+                label="Revanche", emoji="🔁", style=discord.ButtonStyle.success, row=4
+            )
+            self.rematch_button.callback = self.on_rematch
+
+        self.rematch_button.disabled = False
+
+        if self.rematch_button not in self.children:
+            self.add_item(self.rematch_button)
+
+    def schedule_rematch_expiry(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        self.rematch_timer = loop.call_later(
+            REMATCH_WINDOW.total_seconds(), lambda: asyncio.ensure_future(self.expire_rematch())
+        )
+
+    def close_rematch(self) -> None:
+        """Retire le bouton Revanche et libère la vue."""
+        self.rematch_closed = True
+
+        if self.rematch_button is not None and self.rematch_button in self.children:
+            self.remove_item(self.rematch_button)
+
+        if self.rematch_timer is not None:
+            self.rematch_timer.cancel()
+
+        self.stop()
+
+    async def expire_rematch(self) -> None:
+        if self.rematch_closed:
+            return
+
+        self.close_rematch()
+
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+    async def on_rematch(self, interaction: discord.Interaction) -> None:
+        if self.rematch_closed:
+            await interaction.response.send_message(
+                embed=error_embed("La revanche a déjà été demandée."), ephemeral=True
+            )
+            return
+
+        await self.cog.rematch(interaction, self)
 
     async def forfeit_button(self, interaction: discord.Interaction) -> None:
         async with self.lock:
@@ -1331,6 +1399,89 @@ class GamesCog(commands.Cog):
             view.update_buttons()
 
         return view
+
+    async def rematch(self, interaction: discord.Interaction, old: GameView) -> None:
+        """
+        🔁 Revanche : même jeu, mêmes options, même mise.
+        Contre l'IA (ou pendu solo), la partie repart tout de suite.
+        Contre un membre, c'est un nouveau défi : l'autre doit accepter,
+        surtout s'il y a une mise.
+        """
+        guild = interaction.guild
+        user = interaction.user
+        humans = old.humans()
+        opponent_id = next((user_id for user_id in humans if user_id != user.id), None)
+
+        if guild is None or interaction.channel is None:
+            return
+
+        if any(self.is_busy(guild.id, user_id) for user_id in humans):
+            await interaction.response.send_message(
+                embed=error_embed("Un des joueurs est déjà dans une autre partie ou un autre défi."),
+                ephemeral=True,
+            )
+            return
+
+        opponent = guild.get_member(opponent_id) if opponent_id is not None else None
+
+        if opponent_id is not None and opponent is None:
+            await interaction.response.send_message(
+                embed=error_embed("Ton adversaire n'est plus sur le serveur."), ephemeral=True
+            )
+            return
+
+        if old.stake:
+            wallet = await self.get_wallet(guild.id, user.id)
+
+            if wallet < old.stake:
+                await interaction.response.send_message(
+                    embed=error_embed(
+                        f"Il te faut **{format_coins(old.stake)} pièces** pour la même mise "
+                        f"(tu en as {format_coins(wallet)})."
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+        # Une seule revanche par partie : le bouton disparaît du message.
+        old.close_rematch()
+        await interaction.response.edit_message(view=old)
+
+        if opponent is None:
+            players: list[int | None] = [user.id, None]
+            random.shuffle(players)
+            self.reserve(guild.id, {user.id})
+            view = self.create_game(
+                old.game, players=players, stake=0, match_id=None, guild_id=guild.id, options=old.options
+            )
+
+            try:
+                view.message = await interaction.channel.send(
+                    content=f"🔁 Revanche de {user.mention} !",
+                    embed=view.embed(),
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                self.release(guild.id, {user.id})
+                raise
+
+            view.start()
+            return
+
+        self.reserve(guild.id, {user.id, opponent.id})
+        challenge = ChallengeView(self, old.game, user, opponent, old.stake, old.options)
+
+        try:
+            challenge.message = await interaction.channel.send(
+                content=f"🔁 {opponent.mention}, {user.mention} te demande une revanche !",
+                embed=challenge.embed(),
+                view=challenge,
+                allowed_mentions=discord.AllowedMentions(users=[opponent]),
+            )
+        except discord.HTTPException:
+            self.release(guild.id, {user.id, opponent.id})
+            raise
 
     async def launch(
         self,

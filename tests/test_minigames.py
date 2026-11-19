@@ -202,7 +202,8 @@ async def test_morpion_between_members_pays_winner() -> None:
     assert cog.settled == [(7, 10)]
     assert cog.results == [(1, 10)]
     assert "1 000 pièces" in view.result_text
-    assert all(button.disabled for button in view.children)
+    assert all(button.disabled for button in view.children if button is not view.rematch_button)
+    assert view.rematch_button in view.children and not view.rematch_button.disabled
 
 
 async def test_forfeit_and_timeout() -> None:
@@ -504,7 +505,8 @@ async def test_pendu_duel_turns_and_win() -> None:
 
     await view.play(interaction_for(20), word="loup")
     assert view.over and cog.settled == [(5, 20)]
-    assert all(item.disabled for item in view.children)
+    assert all(item.disabled for item in view.children if item is not view.rematch_button)
+    assert view.rematch_button in view.children  # gardé même après la reconstruction des boutons
 
 
 async def test_pendu_solo_loss_and_duel_draw() -> None:
@@ -555,3 +557,106 @@ def test_leaderboard_lines() -> None:
     coins = jeux.leaderboard_lines(rows, "coins_net")
     assert "**+1 500** pièces" in coins[0] and "**−200** pièces" in coins[1]
     assert "**9** victoires" in jeux.leaderboard_lines(rows, "ai_wins")[2]
+
+
+# ---------------------------------------------------------------
+# Revanche
+# ---------------------------------------------------------------
+
+
+class RematchCog(FakeCog):
+    def __init__(self, wallet: int = 10_000) -> None:
+        super().__init__()
+        self.wallet = wallet
+        self.reserved: list = []
+
+    def is_busy(self, guild_id, user_id):
+        return (guild_id, user_id) in self.busy
+
+    def reserve(self, guild_id, users):
+        self.reserved.append(set(users))
+        self.busy |= {(guild_id, user) for user in users}
+
+    async def get_wallet(self, guild_id, user_id):
+        return self.wallet
+
+    rematch = jeux.GamesCog.rematch
+    create_game = jeux.GamesCog.create_game
+
+
+class FakeChannel:
+    def __init__(self) -> None:
+        self.sent: list = []
+
+    async def send(self, **kwargs):
+        self.sent.append(kwargs)
+        return SimpleNamespace(id=len(self.sent))
+
+
+def rematch_interaction(user_id: int, members: dict):
+    interaction = interaction_for(user_id)
+    interaction.guild = SimpleNamespace(id=1, get_member=lambda member_id: members.get(member_id))
+    interaction.channel = FakeChannel()
+    return interaction
+
+
+async def finished_morpion(cog, players, stake=0, match_id=None):
+    view = jeux.MorpionView(cog, players=players, stake=stake, match_id=match_id, guild_id=1, options={"difficulty": HARD})
+    view.update_buttons()
+    await view.forfeit_button(interaction_for(next(p for p in players if p is not None)))
+    return view
+
+
+async def test_rematch_between_members_sends_new_challenge_with_same_stake() -> None:
+    cog = RematchCog()
+    view = await finished_morpion(cog, [10, 20], stake=300, match_id=1)
+    assert view.rematch_button in view.children
+
+    opponent = SimpleNamespace(id=20, mention="<@20>", guild=SimpleNamespace(id=1))
+    challenger = SimpleNamespace(id=10, mention="<@10>", guild=SimpleNamespace(id=1))
+    interaction = rematch_interaction(10, {20: opponent})
+    interaction.user = challenger
+    await view.on_rematch(interaction)
+
+    sent = interaction.channel.sent
+    assert len(sent) == 1 and isinstance(sent[0]["view"], jeux.ChallengeView)
+    challenge = sent[0]["view"]
+    assert challenge.stake == 300 and challenge.opponent is opponent and challenge.options["difficulty"] == HARD
+    assert view.rematch_closed and view.rematch_button not in view.children
+
+    # Deuxième clic : refusé, une seule revanche par partie.
+    again = rematch_interaction(20, {10: challenger})
+    await view.on_rematch(again)
+    assert again.response.messages and not again.channel.sent
+
+
+async def test_rematch_against_ai_starts_new_game_and_checks_wallet() -> None:
+    cog = RematchCog()
+    view = await finished_morpion(cog, [10, None])
+    interaction = rematch_interaction(10, {})
+    await view.on_rematch(interaction)
+
+    new_game = interaction.channel.sent[0]["view"]
+    assert isinstance(new_game, jeux.MorpionView) and None in new_game.players and new_game.difficulty == HARD
+    if new_game.watchdog:
+        new_game.watchdog.cancel()
+
+    poor = RematchCog(wallet=10)
+    staked = await finished_morpion(poor, [10, 20], stake=300, match_id=2)
+    broke = rematch_interaction(10, {20: SimpleNamespace(id=20, mention="<@20>")})
+    await staked.on_rematch(broke)
+    assert broke.response.messages and not broke.channel.sent and not staked.rematch_closed
+
+
+async def test_rematch_button_expires() -> None:
+    cog = RematchCog()
+    view = await finished_morpion(cog, [10, 20])
+    view.message = SimpleNamespace(edit=lambda **kwargs: _noop_async())
+    await view.expire_rematch()
+    assert view.rematch_closed and view.is_finished()
+    view.ensure_rematch_button()
+    assert view.rematch_button not in view.children
+
+
+async def _noop_async():
+    return None

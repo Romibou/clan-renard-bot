@@ -571,6 +571,15 @@ La variable d’environnement `ADVENT_TEST_DATE` (par exemple `2026-12-05`) fait
 - Si le bot redémarre pendant une partie, elle est perdue et **les mises sont remboursées** au démarrage.
 - Les gains de mise ne comptent pas comme de l’argent « gagné » pour les missions et le total historique (comme les dons).
 
+### 🔁 Revanche
+
+À la fin de chaque partie, un bouton **🔁 Revanche** apparaît sur le message, pendant **10 minutes**.
+
+- **Contre un membre** : un nouveau défi part avec **le même jeu, les mêmes options et la même mise**. L’autre joueur doit l’accepter (ou proposer une autre mise), comme pour un défi normal.
+- **Contre l’IA ou au pendu en solo** : une nouvelle partie démarre tout de suite, avec la même difficulté.
+- Une seule revanche par partie : le bouton disparaît dès qu’un joueur clique dessus.
+- Refusée si un joueur est déjà dans une autre partie, si l’adversaire a quitté le serveur, ou si celui qui la demande n’a plus assez de pièces pour la mise (le bouton reste alors disponible).
+
 ### `/jeu classement`
 
 ```text
