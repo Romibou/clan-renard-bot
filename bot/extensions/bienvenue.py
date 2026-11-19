@@ -680,17 +680,37 @@ def short(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def join_date(member: Any) -> str:
+def join_date(member: Any, short_year: bool = False) -> str:
     joined = getattr(member, "joined_at", None)
-    return joined.strftime("%d/%m/%Y") if joined else "—"
+    return joined.strftime("%d/%m/%y" if short_year else "%d/%m/%Y") if joined else "—"
+
+
+# Largeur d'un bloc de code dans un embed Discord avant retour à la ligne.
+TABLE_MAX_WIDTH = 50
 
 
 def member_table(members: list[Any], start: int = 0) -> str:
-    """Tableau aligné : n°, nom du compte (pas le pseudo du serveur), ID, arrivée."""
-    lines = [f"{'#':>3}  {'Compte':<{NAME_WIDTH}}  {'ID':<19}  Arrivée", "─" * (3 + 2 + NAME_WIDTH + 2 + 19 + 2 + 10)]
+    """Tableau aligné et compact : n°, nom du compte (pas le pseudo du serveur), ID, arrivée."""
+    if not members:
+        return "Aucun membre."
+
+    number_width = len(str(start + len(members)))
+    name_width = max(6, min(NAME_WIDTH, max(len(member.name) for member in members)))
+    id_width = max(2, max(len(str(member.id)) for member in members))
+    total = number_width + 1 + name_width + 1 + id_width + 1 + 10
+    short_year = total > TABLE_MAX_WIDTH
+    date_width = 8 if short_year else 10
+
+    def row(number: str, name: str, user_id: str, date: str) -> str:
+        return f"{number:>{number_width}} {name:<{name_width}} {user_id:<{id_width}} {date}".rstrip()
+
+    lines = [row("#", "Compte", "ID", "Arrivée")]
+    lines.append("─" * (number_width + name_width + id_width + date_width + 3))
 
     for number, member in enumerate(members, start + 1):
-        lines.append(f"{number:>3}  {short(member.name, NAME_WIDTH):<{NAME_WIDTH}}  {member.id:<19}  {join_date(member)}")
+        lines.append(
+            row(str(number), short(member.name, name_width), str(member.id), join_date(member, short_year))
+        )
 
     return "\n".join(lines)
 
