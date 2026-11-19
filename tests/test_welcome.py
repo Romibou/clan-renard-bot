@@ -457,3 +457,30 @@ def test_font_choice_changes_render_and_falls_back() -> None:
     assert render_welcome_card(font="poppins", **common) != render_welcome_card(font="roboto", **common)
     assert render_welcome_card(font="inconnue", **common) == render_welcome_card(font="roboto", **common)
     assert bienvenue.merge_settings(bienvenue.JOIN, {"font": "comic"})["font"] == "roboto"
+
+
+def test_custom_font_install_render_and_remove() -> None:
+    from pathlib import Path
+
+    from bot.shared import welcome_card
+
+    common = dict(avatar_bytes=None, title="Bienvenue", subtitle="Test", text="Coucou")
+    roboto = render_welcome_card(font="roboto", **common)
+    data = (Path(__file__).resolve().parents[1] / "assets" / "fonts" / "Poppins-Bold.ttf").read_bytes()
+
+    try:
+        name = welcome_card.install_custom_font(data)
+        assert "Poppins" in name and welcome_card.has_custom_font()
+        assert render_welcome_card(font="perso", **common) != roboto
+    finally:
+        welcome_card.remove_custom_font()
+
+    assert not welcome_card.has_custom_font()
+    assert render_welcome_card(font="perso", **common) == roboto
+
+    try:
+        welcome_card.install_custom_font(b"pas une police")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("un faux fichier doit être refusé")

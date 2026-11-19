@@ -23,8 +23,11 @@ from bot.shared.welcome_card import (
     FONT_NAMES,
     HEIGHT,
     LAYOUTS,
+    MAX_FONT_BYTES,
     TEXT_EFFECTS,
     WIDTH,
+    has_custom_font,
+    install_custom_font,
     parse_hex,
     render_welcome_card,
 )
@@ -345,6 +348,72 @@ class ShadowModal(PanelModal):
         self.settings["shadow_opacity"] = opacity
         self.settings["shadow_blur"] = blur
         self.settings["shadow_offset"] = offset
+        return None
+
+
+def font_label(font: str, custom_name: str | None) -> str:
+    if font == "perso" and custom_name:
+        return custom_name
+
+    return FONT_NAMES.get(font, "Roboto")
+
+
+FONT_HELP = "Police de Koya : « Uni Sans Heavy », gratuite sur fontsquirrel.com (.otf)"
+
+
+class FontModal(PanelModal):
+    def __init__(self, panel: WelcomePanel) -> None:
+        super().__init__(panel, "🔤 Police de la carte")
+        custom = getattr(panel.cog, "custom_font_name", None)
+        current = self.settings["font"]
+        options = [
+            discord.SelectOption(label="Roboto", value="roboto", description="Police d'origine du bot.",
+                                 default=current == "roboto"),
+            discord.SelectOption(label="Poppins", value="poppins", description="Ronde et géométrique.",
+                                 default=current == "poppins"),
+        ]
+
+        if custom:
+            options.append(
+                discord.SelectOption(label=f"Police importée : {custom}"[:100], value="perso",
+                                     description="Le fichier que tu as importé.", default=current == "perso")
+            )
+
+        self.choice = discord.ui.Select(options=options)
+        self.add_item(discord.ui.Label(text="Police utilisée", component=self.choice))
+        self.file = discord.ui.FileUpload(required=False, min_values=0, max_values=1)
+        self.add_item(
+            discord.ui.Label(
+                text="Importer une police (remplace l'ancienne)",
+                description=FONT_HELP,
+                component=self.file,
+            )
+        )
+
+    async def apply(self, interaction: discord.Interaction) -> str | None:
+        files = list(self.file.values)
+
+        if files:
+            attachment = files[0]
+
+            if not attachment.filename.lower().endswith((".ttf", ".otf", ".woff")):
+                raise ValueError(f"« {attachment.filename} » n'est pas une police (.ttf, .otf ou .woff).")
+
+            if attachment.size > MAX_FONT_BYTES:
+                raise ValueError("Fichier trop lourd (10 Mo maximum).")
+
+            data = await attachment.read()
+            name = await asyncio.to_thread(install_custom_font, data)
+            await self.panel.cog.save_custom_font(name, data)
+            self.settings["font"] = "perso"
+            return f"🔤 Police « {name} » importée et utilisée sur la carte."
+
+        choice = self.choice.values[0] if self.choice.values else self.settings["font"]
+
+        if choice == "perso" and not has_custom_font():
+            raise ValueError("Aucune police importée : ajoute un fichier .ttf ou .otf.")
+
+        self.settings["font"] = choice
         return None
 
 
@@ -780,7 +849,8 @@ class WelcomePanel(discord.ui.View):
         self.button("Tester dans le salon", "📨", self.on_test, row=2)
 
         self.button("Ombre du texte", "🌫️", self.on_shadow, row=3)
-        self.button(f"Police : {FONT_NAMES[self.settings.get('font', 'roboto')]}", "🔤", self.on_font, row=3)
+        font = font_label(self.settings.get("font", "roboto"), getattr(self.cog, "custom_font_name", None))
+        self.button(f"Police : {font}"[:80], "🔤", self.on_font, row=3)
 
         if self.kind == JOIN:
             self.button("Rôles à l'arrivée", "🎭", self.on_autoroles, row=3, style=discord.ButtonStyle.primary)
@@ -873,10 +943,7 @@ class WelcomePanel(discord.ui.View):
         await interaction.response.send_modal(ShadowModal(self))
 
     async def on_font(self, interaction: discord.Interaction) -> None:
-        fonts = list(FONT_NAMES)
-        self.settings["font"] = fonts[(fonts.index(self.settings["font"]) + 1) % len(fonts)]
-        await self.save()
-        await self.refresh(interaction)
+        await interaction.response.send_modal(FontModal(self))
 
     async def on_layout(self, interaction: discord.Interaction) -> None:
         current = self.settings["layout"]
@@ -965,6 +1032,8 @@ class BienvenueCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.cache: dict[tuple[int, str], tuple[dict[str, Any], bytes | None]] = {}
+        self.custom_font_name: str | None = None
+
 
     def get_pool(self):
         database = getattr(self.bot, "database", None)
@@ -1001,6 +1070,42 @@ class BienvenueCog(commands.Cog):
             )
             """
         )
+        # Police importée : gardée ici (jamais dans le dépôt) et recopiée
+        # sur le disque à chaque démarrage.
+        await self.get_pool().execute(
+            """
+            CREATE TABLE IF NOT EXISTS welcome_font (
+                id SMALLINT PRIMARY KEY DEFAULT 1,
+                name VARCHAR(60) NOT NULL,
+                data BYTEA NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await self.restore_custom_font()
+
+    async def restore_custom_font(self) -> None:
+        row = await self.get_pool().fetchrow("SELECT name, data FROM welcome_font WHERE id = 1")
+
+        if row is None:
+            return
+
+        try:
+            await asyncio.to_thread(install_custom_font, bytes(row["data"]))
+            self.custom_font_name = row["name"]
+        except Exception:
+            LOGGER.exception("Police importée illisible : la carte utilisera Roboto")
+
+    async def save_custom_font(self, name: str, data: bytes) -> None:
+        await self.get_pool().execute(
+            """
+            INSERT INTO welcome_font (id, name, data) VALUES (1, $1, $2)
+            ON CONFLICT (id) DO UPDATE SET name = $1, data = $2, updated_at = NOW()
+            """,
+            name,
+            data,
+        )
+        self.custom_font_name = name
 
     # -------- réglages --------
 

@@ -3,21 +3,23 @@ Carte de bienvenue / de départ (1024 × 500), dans l'esprit de Koya :
 fond personnalisable assombri, avatar rond avec bordure, grand titre,
 sous-titre coloré (le pseudo) et une ligne de texte.
 
-Trois dispositions : « centre » (avatar en haut, texte dessous),
-« gauche » (avatar à gauche) et « droite » (avatar à droite).
+Quatre dispositions : « centre » (avatar en haut, grand texte dessous),
+« classique » (mêmes proportions que la carte Classic de Koya : avatar
+plus petit, textes plus serrés), « gauche » et « droite ».
 """
 
 from __future__ import annotations
 
 import io
 import os
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 WIDTH, HEIGHT = 1024, 500
-LAYOUTS = ("centre", "gauche", "droite")
+LAYOUTS = ("centre", "classique", "gauche", "droite")
 
 # Effet derrière les textes : ombre douce (comme Koya), contour net,
 # les deux, ou rien.
@@ -49,7 +51,46 @@ FONTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "roboto": (HEAVY_FONTS, BOLD_FONTS),
     "poppins": (("Poppins-ExtraBold.ttf", *HEAVY_FONTS), ("Poppins-Bold.ttf", *BOLD_FONTS)),
 }
-FONT_NAMES = {"roboto": "Roboto", "poppins": "Poppins"}
+
+# Police importée depuis Discord (/bienvenue-admin → Police). Elle n'est
+# jamais dans le dépôt : certaines licences (Uni Sans Heavy, la police de
+# Koya) autorisent à créer des images mais pas à redistribuer le fichier.
+# Le bot la garde en base de données et la recopie ici au démarrage.
+CUSTOM_FONT_PATH = Path(tempfile.gettempdir()) / "clan_renard_fonts" / "police_importee.font"
+FONTS["perso"] = ((str(CUSTOM_FONT_PATH), *HEAVY_FONTS), (str(CUSTOM_FONT_PATH), *BOLD_FONTS))
+
+FONT_NAMES = {"roboto": "Roboto", "poppins": "Poppins", "perso": "Police importée"}
+MAX_FONT_BYTES = 10 * 1024 * 1024
+
+
+def install_custom_font(data: bytes) -> str:
+    """Vérifie et installe la police importée ; retourne son nom."""
+    if len(data) > MAX_FONT_BYTES:
+        raise ValueError("Fichier trop lourd (10 Mo maximum).")
+
+    try:
+        font = ImageFont.truetype(io.BytesIO(data), 40)
+        family, style = font.getname()
+    except Exception as error:
+        raise ValueError("Ce fichier n'est pas une police lisible (.ttf, .otf ou .woff).") from error
+
+    CUSTOM_FONT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CUSTOM_FONT_PATH.with_suffix(".tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, CUSTOM_FONT_PATH)
+    load_font.cache_clear()
+
+    name = " ".join(part for part in (family, style) if part and part.lower() != "regular")
+    return (name or "Police importée")[:60]
+
+
+def remove_custom_font() -> None:
+    CUSTOM_FONT_PATH.unlink(missing_ok=True)
+    load_font.cache_clear()
+
+
+def has_custom_font() -> bool:
+    return CUSTOM_FONT_PATH.is_file()
 
 
 @lru_cache(maxsize=1)
@@ -139,6 +180,42 @@ def fit_text(
         size -= 2
 
     return load_font(minimum, heavy, family)
+
+
+# Carte « classique » : positions mesurées sur une carte Koya (1024 × 500).
+# Chaque texte est placé par le HAUT de ses majuscules et dimensionné par
+# leur hauteur, quelle que soit la police.
+CLASSIC_AVATAR_TOP = 43
+CLASSIC_AVATAR_DIAMETER = 250
+CLASSIC_AVATAR_BORDER = 7
+CLASSIC_LINES = (
+    # (haut des majuscules, hauteur des majuscules, largeur max)
+    (326, 56, 900),
+    (392, 28, 860),
+    (439, 21, 900),
+)
+
+
+def font_for_cap_height(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    cap_height: int,
+    max_width: int,
+    *,
+    heavy: bool,
+    family: str,
+) -> ImageFont.ImageFont:
+    """Police dont les majuscules font cap_height pixels (réduite si trop large)."""
+    probe = load_font(100, heavy, family)
+
+    try:
+        top, bottom = probe.getbbox("H")[1], probe.getbbox("H")[3]
+        ratio = max(0.3, (bottom - top) / 100)
+    except Exception:
+        ratio = 0.72
+
+    size = max(10, round(cap_height / ratio))
+    return fit_text(draw, text, max_width, size, heavy=heavy, minimum=10, family=family)
 
 
 def circle_avatar(avatar: Image.Image, diameter: int, border: int, border_color: tuple[int, int, int]) -> Image.Image:
@@ -300,6 +377,24 @@ def render_welcome_card(
         if text:
             font = fit_text(draw, text.upper(), 900, 30, heavy=False, family=family)
             draw_text(image, (center, min(y, HEIGHT - 40)), text.upper(), font, text_rgb, anchor="mt", style=style)
+    elif layout == "classique":
+        disc = circle_avatar(avatar, CLASSIC_AVATAR_DIAMETER, CLASSIC_AVATAR_BORDER, border_rgb)
+        image.alpha_composite(disc, ((WIDTH - disc.width) // 2, CLASSIC_AVATAR_TOP))
+        rows = [
+            (title.upper(), title_rgb, True),
+            (subtitle.upper(), subtitle_rgb, True),
+            (text.upper(), text_rgb, False),
+        ]
+
+        for (content, color, heavy), (cap_top, cap_height, max_width) in zip(rows, CLASSIC_LINES):
+            if not content:
+                continue
+
+            font = font_for_cap_height(draw, content, cap_height, max_width, heavy=heavy, family=family)
+            # Ligne de base = haut des majuscules + leur hauteur réelle.
+            box = font.getbbox("H")
+            baseline = cap_top + (box[3] - box[1])
+            draw_text(image, (WIDTH / 2, baseline), content, font, color, anchor="ms", style=style)
     else:
         diameter, border = 280, 9
         disc = circle_avatar(avatar, diameter, border, border_rgb)
