@@ -484,3 +484,38 @@ def test_custom_font_install_render_and_remove() -> None:
         pass
     else:
         raise AssertionError("un faux fichier doit être refusé")
+
+
+async def test_backfill_view_lists_members_with_pages() -> None:
+    from datetime import datetime, timezone
+
+    members = [
+        SimpleNamespace(
+            name=f"compte_{i}" + ("_tres_long_nom_de_compte" if i == 3 else ""),
+            display_name=f"Pseudo {i}",
+            id=100000000000000000 + i,
+            joined_at=datetime(2026, 1, 1 + (20 - i) % 28, tzinfo=timezone.utc),
+        )
+        for i in range(20)
+    ]
+    members.append(SimpleNamespace(name="sans_date", display_name="X", id=5, joined_at=None))
+    role = SimpleNamespace(mention="<@&10>", name="Membre")
+    view = bienvenue.BackfillView(SimpleNamespace(), 1, [10], members, [role])
+
+    assert view.pages == 2 and view.previous_page.disabled and not view.next_page.disabled
+    first = view.embed().description
+    assert "Compte" in first and "compte_19" in first and "01/01/2026" not in first.split("```")[0]
+    assert "Pseudo" not in first  # nom du compte, pas le pseudo du serveur
+    assert "sans_date" not in first
+
+    view.page = 1
+    view.update_buttons()
+    second = view.embed().description
+    assert "sans_date" in second and "—" in second and view.next_page.disabled
+    assert "compte_3_tres_long_…" in second
+
+    data = bienvenue.member_list_file(view.missing, [role]).fp.read().decode("utf-8")
+    assert "Pseudo sur le serveur" in data and "compte_3_tres_long_nom_de_compte" in data and data.count("\n") >= 22
+
+    single = bienvenue.BackfillView(SimpleNamespace(), 1, [10], members[:3], [role])
+    assert single.previous_page not in single.children

@@ -716,7 +716,7 @@ Ouvre un panneau, visible par toi seul, avec **l’aperçu de la carte** (avec t
 | 🧩 **Modèles** | Enregistrer l’apparence actuelle sous un nom, charger un modèle (l’aperçu se met à jour), supprimer |
 | 📨 **Tester dans le salon** | Envoie un vrai message avec ton profil, pour voir le rendu final |
 | 🎭 **Rôles à l’arrivée** *(arrivées)* | Jusqu’à 3 rôles donnés à chaque nouveau membre dès son arrivée, et gardés ensuite (comme le rôle « Membre » de DraftBot). Aucun rôle = désactivé |
-| 👥 **Donner aux membres actuels** *(arrivées)* | Donne ces rôles aux membres déjà présents qui ne les ont pas (après confirmation) |
+| 👥 **Donner aux membres actuels** *(arrivées)* | Donne ces rôles aux membres déjà présents qui ne les ont pas, après confirmation. La confirmation affiche la liste des membres concernés (n°, nom du compte, ID, date d’arrivée), 15 par page avec ◀️ ▶️, triée par date d’arrivée, et 📄 envoie la liste complète en .txt (avec le pseudo du serveur) |
 
 Chaque changement est enregistré tout de suite (si l’envoi automatique est activé, il s’applique dès la prochaine arrivée).
 

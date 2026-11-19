@@ -404,6 +404,9 @@ class FontModal(PanelModal):
 
             data = await attachment.read()
             name = await asyncio.to_thread(install_custom_font, data)
+
+            if name.lower() in ("my font", "untitled", "font", "police importée"):
+                name = attachment.filename.rsplit(".", 1)[0][:60] or name
             await self.panel.cog.save_custom_font(name, data)
             self.settings["font"] = "perso"
             return f"🔤 Police « {name} » importée et utilisée sur la carte."
@@ -669,20 +672,94 @@ class AutoroleModal(PanelModal):
         )
 
 
-class BackfillView(discord.ui.View):
-    """Confirmation avant de donner les rôles d'arrivée aux membres actuels."""
+MEMBERS_PER_PAGE = 15
+NAME_WIDTH = 20
 
-    def __init__(self, cog: BienvenueCog, owner_id: int, role_ids: list[int], missing: list[discord.Member]) -> None:
-        super().__init__(timeout=120)
+
+def short(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def join_date(member: Any) -> str:
+    joined = getattr(member, "joined_at", None)
+    return joined.strftime("%d/%m/%Y") if joined else "—"
+
+
+def member_table(members: list[Any], start: int = 0) -> str:
+    """Tableau aligné : n°, nom du compte (pas le pseudo du serveur), ID, arrivée."""
+    lines = [f"{'#':>3}  {'Compte':<{NAME_WIDTH}}  {'ID':<19}  Arrivée", "─" * (3 + 2 + NAME_WIDTH + 2 + 19 + 2 + 10)]
+
+    for number, member in enumerate(members, start + 1):
+        lines.append(f"{number:>3}  {short(member.name, NAME_WIDTH):<{NAME_WIDTH}}  {member.id:<19}  {join_date(member)}")
+
+    return "\n".join(lines)
+
+
+def member_list_file(members: list[Any], roles: list[Any]) -> discord.File:
+    """Liste complète en .txt (avec le pseudo du serveur en plus)."""
+    header = "Membres sans " + ", ".join(f"@{role.name}" for role in roles) + f" : {len(members)}\n\n"
+    rows = [
+        f"{number:>4}  {member.name:<32}  {member.id:<19}  {join_date(member):<10}  {member.display_name}"
+        for number, member in enumerate(members, 1)
+    ]
+    table = f"{'#':>4}  {'Compte':<32}  {'ID':<19}  {'Arrivée':<10}  Pseudo sur le serveur\n" + "\n".join(rows)
+    return discord.File(io.BytesIO((header + table + "\n").encode("utf-8")), filename="membres_sans_role.txt")
+
+
+class BackfillView(discord.ui.View):
+    """Confirmation avant de donner les rôles d'arrivée, avec la liste des membres concernés."""
+
+    def __init__(
+        self,
+        cog: BienvenueCog,
+        owner_id: int,
+        role_ids: list[int],
+        missing: list[discord.Member],
+        roles: list[Any] | None = None,
+    ) -> None:
+        super().__init__(timeout=300)
         self.cog = cog
         self.owner_id = owner_id
         self.role_ids = role_ids
-        self.missing = missing
+        # Les plus anciens membres d'abord.
+        self.missing = sorted(
+            missing, key=lambda member: (getattr(member, "joined_at", None) is None, getattr(member, "joined_at", None) or 0)
+        )
+        self.roles = roles or []
+        self.page = 0
+        self.pages = max(1, -(-len(self.missing) // MEMBERS_PER_PAGE))
+        self.update_buttons()
+
+    def embed(self) -> discord.Embed:
+        start = self.page * MEMBERS_PER_PAGE
+        shown = self.missing[start:start + MEMBERS_PER_PAGE]
+        embed = discord.Embed(
+            title="👥 Donner les rôles aux membres actuels ?",
+            description=(
+                f"**{len(self.missing)}** membre(s) n'ont pas encore "
+                + (", ".join(role.mention for role in self.roles) or "ces rôles")
+                + ".\nCela peut prendre un peu de temps (Discord limite la vitesse).\n"
+                f"```\n{member_table(shown, start)}\n```"
+            ),
+            color=COLOR,
+        )
+        embed.set_footer(
+            text=f"Page {self.page + 1}/{self.pages} · triés par date d'arrivée · 📄 pour la liste complète"
+        )
+        return embed
+
+    def update_buttons(self) -> None:
+        self.previous_page.disabled = self.page == 0
+        self.next_page.disabled = self.page >= self.pages - 1
+
+        if self.pages == 1:
+            self.remove_item(self.previous_page)
+            self.remove_item(self.next_page)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.owner_id
 
-    @discord.ui.button(label="Oui, donner les rôles", emoji="✅", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Oui, donner les rôles", emoji="✅", style=discord.ButtonStyle.success, row=0)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.stop()
         await interaction.response.edit_message(
@@ -704,12 +781,30 @@ class BackfillView(discord.ui.View):
         except discord.HTTPException:
             await interaction.followup.send(text, ephemeral=True)
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, row=0)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.stop()
         await interaction.response.edit_message(
             embed=discord.Embed(description="Annulé, rien n'a changé.", color=COLOR), view=None
         )
+
+    @discord.ui.button(label="Liste complète", emoji="📄", style=discord.ButtonStyle.secondary, row=0)
+    async def full_list(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_message(
+            file=member_list_file(self.missing, self.roles), ephemeral=True
+        )
+
+    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary, row=1)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.page = max(0, self.page - 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary, row=1)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.page = min(self.pages - 1, self.page + 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 
 # ============================================================
@@ -892,19 +987,8 @@ class WelcomePanel(discord.ui.View):
             )
             return
 
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="👥 Donner les rôles aux membres actuels ?",
-                description=(
-                    f"**{len(missing)}** membre(s) n'ont pas encore "
-                    + ", ".join(role.mention for role in roles)
-                    + ".\nCela peut prendre un peu de temps (Discord limite la vitesse)."
-                ),
-                color=COLOR,
-            ),
-            view=BackfillView(self.cog, self.owner_id, role_ids, missing),
-            ephemeral=True,
-        )
+        view = BackfillView(self.cog, self.owner_id, role_ids, missing, roles)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def on_kind(self, interaction: discord.Interaction) -> None:
         self.kind = interaction.data["values"][0]
