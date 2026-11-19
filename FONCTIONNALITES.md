@@ -69,6 +69,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/bienvenue-admin` | Gérer le serveur | Messages et cartes de bienvenue et de départ (voir [Bienvenue et départs](#bienvenue-et-départs)) |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
+| `/membres-role` | Gérer les rôles | Liste des membres qui ont (ou n’ont pas) un rôle (voir [Membres par rôle](#membres-role)) |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
 | `/warn`, `/mute`, `/unmute`, `/amende`, `/pardon`, `/casier`, `/note` | Exclure temporairement | Sanctions, annulations, casier (voir [Modération](#modération)) |
 | `/kick` | Expulser | Expulsion |
@@ -685,6 +686,24 @@ Variables : `{membre}` (mention), `{nom}`, `{serveur}`, `{age}` (« 21 ans ! » 
 | `/reaction-role-liste` | Liste les associations du serveur. |
 
 Réagir donne le rôle, retirer sa réaction l’enlève. Les émojis personnalisés restent reconnus s’ils sont renommés ou animés.
+
+## `/membres-role`
+
+Ouvre un panneau avec un menu de rôles. Choisir un rôle **répond dans un nouveau message** avec la liste de ses membres, puis **le menu se remet à zéro** : on peut rechoisir le même rôle pour avoir la liste à jour, sans retaper la commande.
+
+La liste est un tableau aligné, au même format que « Donner aux membres actuels » de `/bienvenue-admin` :
+
+| Colonne | Contenu |
+|---|---|
+| `#` | Numéro (triés par date d’arrivée, les plus anciens d’abord) |
+| Compte | Nom du compte Discord (pas le pseudo du serveur) |
+| ID | Identifiant du membre |
+| Arrivée | Date d’arrivée sur le serveur |
+
+- 15 membres par page, avec ◀️ ▶️ s’il y en a plus.
+- 🔄 bascule entre les membres **qui ont** le rôle et ceux **qui ne l’ont pas**.
+- 📄 envoie la liste complète en .txt (avec le pseudo du serveur).
+- Les bots sont exclus de la liste (leur nombre est indiqué).
 
 ## `/aide`
 

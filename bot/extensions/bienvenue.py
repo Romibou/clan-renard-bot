@@ -19,6 +19,8 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps
 
+from bot.shared.member_list import MemberPagesView
+from bot.shared.member_list import member_list_file as shared_member_list_file
 from bot.shared.welcome_card import (
     FONT_NAMES,
     HEIGHT,
@@ -672,61 +674,12 @@ class AutoroleModal(PanelModal):
         )
 
 
-MEMBERS_PER_PAGE = 15
-NAME_WIDTH = 20
-
-
-def short(text: str, width: int) -> str:
-    return text if len(text) <= width else text[: width - 1] + "…"
-
-
-def join_date(member: Any, short_year: bool = False) -> str:
-    joined = getattr(member, "joined_at", None)
-    return joined.strftime("%d/%m/%y" if short_year else "%d/%m/%Y") if joined else "—"
-
-
-# Largeur d'un bloc de code dans un embed Discord avant retour à la ligne.
-TABLE_MAX_WIDTH = 50
-
-
-def member_table(members: list[Any], start: int = 0) -> str:
-    """Tableau aligné et compact : n°, nom du compte (pas le pseudo du serveur), ID, arrivée."""
-    if not members:
-        return "Aucun membre."
-
-    number_width = len(str(start + len(members)))
-    name_width = max(6, min(NAME_WIDTH, max(len(member.name) for member in members)))
-    id_width = max(2, max(len(str(member.id)) for member in members))
-    total = number_width + 1 + name_width + 1 + id_width + 1 + 10
-    short_year = total > TABLE_MAX_WIDTH
-    date_width = 8 if short_year else 10
-
-    def row(number: str, name: str, user_id: str, date: str) -> str:
-        return f"{number:>{number_width}} {name:<{name_width}} {user_id:<{id_width}} {date}".rstrip()
-
-    lines = [row("#", "Compte", "ID", "Arrivée")]
-    lines.append("─" * (number_width + name_width + id_width + date_width + 3))
-
-    for number, member in enumerate(members, start + 1):
-        lines.append(
-            row(str(number), short(member.name, name_width), str(member.id), join_date(member, short_year))
-        )
-
-    return "\n".join(lines)
-
-
 def member_list_file(members: list[Any], roles: list[Any]) -> discord.File:
-    """Liste complète en .txt (avec le pseudo du serveur en plus)."""
-    header = "Membres sans " + ", ".join(f"@{role.name}" for role in roles) + f" : {len(members)}\n\n"
-    rows = [
-        f"{number:>4}  {member.name:<32}  {member.id:<19}  {join_date(member):<10}  {member.display_name}"
-        for number, member in enumerate(members, 1)
-    ]
-    table = f"{'#':>4}  {'Compte':<32}  {'ID':<19}  {'Arrivée':<10}  Pseudo sur le serveur\n" + "\n".join(rows)
-    return discord.File(io.BytesIO((header + table + "\n").encode("utf-8")), filename="membres_sans_role.txt")
+    header = "Membres sans " + ", ".join(f"@{role.name}" for role in roles) + f" : {len(members)}"
+    return shared_member_list_file(members, header, "membres_sans_role.txt")
 
 
-class BackfillView(discord.ui.View):
+class BackfillView(MemberPagesView):
     """Confirmation avant de donner les rôles d'arrivée, avec la liste des membres concernés."""
 
     def __init__(
@@ -737,47 +690,34 @@ class BackfillView(discord.ui.View):
         missing: list[discord.Member],
         roles: list[Any] | None = None,
     ) -> None:
-        super().__init__(timeout=300)
+        super().__init__(owner_id, missing)
         self.cog = cog
-        self.owner_id = owner_id
         self.role_ids = role_ids
-        # Les plus anciens membres d'abord.
-        self.missing = sorted(
-            missing, key=lambda member: (getattr(member, "joined_at", None) is None, getattr(member, "joined_at", None) or 0)
-        )
         self.roles = roles or []
-        self.page = 0
-        self.pages = max(1, -(-len(self.missing) // MEMBERS_PER_PAGE))
-        self.update_buttons()
+        # « Liste complète » après « Oui » et « Annuler ».
+        self.remove_item(self.full_list)
+        self.add_item(self.full_list)
+
+    @property
+    def missing(self) -> list[Any]:
+        return self.members
 
     def embed(self) -> discord.Embed:
-        start = self.page * MEMBERS_PER_PAGE
-        shown = self.missing[start:start + MEMBERS_PER_PAGE]
         embed = discord.Embed(
             title="👥 Donner les rôles aux membres actuels ?",
             description=(
                 f"**{len(self.missing)}** membre(s) n'ont pas encore "
                 + (", ".join(role.mention for role in self.roles) or "ces rôles")
                 + ".\nCela peut prendre un peu de temps (Discord limite la vitesse).\n"
-                f"```\n{member_table(shown, start)}\n```"
+                + self.table()
             ),
             color=COLOR,
         )
-        embed.set_footer(
-            text=f"Page {self.page + 1}/{self.pages} · triés par date d'arrivée · 📄 pour la liste complète"
-        )
+        embed.set_footer(text=self.footer())
         return embed
 
-    def update_buttons(self) -> None:
-        self.previous_page.disabled = self.page == 0
-        self.next_page.disabled = self.page >= self.pages - 1
-
-        if self.pages == 1:
-            self.remove_item(self.previous_page)
-            self.remove_item(self.next_page)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner_id
+    def list_file(self) -> discord.File:
+        return member_list_file(self.missing, self.roles)
 
     @discord.ui.button(label="Oui, donner les rôles", emoji="✅", style=discord.ButtonStyle.success, row=0)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -807,24 +747,6 @@ class BackfillView(discord.ui.View):
         await interaction.response.edit_message(
             embed=discord.Embed(description="Annulé, rien n'a changé.", color=COLOR), view=None
         )
-
-    @discord.ui.button(label="Liste complète", emoji="📄", style=discord.ButtonStyle.secondary, row=0)
-    async def full_list(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.send_message(
-            file=member_list_file(self.missing, self.roles), ephemeral=True
-        )
-
-    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary, row=1)
-    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.page = max(0, self.page - 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
-
-    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary, row=1)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.page = min(self.pages - 1, self.page + 1)
-        self.update_buttons()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 
 # ============================================================
