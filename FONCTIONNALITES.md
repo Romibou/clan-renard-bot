@@ -40,6 +40,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/mensuel` | Récompense du mois |
 | `/missions` | Missions du jour et de la semaine |
 | `/boutique` | Boutique permanente (rôles et cosmétiques) |
+| `/role-perso` | Voir et gérer son rôle personnalisé : date de fin, couleur, nom et icône, prolonger, supprimer (voir [Rôles perso](#rôles-perso)) |
 | `/profil [membre]` | Carte de profil, personnalisation, inventaire, collections |
 | `/collections [membre]` | Tableau des collections de cosmétiques |
 | `/donner` | Donne des pièces à un membre |
@@ -268,8 +269,54 @@ Vend des **rôles Discord** et des **cosmétiques de profil** contre des pièces
 - **Ajouter un cosmétique** : sélectionner un cosmétique déjà créé dans `/profil-admin`, puis son prix et son niveau minimum.
 - **Liste** : articles actifs et leurs identifiants.
 - **Supprimer** : retire un article. Les rôles et cosmétiques déjà achetés sont conservés.
+- **🎨 Rôles perso** : réglages des rôles personnalisés (voir [Rôles perso](#rôles-perso)).
 
 Supprimer un article de la boutique est différent de supprimer un cosmétique dans `/profil-admin`.
+
+## Rôles perso
+
+Un membre peut acheter **son propre rôle** : il choisit le nom, la couleur et une icône (emoji), paie, et le staff valide.
+
+### Réglages (`/boutique-admin` → 🎨 Rôles perso)
+
+| Réglage | Par défaut | Rôle |
+|---|---|---|
+| État | désactivés | Affiche ou non le bouton **🎨 Rôle perso** dans `/boutique` |
+| Prix | 50 000 pièces | Prix de l’achat, et de chaque prolongation |
+| Durée | 90 jours (3 mois) | Durée du rôle à partir de la validation, et de chaque prolongation |
+| Salon des demandes | à choisir | Salon (privé) où le staff accepte ou refuse |
+
+Le panneau montre aussi le nombre de rôles actifs et de demandes en attente, la **📋 Liste des rôles** (tableau : membre, rôle, date de fin) et **🗑️ Retirer un rôle** (sans remboursement, le membre reçoit la raison en MP).
+
+### Achat (`/boutique` → 🎨 Rôle perso)
+
+1. Le membre remplit **le nom** (2 à 25 caractères, sans emoji), **la couleur** (code hex, ex. `#FF9AD5`) et **l’icône** (un emoji, facultatif, placé après le nom : « Renard 🦊 »).
+2. Un récapitulatif dans la couleur choisie lui demande de confirmer, puis il paie.
+3. La demande arrive dans le salon des demandes avec **✅ Accepter** et **✖️ Refuser** (il faut la permission *Gérer les rôles*). Les boutons marchent même après un redémarrage du bot.
+   - **Accepter** : le bot crée le rôle **tout en bas de la liste des rôles**, sans aucune permission et **non mentionnable**, puis le donne au membre.
+   - **Refuser** : on peut écrire une raison. Le membre est **remboursé** et reçoit la raison en MP.
+
+Un seul rôle perso (ou demande en attente) par membre. L’achat et un éventuel remboursement apparaissent dans **📜 Historique** de la boutique.
+
+> Le rôle est en bas de la liste : sa couleur ne s’affiche pas sur le pseudo des membres qui ont déjà un rôle coloré au-dessus (le but est d’avoir **son** rôle, pas une couleur). Discord ne permet pas de réserver la mention d’un rôle à son propriétaire (ce serait tout le monde ou personne) : le rôle n’est donc pas mentionnable. L’icône est un emoji dans le nom, car les vraies icônes de rôle demandent le boost de niveau 2.
+
+### `/role-perso`
+
+Montre le rôle, son nom, sa couleur, sa date de création et **sa date de fin**, avec :
+
+| Bouton | Effet |
+|---|---|
+| ✏️ **Nom et icône** | Nouvelle demande dans le salon des demandes, **gratuite**. Le rôle change seulement si le staff accepte (MP au membre dans les deux cas) |
+| 🎨 **Couleur** | Change tout de suite |
+| ⏳ **Prolonger** | Repaie le prix pour ajouter une durée complète (à partir de la date de fin actuelle), sans nouvelle validation |
+| 🗑️ **Supprimer mon rôle** | Supprime le rôle, sans remboursement |
+
+### Fin du rôle
+
+- **7 jours avant la fin**, le membre reçoit un rappel en MP pour prolonger.
+- **À la fin**, le rôle est supprimé du serveur (vérification toutes les 10 minutes) et le membre est prévenu.
+- **Si le membre quitte le serveur**, son rôle est supprimé tout de suite, sans remboursement.
+- Si un rôle perso est supprimé à la main dans Discord, sa fiche est close.
 
 ## Boutique permanente et boutique de l’Avent
 

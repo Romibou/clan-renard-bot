@@ -1260,6 +1260,28 @@ class ShopAdminView(discord.ui.View):
             )
         )
 
+    @discord.ui.button(
+        label="Rôles perso",
+        emoji="🎨",
+        style=discord.ButtonStyle.primary,
+        row=1,
+    )
+    async def custom_roles(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        custom_roles = self.cog.bot.get_cog("CustomRoles")
+
+        if custom_roles is None:
+            await interaction.response.send_message(
+                embed=error_embed("Rôles perso", "Le module des rôles perso n'est pas chargé."),
+                ephemeral=True,
+            )
+            return
+
+        await custom_roles.open_admin(interaction)
+
 
 # ============================================================
 # COG PRINCIPAL
@@ -2703,6 +2725,15 @@ class PermanentShop(commands.Cog):
                 wallet=wallet,
                 level=level,
             )
+
+            # 🎨 Rôle perso (module role_perso), seulement s'il est activé.
+            custom_roles = self.bot.get_cog("CustomRoles")
+
+            if custom_roles is not None:
+                custom_button = await custom_roles.shop_button(guild.id)
+
+                if custom_button is not None:
+                    view.add_item(custom_button)
 
             await interaction.followup.send(
                 embed=embed,
