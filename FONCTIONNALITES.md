@@ -290,9 +290,10 @@ Le panneau montre aussi le nombre de rôles actifs et de demandes en attente, la
 
 ### Achat (`/boutique` → 🎨 Rôle perso)
 
-1. Le membre remplit **le nom** (2 à 25 caractères, sans emoji), **la couleur** (code hex, ex. `#FF9AD5`) et **l’icône** (un emoji, facultatif, placé après le nom : « Renard 🦊 »).
-2. Un récapitulatif dans la couleur choisie lui demande de confirmer, puis il paie.
-3. La demande arrive dans le salon des demandes avec **✅ Accepter** et **✖️ Refuser** (il faut la permission *Gérer les rôles*). Les boutons marchent même après un redémarrage du bot.
+1. Le bouton répond par une **présentation** : prix, durée, ce qu’on peut choisir et la validation par le staff (refus = remboursement). Le bouton **🎨 Configurer mon rôle perso** ouvre le formulaire.
+2. Le membre remplit **le nom** (2 à 25 caractères, sans emoji), **la couleur** (code hex, ex. `#FF9AD5`) et **l’icône** (un emoji, facultatif, placé après le nom : « Renard 🦊 »).
+3. Un récapitulatif dans la couleur choisie lui demande de confirmer, puis il paie.
+4. La demande arrive dans le salon des demandes avec **✅ Accepter** et **✖️ Refuser** (il faut la permission *Gérer les rôles*). Les boutons marchent même après un redémarrage du bot.
    - **Accepter** : le bot crée le rôle **tout en bas de la liste des rôles**, sans aucune permission et **non mentionnable**, puis le donne au membre.
    - **Refuser** : on peut écrire une raison. Le membre est **remboursé** et reçoit la raison en MP.
 

@@ -274,3 +274,12 @@ async def test_modals_build_within_discord_limits() -> None:
 
     assert rp.NameEmojiModal(panel).inputs["name"].default == "Renard"
     assert rp.ColorModal(panel).inputs["color"].default == "#FF9AD5"
+
+
+def test_intro_shows_price_duration_and_rules() -> None:
+    embed = rp.intro_embed(SETTINGS)
+    text = " ".join(f"{field.name} {field.value}" for field in embed.fields)
+    assert "50 000 pièces" in text and "90 jours" in text and "remboursée" in text and "#FF9AD5" in text
+
+    view = rp.IntroView(None, 42, SETTINGS)
+    assert view.children[0].label == "Configurer mon rôle perso"

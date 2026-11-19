@@ -442,6 +442,54 @@ class ConfirmPurchaseView(discord.ui.View):
         )
 
 
+def intro_embed(settings: dict[str, Any]) -> discord.Embed:
+    """Présentation du rôle perso (prix, durée, règles) avant le formulaire."""
+    embed = discord.Embed(
+        title="🎨 Ton rôle perso",
+        description=(
+            "Crée **ton propre rôle** sur le serveur : tu choisis son nom, sa couleur et son icône.\n"
+            "Il apparaît sur ton profil Discord, dans la liste des rôles."
+        ),
+        color=COLOR,
+    )
+    embed.add_field(name="💰 Prix", value=f"**{format_coins(settings['price'])} pièces**", inline=True)
+    embed.add_field(name="⏳ Durée", value=f"**{settings['duration_days']} jours**, prolongeable", inline=True)
+    embed.add_field(
+        name="📝 Ce que tu choisis",
+        value=(
+            f"• **Nom** : {NAME_MIN} à {NAME_MAX} caractères, sans emoji\n"
+            "• **Couleur** : un code hex, par exemple `#FF9AD5`\n"
+            "• **Icône** (facultatif) : un emoji placé après le nom, par exemple « Renard 🦊 »"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🛡️ Validation",
+        value=(
+            "Le staff vérifie chaque demande. **Refusée = remboursée.**\n"
+            "Tu paies seulement après avoir vu le récapitulatif."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Ensuite : /role-perso pour voir la date de fin, changer la couleur, le nom ou prolonger.")
+    return embed
+
+
+class IntroView(discord.ui.View):
+    def __init__(self, cog: CustomRoles, owner_id: int, settings: dict[str, Any]) -> None:
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.owner_id = owner_id
+        self.settings = settings
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="Configurer mon rôle perso", emoji="🎨", style=discord.ButtonStyle.success)
+    async def configure(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_modal(PurchaseModal(self.cog, self.settings))
+
+
 class CustomRoleShopButton(discord.ui.Button):
     """Bouton ajouté à /boutique quand les rôles perso sont activés."""
 
@@ -1096,7 +1144,8 @@ class CustomRoles(commands.Cog):
             await interaction.response.send_message(embed=error_embed(text), ephemeral=True)
             return
 
-        await interaction.response.send_modal(PurchaseModal(self, settings))
+        view = IntroView(self, interaction.user.id, settings)
+        await interaction.response.send_message(embed=intro_embed(settings), view=view, ephemeral=True)
 
     async def create_request(self, interaction: discord.Interaction, name: str, color: int, emoji: str) -> discord.Embed:
         guild = interaction.guild
