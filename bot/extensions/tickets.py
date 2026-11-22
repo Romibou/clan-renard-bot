@@ -490,7 +490,9 @@ class SettingsModal(discord.ui.Modal):
             component=self.log_channel,
         ))
         self.max_open = discord.ui.TextInput(default=str(settings["max_open"]), max_length=2)
-        self.add_item(discord.ui.Label(text="Tickets ouverts en même temps par membre (1 à 5)", component=self.max_open))
+        self.add_item(discord.ui.Label(
+            text="Tickets ouverts par membre", description="En même temps, de 1 à 5.", component=self.max_open,
+        ))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         value = self.max_open.value.strip()
