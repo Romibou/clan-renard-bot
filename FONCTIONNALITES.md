@@ -70,6 +70,7 @@ Pour l’installation et le déploiement, voir `README.md`.
 | `/bienvenue-admin` | Gérer le serveur | Messages et cartes de bienvenue et de départ (voir [Bienvenue et départs](#bienvenue-et-départs)) |
 | `/annonce creer` / `modifier` / `programmees` / `historique` | Gérer le serveur | Studio d’annonces publiées par le bot (voir [Annonces](#annonces)) |
 | `/reaction-role`, `/reaction-role-retirer`, `/reaction-role-liste` | Gérer les rôles | Rôles à la réaction |
+| `/ticket-admin` | Gérer le serveur | Système de tickets : salons, types, rôles staff, message public (voir [Tickets](#tickets)) |
 | `/membres-role` | Gérer les rôles | Liste des membres qui ont (ou n’ont pas) un rôle (voir [Membres par rôle](#membres-role)) |
 | `/import_draftbot` | Administrateur | Import d’une progression DraftBot |
 | `/warn`, `/mute`, `/unmute`, `/amende`, `/pardon`, `/casier`, `/note` | Exclure temporairement | Sanctions, annulations, casier (voir [Modération](#modération)) |
@@ -746,6 +747,43 @@ Variables : `{membre}` (mention), `{nom}`, `{serveur}`, `{age}` (« 21 ans ! » 
 Réagir donne le rôle, retirer sa réaction l’enlève. Les émojis personnalisés restent reconnus s’ils sont renommés ou animés.
 
 > 🔒 **Protection des rôles** (partout où le bot distribue un rôle tout seul : réaction, arrivée, boutique, Avent, niveaux, anniversaire) : un rôle qui donne des permissions sensibles (Administrateur, Gérer le serveur, Gérer les rôles, Bannir, Expulser, Exclure, Gérer les messages, Mentionner @everyone…) est **refusé**, ainsi qu’un rôle placé au-dessus du rôle le plus haut de l’admin qui le configure (sauf pour le propriétaire du serveur). Si un rôle déjà configuré reçoit plus tard une permission sensible, le bot arrête de le donner.
+
+## Tickets
+
+Un ticket est un **salon privé** entre un membre et le staff.
+
+### `/ticket-admin`
+
+| Bouton | Rôle |
+|---|---|
+| ⚙️ **Réglages** | Salon du message « Ouvrir un ticket », **catégorie Discord** où créer les tickets, salon des **logs** (transcripts), nombre de tickets ouverts en même temps par membre (1 par défaut) |
+| ➕ **Ajouter un type** | Nom, emoji, description affichée dans le menu, et **jusqu’à 5 rôles staff** qui voient ces tickets |
+| ✏️ menu **Modifier ou supprimer un type** | Rouvre le type pour le changer ou le supprimer (le menu se remet à zéro après chaque choix) |
+| 🧩 **Créer les types par défaut** | Question, Problème, Animation, Administration, Autre (quand il n’y a encore aucun type) |
+| ✏️ **Texte du message** | Titre, texte et texte du bouton du message public |
+| 📣 **Publier / mettre à jour** | Envoie le message public (ou le met à jour). Il se met aussi à jour tout seul après chaque changement |
+| 📋 **Tickets ouverts** | Liste des tickets ouverts, avec qui les a pris en charge |
+
+Le panneau signale ce qui manque au bot (Gérer les salons et les permissions dans la catégorie, joindre des fichiers dans les logs…).
+
+### Ouvrir un ticket
+
+1. Le membre clique sur **📩 Ouvrir un ticket** dans le message public.
+2. Il choisit la **catégorie** dans un menu (avec emoji et description), puis écrit la **raison**.
+3. Le bot crée `ticket-0008-pseudo` dans la catégorie choisie, visible seulement par **le membre**, **les rôles staff du type** et les admins. Le membre et les rôles staff sont mentionnés.
+4. La fiche du ticket affiche : type, numéro, date d’ouverture, le membre (mention, nom du compte, ID), la date de création du compte, la date d’arrivée, ses rôles, son avatar, puis la raison.
+
+### Dans le ticket
+
+| Bouton | Qui | Effet |
+|---|---|---|
+| 🙋 **Prendre en charge** | staff du type | Annonce qui s’occupe du ticket (affiché dans les logs et la liste) |
+| 👥 **Gérer les membres** | staff du type | Ajouter ou retirer jusqu’à 5 membres du ticket |
+| 🔒 **Fermer** | le membre ou le staff | Confirmation, puis suppression dans 10 secondes (bouton **↩️ Annuler la fermeture**) |
+
+À la fermeture, le bot enregistre **toute la conversation** dans un fichier `.txt` (messages, heures, pièces jointes) envoyé dans le **salon des logs** avec un résumé (type, membre, fermé par, pris en charge par, durée, nombre de messages, raison) et **en MP au membre**, puis supprime le salon. Un salon de ticket supprimé à la main est aussi marqué fermé.
+
+Les boutons fonctionnent même après un redémarrage du bot.
 
 ## `/membres-role`
 
