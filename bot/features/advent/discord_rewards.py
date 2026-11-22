@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import discord
+from bot.shared.checks import unsafe_role_reason
 
 from bot.features.advent.models import OpenResult
 from bot.features.advent.service import AdventService
@@ -62,6 +63,15 @@ async def grant_role_reward(
             "Le bot ne possède pas la permission "
             "« Gérer les rôles »."
         )
+        await service.mark_role_result(
+            opening_id=result.opening.id,
+            success=False,
+            error=error,
+        )
+        return False, error
+
+    if unsafe_role_reason(role) is not None:
+        error = f"Rôle non distribué : {unsafe_role_reason(role)}."
         await service.mark_role_result(
             opening_id=result.opening.id,
             success=False,

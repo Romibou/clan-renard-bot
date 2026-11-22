@@ -9,6 +9,7 @@ from typing import Any
 import discord
 from discord import app_commands
 from discord.ext import commands
+from bot.shared.checks import unsafe_role_reason
 
 from bot.shared.pagination import (
     SELECT_PAGE_SIZE,
@@ -1482,7 +1483,7 @@ class AdventShop(commands.Cog):
                 "Le rôle associé à cette récompense a été supprimé.",
             )
 
-        if role.is_default() or role.managed:
+        if unsafe_role_reason(role) is not None:
             return error_embed(
                 "Rôle invalide",
                 "Le bot ne peut pas attribuer ce rôle.",
@@ -2044,11 +2045,13 @@ class AdventShop(commands.Cog):
                 )
                 return
 
-            if role.is_default() or role.managed:
+            problem = unsafe_role_reason(role, interaction.user)
+
+            if problem is not None:
                 await interaction.followup.send(
                     embed=error_embed(
-                        "Rôle invalide",
-                        "Ce rôle ne peut pas être attribué par le bot.",
+                        "Rôle refusé",
+                        problem[0].upper() + problem[1:] + ".",
                     ),
                     ephemeral=True,
                 )

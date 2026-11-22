@@ -7,6 +7,7 @@ from typing import Any
 import discord
 from discord import app_commands
 from discord.ext import commands
+from bot.shared.checks import unsafe_role_reason
 
 from bot.features.advent.admin_repository import (
     AdminAdventRepository,
@@ -548,6 +549,16 @@ class AdventAdminRewardsCommands(commands.Cog):
                 interaction,
                 "Rôle invalide",
                 "Le rôle `@everyone` ne peut pas être distribué.",
+            )
+            return
+
+        problem = unsafe_role_reason(role, interaction.user)
+
+        if problem is not None:
+            await self._send_error(
+                interaction,
+                "Rôle refusé",
+                problem[0].upper() + problem[1:] + ".",
             )
             return
 

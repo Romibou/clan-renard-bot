@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps
 
+from bot.shared.checks import unsafe_role_reason
 from bot.shared.member_list import MemberPagesView
 from bot.shared.member_list import member_list_file as shared_member_list_file
 from bot.shared.welcome_card import (
@@ -630,8 +631,8 @@ def autorole_problems(guild: discord.Guild, role_ids: list[int]) -> list[str]:
 
         if role is None:
             problems.append(f"le rôle <@&{role_id}> n'existe plus")
-        elif role.managed or role.is_default():
-            problems.append(f"{role.mention} ne peut pas être donné (rôle géré par Discord ou une intégration)")
+        elif unsafe_role_reason(role) is not None:
+            problems.append(unsafe_role_reason(role))
         elif me is not None and role >= me.top_role:
             problems.append(f"mon rôle doit être placé au-dessus de {role.mention} dans la liste des rôles")
 
@@ -657,6 +658,12 @@ class AutoroleModal(PanelModal):
         )
 
     async def apply(self, interaction: discord.Interaction) -> str | None:
+        for role in self.roles.values:
+            problem = unsafe_role_reason(interaction.guild.get_role(role.id) or role, interaction.user)
+
+            if problem is not None:
+                raise ValueError(f"Rôle refusé : {problem}.")
+
         self.settings["autoroles"] = [role.id for role in self.roles.values]
 
         if not self.settings["autoroles"]:
@@ -1374,7 +1381,10 @@ class BienvenueCog(commands.Cog):
         try:
             settings, _ = await self.get_settings(member.guild.id, JOIN)
             roles = [member.guild.get_role(int(role_id)) for role_id in settings.get("autoroles") or []]
-            roles = [role for role in roles if role is not None and role not in member.roles]
+            roles = [
+                role for role in roles
+                if role is not None and role not in member.roles and unsafe_role_reason(role) is None
+            ]
 
             if roles:
                 await member.add_roles(*roles, reason="Rôle à l'arrivée")

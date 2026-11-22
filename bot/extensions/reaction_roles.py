@@ -7,6 +7,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.shared.checks import unsafe_role_reason
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -303,6 +305,18 @@ class ReactionRoleCog(
             )
             return
 
+        # Si le rôle a reçu entre-temps des permissions sensibles, on ne
+        # le distribue plus (sinon une réaction donnerait des pouvoirs).
+        problem = unsafe_role_reason(role)
+
+        if problem is not None:
+            LOGGER.warning(
+                "Réaction-rôle du message %s ignorée : %s",
+                payload.message_id,
+                problem,
+            )
+            return
+
         member = payload.member
 
         if member is None:
@@ -428,6 +442,18 @@ class ReactionRoleCog(
                 embed=error_embed(
                     "Serveur requis",
                     "Cette commande doit être utilisée dans un serveur.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        problem = unsafe_role_reason(role, interaction.user)
+
+        if problem is not None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Rôle refusé",
+                    problem[0].upper() + problem[1:] + ".",
                 ),
                 ephemeral=True,
             )

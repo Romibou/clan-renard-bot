@@ -215,7 +215,9 @@ async def test_run_once_celebrates_once_and_removes_role_next_day(monkeypatch) -
     wishes: list = []
     gifts: list = []
 
-    role = SimpleNamespace(id=77)
+    role = SimpleNamespace(
+        id=77, managed=False, permissions=discord.Permissions.none(), is_default=lambda: False, mention="<@&77>"
+    )
 
     async def add_roles(r, reason=None):
         roles_added.append(r.id)

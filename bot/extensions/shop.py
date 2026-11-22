@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from bot.shared.panels import reset_selection, send_panel
+from bot.shared.checks import unsafe_role_reason
 from bot.extensions.progression import level_from_xp
 from bot.shared.pagination import (
     SELECT_PAGE_SIZE,
@@ -885,11 +886,13 @@ class ShopRoleSelect(discord.ui.RoleSelect):
             )
             return
 
-        if role.is_default() or role.managed:
+        problem = unsafe_role_reason(role, interaction.user)
+
+        if problem is not None:
             await interaction.response.send_message(
                 embed=error_embed(
-                    "Rôle invalide",
-                    "Ce rôle ne peut pas être attribué par le bot.",
+                    "Rôle refusé",
+                    problem[0].upper() + problem[1:] + ".",
                 ),
                 ephemeral=True,
             )
@@ -2130,8 +2133,7 @@ class PermanentShop(commands.Cog):
 
             if (
                 bot_member is None
-                or role.is_default()
-                or role.managed
+                or unsafe_role_reason(role) is not None
                 or role >= bot_member.top_role
             ):
                 return error_embed(

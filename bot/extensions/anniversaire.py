@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from bot.shared.checks import unsafe_role_reason
 
 from bot.shared.economy import credit_progression, refresh_level_roles
 from bot.shared.members import present_member_ids
@@ -443,6 +444,13 @@ class ChannelRoleModal(AdminModal):
     async def apply(self, interaction: discord.Interaction) -> str | None:
         self.panel.settings["channel_id"] = self.channel.values[0].id
         roles = list(self.role.values)
+
+        if roles:
+            problem = unsafe_role_reason(interaction.guild.get_role(roles[0].id) or roles[0], interaction.user)
+
+            if problem is not None:
+                raise ValueError(f"Rôle refusé : {problem}.")
+
         self.panel.settings["role_id"] = roles[0].id if roles else None
         return self.panel.cog.permission_warning(interaction.guild, self.panel.settings) or "📍 Salon et rôle enregistrés."
 
@@ -986,6 +994,10 @@ class BirthdayCog(commands.Cog):
         await self.send_wishes(member, birthday.shown_age(today), settings, background)
 
         role = guild.get_role(settings["role_id"] or 0) if settings["role_id"] else None
+
+        if role is not None and unsafe_role_reason(role) is not None:
+            LOGGER.warning("Rôle d'anniversaire non donné : %s", unsafe_role_reason(role))
+            role = None
 
         if role is not None:
             try:

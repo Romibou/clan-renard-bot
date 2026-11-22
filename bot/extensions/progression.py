@@ -12,6 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from bot.shared.checks import unsafe_role_reason
 
 from bot.shared.panels import reset_selection, send_panel
 from bot.shared.members import present_member_ids
@@ -2190,8 +2191,7 @@ class ProgressionCog(commands.Cog):
 
             if (
                 role is not None
-                and not role.is_default()
-                and not role.managed
+                and unsafe_role_reason(role) is None
                 and role < bot_member.top_role
             ):
                 target_role = role
@@ -2216,7 +2216,7 @@ class ProgressionCog(commands.Cog):
             if target_role is not None and role.id == target_role.id:
                 continue
 
-            if role.is_default() or role.managed:
+            if unsafe_role_reason(role) is not None:
                 continue
 
             if role >= bot_member.top_role:

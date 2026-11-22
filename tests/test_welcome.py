@@ -314,6 +314,7 @@ class FakeRole:
         self.managed = managed
         self._default = default
         self.mention = f"<@&{role_id}>"
+        self.permissions = discord.Permissions.none()
 
     def is_default(self) -> bool:
         return self._default
@@ -519,3 +520,21 @@ async def test_backfill_view_lists_members_with_pages() -> None:
 
     single = bienvenue.BackfillView(SimpleNamespace(), 1, [10], members[:3], [role])
     assert single.previous_page not in single.children
+
+
+def test_unsafe_roles_are_never_given_automatically() -> None:
+    from bot.shared.checks import unsafe_role_reason
+
+    guild = SimpleNamespace(owner_id=1)
+    admin_role = FakeRole(20, position=3)
+    admin_role.permissions = discord.Permissions(administrator=True)
+    admin_role.guild = guild
+    assert "permissions sensibles" in unsafe_role_reason(admin_role)
+
+    high = FakeRole(21, position=5)
+    high.guild = guild
+    moderator = SimpleNamespace(id=2, top_role=FakeRole(1, position=4))
+    owner = SimpleNamespace(id=1, top_role=FakeRole(1, position=1))
+    assert "au-dessus" in unsafe_role_reason(high, moderator)
+    assert unsafe_role_reason(high, owner) is None  # le propriétaire peut tout
+    assert unsafe_role_reason(high) is None
