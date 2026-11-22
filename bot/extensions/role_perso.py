@@ -32,6 +32,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from bot.shared.member_list import short
+from bot.shared.panels import first_value
 
 LOGGER = logging.getLogger(__name__)
 
@@ -762,11 +763,18 @@ class SettingsModal(discord.ui.Modal):
                 embed=error_embed(f"Durée : un nombre de jours entre 1 et {MAX_DAYS}."), ephemeral=True)
             return
 
+        channel = first_value(self.channel)
+
+        if channel is None:
+            await interaction.response.send_message(
+                embed=error_embed("Choisis le salon des demandes."), ephemeral=True)
+            return
+
         settings = {
-            "enabled": self.state.values[0] == "on",
+            "enabled": first_value(self.state, "off") == "on",
             "price": int(price),
             "duration_days": int(days),
-            "review_channel_id": self.channel.values[0].id,
+            "review_channel_id": channel.id,
         }
         await self.panel.cog.save_settings(interaction.guild_id, settings)
         warning = self.panel.cog.channel_problem(interaction.guild, settings["review_channel_id"])
@@ -783,7 +791,11 @@ class RemoveRoleModal(discord.ui.Modal):
         self.add_item(discord.ui.Label(text="Raison (envoyée au membre)", component=self.reason))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        user = self.user.values[0]
+        user = first_value(self.user)
+
+        if user is None:
+            await interaction.response.send_message(embed=error_embed("Choisis un membre."), ephemeral=True)
+            return
         record, _change = await self.panel.cog.member_state(interaction.guild_id, user.id)
 
         if record is None or record["status"] != "active":

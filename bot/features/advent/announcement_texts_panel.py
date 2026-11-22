@@ -26,7 +26,7 @@ from bot.features.advent.announcement_texts import (
     parse_days,
 )
 from bot.shared.embeds import base_embed
-from bot.shared.panels import reset_selection, send_panel
+from bot.shared.panels import first_value, reset_selection, send_panel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ class DefaultTextsModal(TextsModal):
         texts.title = clean(self.title_input.value, DEFAULT_TITLE)
         texts.message = clean(self.message.value, DEFAULT_MESSAGE)
         texts.last_message = clean(self.last_message.value, DEFAULT_LAST_MESSAGE)
-        texts.show_opening = self.opening.values[0] == "yes"
+        texts.show_opening = first_value(self.opening, "yes") == "yes"
         return "✏️ Texte par défaut enregistré."
 
 

@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.shared.panels import remember_origin, reset_selection
+from bot.shared.panels import first_value, remember_origin, reset_selection
 
 LOGGER = logging.getLogger(__name__)
 
@@ -415,7 +415,7 @@ class MembersModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         text = await self.cog.change_members(
-            interaction, self.ticket_id, list(self.users.values), add=self.action.values[0] == "add")
+            interaction, self.ticket_id, list(self.users.values), add=first_value(self.action, "add") == "add")
         await interaction.response.send_message(text, ephemeral=True)
 
 
@@ -501,10 +501,15 @@ class SettingsModal(discord.ui.Modal):
             await interaction.response.send_message(embed=error_embed("Un nombre entre 1 et 5."), ephemeral=True)
             return
 
+        # Un menu laissé vide garde le salon déjà choisi.
+        def chosen(select: Any, key: str) -> int | None:
+            picked = first_value(select)
+            return picked.id if picked is not None else self.panel.settings[key]
+
         self.panel.settings.update(
-            panel_channel_id=self.panel_channel.values[0].id,
-            category_id=self.category.values[0].id,
-            log_channel_id=self.log_channel.values[0].id,
+            panel_channel_id=chosen(self.panel_channel, "panel_channel_id"),
+            category_id=chosen(self.category, "category_id"),
+            log_channel_id=chosen(self.log_channel, "log_channel_id"),
             max_open=int(value),
         )
         await self.panel.cog.save_settings(interaction.guild_id, self.panel.settings)
@@ -576,7 +581,7 @@ class TypeModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         cog = self.panel.cog
 
-        if self.ticket_type and self.delete.values and self.delete.values[0] == "delete":
+        if self.ticket_type and first_value(self.delete, "keep") == "delete":
             await cog.delete_type(interaction.guild_id, self.ticket_type["id"])
             notice = f"🗑️ Type **{self.ticket_type['label']}** supprimé."
         else:

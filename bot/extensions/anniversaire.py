@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import calendar
-import re
 import io
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -32,11 +32,11 @@ from zoneinfo import ZoneInfo
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from bot.shared.checks import unsafe_role_reason
 
+from bot.shared.checks import unsafe_role_reason
 from bot.shared.economy import credit_progression, refresh_level_roles
 from bot.shared.members import present_member_ids
-from bot.shared.panels import reset_selection, send_panel
+from bot.shared.panels import first_value, reset_selection, send_panel
 from bot.shared.welcome_card import render_welcome_card
 
 LOGGER = logging.getLogger(__name__)
@@ -442,7 +442,13 @@ class ChannelRoleModal(AdminModal):
         )
 
     async def apply(self, interaction: discord.Interaction) -> str | None:
-        self.panel.settings["channel_id"] = self.channel.values[0].id
+        channel = first_value(self.channel)
+
+        if channel is None and not self.panel.settings["channel_id"]:
+            raise ValueError("Choisis le salon des anniversaires.")
+
+        if channel is not None:
+            self.panel.settings["channel_id"] = channel.id
         roles = list(self.role.values)
 
         if roles:
@@ -535,7 +541,7 @@ class BackgroundModal(AdminModal):
             await self.panel.cog.save_background(interaction.guild_id, self.panel.background)
             return "🖼️ Nouveau fond enregistré."
 
-        if self.choice.values[0] == "default":
+        if first_value(self.choice, "keep") == "default":
             self.panel.background = None
             await self.panel.cog.save_background(interaction.guild_id, None)
             return "🌅 Retour au fond par défaut."

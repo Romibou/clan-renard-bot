@@ -22,6 +22,7 @@ from PIL import Image, ImageOps
 from bot.shared.checks import unsafe_role_reason
 from bot.shared.member_list import MemberPagesView
 from bot.shared.member_list import member_list_file as shared_member_list_file
+from bot.shared.panels import first_value
 from bot.shared.welcome_card import (
     FONT_NAMES,
     HEIGHT,
@@ -237,7 +238,13 @@ class ChannelModal(PanelModal):
         self.add_item(discord.ui.Label(text="Salon des messages", component=self.channel))
 
     async def apply(self, interaction: discord.Interaction) -> str | None:
-        self.settings["channel_id"] = self.channel.values[0].id
+        channel = first_value(self.channel)
+
+        if channel is None and not self.settings["channel_id"]:
+            raise ValueError("Choisis le salon des messages.")
+
+        if channel is not None:
+            self.settings["channel_id"] = channel.id
         return self.panel.cog.permission_warning(interaction.guild, self.settings["channel_id"])
 
 
@@ -470,7 +477,7 @@ class BackgroundModal(PanelModal):
             self.panel.background_changed = True
             return "🖼️ Nouveau fond enregistré."
 
-        if self.choice.values[0] == "default":
+        if first_value(self.choice, "keep") == "default":
             self.panel.background = None
             self.panel.background_changed = True
             return "🌅 Retour au fond par défaut."

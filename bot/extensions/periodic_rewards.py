@@ -23,6 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.shared.economy import refresh_level_roles
+from bot.shared.panels import first_value
 
 LOGGER = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class PeriodicSettingsModal(discord.ui.Modal):
                 "coins": parse_amount(self.coins.value, "Pièces"),
                 "bonus_percent": parse_amount(self.bonus_percent.value, "Bonus de série", 1000),
                 "bonus_max": parse_amount(self.bonus_max.value, "Bonus maximum", 1000),
-                "enabled": self.enabled.values[0] == "on",
+                "enabled": first_value(self.enabled, "on") == "on",
             }
         except ValueError as error:
             await interaction.response.send_message(

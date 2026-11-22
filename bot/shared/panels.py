@@ -61,3 +61,26 @@ async def reset_selection(view: discord.ui.View | None) -> None:
     except (discord.HTTPException, ValueError, TypeError):
         # Panneau expiré ou supprimé : rien de grave, il suffit de le rouvrir.
         LOGGER.debug("Menu du panneau non remis à zéro", exc_info=True)
+
+
+def first_value(select: Any, fallback: Any = None) -> Any:
+    """
+    Choix d'un menu dans un formulaire, sans planter s'il est resté vide.
+
+    Discord n'envoie rien pour un menu non touché : on reprend alors
+    l'option cochée par défaut (ou la valeur par défaut d'un menu de
+    salons / rôles / membres), sinon `fallback`.
+    """
+    if select.values:
+        return select.values[0]
+
+    for option in getattr(select, "options", None) or []:
+        if option.default:
+            return option.value
+
+    defaults = getattr(select, "default_values", None)
+
+    if defaults:
+        return defaults[0]
+
+    return fallback

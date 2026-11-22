@@ -34,10 +34,11 @@ from bot.features.announcements.model import (
     parse_datetime,
     summary_title,
     text_to_buttons,
-    text_to_reactions,
     text_to_fields,
+    text_to_reactions,
     upload_ids,
 )
+from bot.shared.panels import first_value
 
 if TYPE_CHECKING:
     from bot.extensions.annonces import AnnouncementCog
@@ -302,7 +303,7 @@ class StyleModal(StudioModal):
             embed["color"] = color
 
         guild = interaction.guild
-        icon = guild.icon.url if guild and guild.icon and self.icon_select.values[0] == "yes" else None
+        icon = guild.icon.url if guild and guild.icon and first_value(self.icon_select, "no") == "yes" else None
 
         author = self.author_input.value.strip()
         footer = self.footer_input.value.strip()
@@ -320,7 +321,7 @@ class StyleModal(StudioModal):
             if icon:
                 embed["footer"]["icon_url"] = icon
 
-        if self.timestamp_select.values[0] == "yes":
+        if first_value(self.timestamp_select, "no") == "yes":
             embed["timestamp"] = True
         else:
             embed.pop("timestamp", None)
