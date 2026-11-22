@@ -745,6 +745,8 @@ Variables : `{membre}` (mention), `{nom}`, `{serveur}`, `{age}` (« 21 ans ! » 
 
 Réagir donne le rôle, retirer sa réaction l’enlève. Les émojis personnalisés restent reconnus s’ils sont renommés ou animés.
 
+> 🔒 **Protection des rôles** (partout où le bot distribue un rôle tout seul : réaction, arrivée, boutique, Avent, niveaux, anniversaire) : un rôle qui donne des permissions sensibles (Administrateur, Gérer le serveur, Gérer les rôles, Bannir, Expulser, Exclure, Gérer les messages, Mentionner @everyone…) est **refusé**, ainsi qu’un rôle placé au-dessus du rôle le plus haut de l’admin qui le configure (sauf pour le propriétaire du serveur). Si un rôle déjà configuré reçoit plus tard une permission sensible, le bot arrête de le donner.
+
 ## `/membres-role`
 
 Ouvre un panneau avec un menu de rôles. Choisir un rôle **répond dans un nouveau message** avec la liste de ses membres, puis **le menu se remet à zéro** : on peut rechoisir le même rôle pour avoir la liste à jour, sans retaper la commande.

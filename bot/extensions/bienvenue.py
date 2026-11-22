@@ -837,6 +837,11 @@ class WelcomePanel(discord.ui.View):
 
     async def refresh(self, interaction: discord.Interaction | None, *, notice: str | None = None) -> None:
         """interaction None : mise à jour depuis un autre message (modèles)."""
+        # L'aperçu peut prendre plus de 3 secondes à dessiner : on prévient
+        # Discord tout de suite, sinon il affiche « Échec de l'interaction ».
+        if interaction is not None and not interaction.response.is_done():
+            await interaction.response.defer()
+
         self.build()
         files = []
         user = (interaction or self.origin).user

@@ -1683,6 +1683,9 @@ class GamesCog(commands.Cog):
         tri: app_commands.Choice[str] | None = None,
     ) -> None:
         metric = tri.value if tri else "wins"
+
+        if metric not in {"wins", "coins_net", "ai_wins"}:  # inséré dans la requête : liste fermée
+            metric = "wins"
         rows = await self.get_pool().fetch(
             f"""
             SELECT user_id,
