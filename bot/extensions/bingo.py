@@ -290,6 +290,7 @@ class BingoCog(commands.Cog):
         self.cooldowns: dict[tuple[int, int], float] = {}
         self.locks: dict[int, asyncio.Lock] = {}
         self.dirty: set[int] = set()
+        self.background_tasks: set[asyncio.Task] = set()
         self.last_refresh: dict[int, float] = {}
 
     @property
@@ -470,7 +471,9 @@ class BingoCog(commands.Cog):
             else:
                 state.round += 1
                 state.secret = new_secret
-                asyncio.create_task(self.tell_knowers(state))
+                task = asyncio.create_task(self.tell_knowers(state))
+                self.background_tasks.add(task)
+                task.add_done_callback(self.background_tasks.discard)
 
             return GuessOutcome(
                 WIN,

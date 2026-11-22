@@ -53,6 +53,16 @@ MAX_STAKE = 100_000
 CHALLENGE_TIMEOUT = timedelta(minutes=3)
 # Le bouton 🔁 Revanche reste disponible ce temps-là après la fin d'une partie.
 REMATCH_WINDOW = timedelta(minutes=10)
+
+# Tâches lancées en arrière-plan : asyncio ne garde qu'une référence
+# faible, on les retient donc ici jusqu'à leur fin.
+BACKGROUND_TASKS: set[asyncio.Future] = set()
+
+
+def keep_task(task: asyncio.Future) -> asyncio.Future:
+    BACKGROUND_TASKS.add(task)
+    task.add_done_callback(BACKGROUND_TASKS.discard)
+    return task
 MOVE_TIMEOUT = timedelta(minutes=2)
 RPS_ROUND_TIMEOUT = timedelta(seconds=60)
 
@@ -509,7 +519,7 @@ class GameView(discord.ui.View):
             return
 
         self.rematch_timer = loop.call_later(
-            REMATCH_WINDOW.total_seconds(), lambda: asyncio.ensure_future(self.expire_rematch())
+            REMATCH_WINDOW.total_seconds(), lambda: keep_task(asyncio.ensure_future(self.expire_rematch()))
         )
 
     def close_rematch(self) -> None:
@@ -636,7 +646,7 @@ class TurnGameView(GameView):
         super().start()
 
         if self.current_player is None:
-            asyncio.create_task(self.locked_ai_turn())
+            keep_task(asyncio.create_task(self.locked_ai_turn()))
 
     async def locked_ai_turn(self) -> None:
         async with self.lock:

@@ -755,8 +755,12 @@ class AnnouncementCog(commands.Cog):
             LOGGER.exception("Lecture des annonces programmées impossible")
             return
 
+        # Une erreur sur une annonce ne doit pas arrêter la boucle pour toujours.
         for record in due:
-            await self.send_scheduled(record)
+            try:
+                await self.send_scheduled(record)
+            except Exception:
+                LOGGER.exception("Annonce programmée %s : erreur inattendue", record.get("id"))
 
         self._loop_turns += 1
 

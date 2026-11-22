@@ -461,8 +461,12 @@ class DropCog(commands.Cog):
             LOGGER.exception("Impossible de clôturer les drops expirés.")
             return
 
+        # Une erreur sur un drop ne doit pas arrêter la boucle pour toujours.
         for record in records:
-            await self.refresh_message(int(record["id"]))
+            try:
+                await self.refresh_message(int(record["id"]))
+            except Exception:
+                LOGGER.exception("Message du drop %s non mis à jour.", record["id"])
 
     @expire_loop.before_loop
     async def before_expire_loop(self) -> None:
